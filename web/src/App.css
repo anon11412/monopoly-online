@@ -1,0 +1,71 @@
+.btn { transition: transform 0.05s ease, filter 0.15s ease; }
+.btn:hover { filter: brightness(1.05); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+#root { max-width: 1600px; margin: 0 auto; padding: 0.5rem; }
+.app { display: flex; flex-direction: column; gap: 1rem; }
+.game-view { display: grid; grid-template-columns: minmax(480px, 1fr) 480px; gap: 12px; align-items: start; }
+.board { background: transparent; padding: 0; border: none; height: auto; }
+/* Keep the inner board perfectly square and as large as possible within viewport */
+.board .board-wrap {
+	position: relative;
+	/* Keep it square and fit on screen: width limited by viewport height and container width */
+	--board-max-h: calc(100vh - 140px);
+	width: min(100%, var(--board-max-h));
+	height: auto;
+	max-width: 100%;
+	margin: 0 auto;
+	aspect-ratio: 1 / 1;
+	background: #e7f0f3;
+	border-radius: 10px;
+	border: 2px solid #2c3e50;
+	overflow: hidden; /* ensure inner content never extends beyond the square */
+}
+.board .grid {
+	position: absolute; inset: 0;
+	display: grid;
+	grid-template-columns: repeat(11, 1fr);
+	grid-template-rows: repeat(11, 1fr);
+	gap: 3px;
+	width: 100%;
+	height: 100%;
+	align-content: stretch;
+	justify-content: stretch;
+}
+.tile { background: #fffef5; color: #111; border-radius: 4px; padding: 3px; position: relative; overflow: visible; border: 1px solid #ddd; box-shadow: inset 0 0 0 1px #f2f2e6; min-width: 0; min-height: 0; }
+.tile .stripe { height: 10%; min-height: 8px; border-bottom: 1px solid #999; }
+.tile .name { font-size: 9px; padding: 2px; text-align: center; line-height: 1.05; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; }
+.tile .tokens { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; gap: 4px; }
+.tile .token { width: 40px; height: 40px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.4); box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+.tile .owner { position: absolute; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #444; }
+.tile .owner.top { bottom: 100%; left: 50%; transform: translate(-50%, -2px); }
+.tile .owner.bottom { top: 100%; left: 50%; transform: translate(-50%, 2px); }
+.tile .owner.left { right: 100%; top: 50%; transform: translate(2px, -50%); }
+.tile .owner.right { left: 100%; top: 50%; transform: translate(-2px, -50%); }
+.tile .houses { position: absolute; top: 24px; right: 2px; display: flex; gap: 2px; }
+.tile .house { width: 8px; height: 8px; background: #2ecc71; border: 1px solid #196f3d; }
+.tile .hotel { width: 10px; height: 10px; background: #e74c3c; border: 1px solid #922b21; }
+.tile .mortgage { position: absolute; top: 2px; left: 2px; font-size: 9px; color: #b03a2e; font-weight: 700; }
+.actions { display: flex; flex-direction: column; gap: 8px; position: sticky; top: 8px; }
+.actions-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; }
+.actions-panel > .ui-labelframe { min-height: 0; }
+.main-menu, .lobby-room { background: #101826; padding: 12px; border-radius: 8px; }
+.lobby-room .players ul { list-style: none; padding: 0; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot.ready { background: #2ecc71; box-shadow: 0 0 0 1px #196f3d inset; }
+.dot.not-ready { background: #e74c3c; box-shadow: 0 0 0 1px #922b21 inset; }
+
+/* Highlight current player in Players Overview */
+.list-item.current { background: rgba(241, 196, 15, 0.15); border: 1px solid #f1c40f; border-radius: 6px; padding: 3px 6px; }
+
+/* Trades notification badge and jiggle */
+.btn-with-badge { position: relative; }
+.btn-badge { position: absolute; top: -6px; right: -6px; background: #e74c3c; color: #fff; border-radius: 999px; min-width: 18px; height: 18px; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; border: 2px solid #fff; }
+@keyframes jiggle { 0% { transform: translate(0,0) rotate(0); } 20% { transform: translate(1px, -1px) rotate(-2deg); } 40% { transform: translate(-1px, 1px) rotate(2deg); } 60% { transform: translate(1px, 0) rotate(-1deg); } 80% { transform: translate(-1px, 0) rotate(1deg); } 100% { transform: translate(0,0) rotate(0); } }
+.jiggle { animation: jiggle 0.6s ease-in-out 1; }
+
+/* Responsive tweaks for smaller screens */
+@media (max-width: 1100px) {
+	.game-view { grid-template-columns: 1fr; }
+}

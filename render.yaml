@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: monopoly-online
+    env: docker
+    plan: free
+    rootDir: .
+    dockerCommand: ""
+    autoDeploy: true
+    healthCheckPath: /board_meta
+    envVars:
+      - key: ALLOWED_ORIGINS
+        value: "*"
+    # Render will build using the Dockerfile in server/ by default only if set; we specify here
+    dockerfilePath: server/Dockerfile
+    # Ports inferred from EXPOSE; keep default

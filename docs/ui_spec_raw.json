@@ -1,0 +1,6160 @@
+{
+  "summary": {
+    "unique_colors": [
+      "#27ae60",
+      "#2980b9",
+      "#2c3e50",
+      "#34495e",
+      "#666666",
+      "#7f8c8d",
+      "#8e44ad",
+      "#95a5a6",
+      "#c0392b",
+      "#e74c3c",
+      "#ecf0f1",
+      "#f0f0f0",
+      "#f39c12",
+      "blue",
+      "gray",
+      "green",
+      "lightblue",
+      "lightgreen",
+      "red",
+      "white",
+      "yellow"
+    ],
+    "unique_fonts": [
+      "['Arial', 10, 'bold']",
+      "['Arial', 10, 'italic']",
+      "['Arial', 10]",
+      "['Arial', 11, 'bold']",
+      "['Arial', 11]",
+      "['Arial', 12, 'bold']",
+      "['Arial', 12]",
+      "['Arial', 14, 'bold']",
+      "['Arial', 14]",
+      "['Arial', 16, 'bold']",
+      "['Arial', 8, 'bold']",
+      "['Arial', 8]",
+      "['Arial', 9, 'bold']",
+      "['Arial', 9]"
+    ],
+    "sample_texts": [
+      " ➜ ",
+      "${expr}",
+      "(Observing)",
+      "Add Payment",
+      "Available: ${expr}",
+      "Close",
+      "Current Status",
+      "Drag function blocks here",
+      "Enhanced Trade: {expr} ↔ {expr}",
+      "From: {expr}",
+      "Function Blocks",
+      "Function Blocks to Request",
+      "Functions to bring to this deal",
+      "Money",
+      "Money Exchange",
+      "No pending trades",
+      "Nothing",
+      "Offering:",
+      "Pending Payments",
+      "Players Overview",
+      "Properties",
+      "Properties to Request",
+      "Property Details",
+      "Proposed at: {expr}",
+      "Remove",
+      "Requesting:",
+      "Selected Functions Summary",
+      "Timing",
+      "To: {expr}",
+      "Trade #{expr}",
+      "Trade Details",
+      "Trade Proposal #{expr}",
+      "Trade Summary",
+      "What's the difference?",
+      "Your Offer ({expr})",
+      "Your Request (from {expr})",
+      "{expr} (${expr})",
+      "{expr} will pay {expr}",
+      "{expr} {expr}",
+      "{expr}🏠{expr}",
+      "×",
+      "ℹ️ Special Space",
+      "⚙️ Block Settings",
+      "⚡ Advanced Function Blocks",
+      "⚡ Advanced Terms:",
+      "⚡ {expr}'s Terms:",
+      "✅ Accept Trade",
+      "❌ Close",
+      "❌ Reject Trade",
+      "➕ Create New Trade",
+      "🏚️ Sell House (+${expr})",
+      "🏠 Buy House (${expr})",
+      "🏠 Properties to Request",
+      "🏠 Rent Information",
+      "🏠 {expr}",
+      "🏦 Mortgage (+${expr})",
+      "🏦 Sell to Bank ($0)",
+      "👁️ View Details",
+      "👤 Ownership",
+      "💰 ${expr}",
+      "💰 Money to Request",
+      "💰 Property Information",
+      "💰 Traditional Exchange",
+      "💰 {expr}",
+      "💳 Unmortgage (-${expr})",
+      "📊 Trade Details",
+      "📤 Create New Trade",
+      "📤 Your Offer",
+      "📤 {expr}'s Offer",
+      "📥 Partner's Offer",
+      "📥 Your Request",
+      "📦 Available Blocks",
+      "📬 Pending Trades for {expr}",
+      "🔄 Refresh",
+      "🔄 Refresh Pending Trades",
+      "🔄⚡ Combined Trading System",
+      "🔙 Withdraw Trade",
+      "🔨 Build Your Deal",
+      "🙋 {expr} (You)",
+      "🤝 Trading Partner"
+    ]
+  },
+  "files": [
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/board_demo.py",
+      "widgets": [
+        {
+          "var": "demo_frame",
+          "class": "Frame",
+          "parent": "self.root",
+          "kwargs": {
+            "bg": "#2c3e50"
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": 10,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 42
+        },
+        {
+          "var": "demo_label",
+          "class": "Label",
+          "parent": "demo_frame",
+          "kwargs": {
+            "text": "🎯 Responsive Monopoly Board Demo - Resize window to see scaling in action!",
+            "bg": "#2c3e50",
+            "fg": "#ecf0f1",
+            "font": [
+              "Arial",
+              12,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 45
+        },
+        {
+          "var": "info_label",
+          "class": "Label",
+          "parent": "demo_frame",
+          "kwargs": {
+            "text": "✓ Board auto-scales to fit screen ✓ All 40 spaces visible ✓ Player tokens scale ✓ Industry-standard responsive design",
+            "bg": "#2c3e50",
+            "fg": "#95a5a6",
+            "font": [
+              "Arial",
+              9
+            ]
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 50
+        },
+        {
+          "var": "instructions",
+          "class": "Label",
+          "parent": "self.root",
+          "kwargs": {
+            "text": "Try resizing this window to see the responsive board scaling!",
+            "bg": "#2c3e50",
+            "fg": "#f39c12",
+            "font": [
+              "Arial",
+              10
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 114
+        }
+      ],
+      "order": [
+        "demo_frame",
+        "demo_label",
+        "info_label",
+        "instructions"
+      ],
+      "window_titles": [
+        "Monopoly Board - Responsive Display Test"
+      ],
+      "menu_items": [],
+      "texts": [
+        "🎯 Responsive Monopoly Board Demo - Resize window to see scaling in action!",
+        "✓ Board auto-scales to fit screen ✓ All 40 spaces visible ✓ Player tokens scale ✓ Industry-standard responsive design",
+        "Try resizing this window to see the responsive board scaling!"
+      ],
+      "colors": [
+        "#2c3e50",
+        "#95a5a6",
+        "#ecf0f1",
+        "#f39c12"
+      ],
+      "fonts": [
+        "['Arial', 10]",
+        "['Arial', 12, 'bold']",
+        "['Arial', 9]"
+      ]
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/complete_function_blocks_test.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [
+        "🎯 Complete Function Blocks Test - WORKING SYSTEM!"
+      ],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/debug_enhanced_button.py",
+      "widgets": [
+        {
+          "var": "debug_frame",
+          "class": "Frame",
+          "parent": "root",
+          "kwargs": {
+            "bg": "red"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 73
+        },
+        {
+          "var": "debug_btn",
+          "class": "Button",
+          "parent": "debug_frame",
+          "kwargs": {
+            "text": "🔍 DEBUG: Test Enhanced Trade Button",
+            "bg": "yellow",
+            "font": [
+              "Arial",
+              12,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 76
+        }
+      ],
+      "order": [
+        "debug_frame",
+        "debug_btn"
+      ],
+      "window_titles": [
+        "🔍 Enhanced Trade Button Debug"
+      ],
+      "menu_items": [],
+      "texts": [
+        "🔍 DEBUG: Test Enhanced Trade Button"
+      ],
+      "colors": [
+        "red",
+        "yellow"
+      ],
+      "fonts": [
+        "['Arial', 12, 'bold']"
+      ]
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/definitive_working_demo.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [
+        "🚀 Super Simple Enhanced Trading - WORKING SYSTEM!"
+      ],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/final_enhanced_trade_demo.py",
+      "error": "SyntaxError: unterminated string literal (detected at line 136) (final_enhanced_trade_demo.py, line 136)"
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/final_integration_test.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [
+        "🎯 Final Combined Trading Integration Test"
+      ],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/final_super_simple_test.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/final_verification_test.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [
+        "🔍 FINAL VERIFICATION - Enhanced Trading Test"
+      ],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/full_integration_test.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/monopoly_launcher.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/advanced_trading.py",
+      "widgets": [
+        {
+          "var": "notebook",
+          "class": "Notebook",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 66
+        },
+        {
+          "var": "main_container",
+          "class": "Frame",
+          "parent": "self.combined_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 82
+        },
+        {
+          "var": "top_section",
+          "class": "Frame",
+          "parent": "main_container",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 86
+        },
+        {
+          "var": "partner_frame",
+          "class": "LabelFrame",
+          "parent": "top_section",
+          "kwargs": {
+            "text": "🤝 Trading Partner",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 90
+        },
+        {
+          "var": "trad_frame",
+          "class": "LabelFrame",
+          "parent": "top_section",
+          "kwargs": {
+            "text": "💰 Traditional Exchange",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 103
+        },
+        {
+          "var": "offer_section",
+          "class": "Frame",
+          "parent": "trad_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 107
+        },
+        {
+          "var": "money_offer_frame",
+          "class": "Frame",
+          "parent": "offer_section",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 117
+        },
+        {
+          "var": "want_section",
+          "class": "Frame",
+          "parent": "trad_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 125
+        },
+        {
+          "var": "money_request_frame",
+          "class": "Frame",
+          "parent": "want_section",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 135
+        },
+        {
+          "var": "bottom_section",
+          "class": "LabelFrame",
+          "parent": "main_container",
+          "kwargs": {
+            "text": "⚡ Advanced Function Blocks",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 143
+        },
+        {
+          "var": "side_frame",
+          "class": "Frame",
+          "parent": "bottom_section",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 147
+        },
+        {
+          "var": "proposer_radio",
+          "class": "Radiobutton",
+          "parent": "side_frame",
+          "kwargs": {
+            "text": "🙋 {expr} (You)",
+            "value": "proposer"
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  10,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 153
+        },
+        {
+          "var": "blocks_container",
+          "class": "Frame",
+          "parent": "bottom_section",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 164
+        },
+        {
+          "var": "blocks_frame",
+          "class": "LabelFrame",
+          "parent": "blocks_container",
+          "kwargs": {
+            "text": "📦 Available Blocks",
+            "padding": 5
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 168
+        },
+        {
+          "var": "blocks_canvas",
+          "class": "Canvas",
+          "parent": "blocks_frame",
+          "kwargs": {
+            "width": 200,
+            "bg": "#34495e"
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 172
+        },
+        {
+          "var": "blocks_scrollbar",
+          "class": "Scrollbar",
+          "parent": "blocks_frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 173
+        },
+        {
+          "var": "construction_frame",
+          "class": "LabelFrame",
+          "parent": "blocks_container",
+          "kwargs": {
+            "text": "🔨 Build Your Deal",
+            "padding": 5
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 186
+        },
+        {
+          "var": "properties_frame",
+          "class": "LabelFrame",
+          "parent": "blocks_container",
+          "kwargs": {
+            "text": "⚙️ Block Settings",
+            "padding": 5
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 203
+        },
+        {
+          "var": "cb",
+          "class": "Checkbutton",
+          "parent": "self.request_properties_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 254
+        },
+        {
+          "var": "category_frame",
+          "class": "Frame",
+          "parent": "self.blocks_container",
+          "kwargs": {
+            "bg": "#2c3e50"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  10,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 338
+        },
+        {
+          "var": "category_label",
+          "class": "Label",
+          "parent": "category_frame",
+          "kwargs": {
+            "bg": "#2c3e50",
+            "fg": "#ecf0f1",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 341
+        },
+        {
+          "var": "separator",
+          "class": "Frame",
+          "parent": "self.blocks_container",
+          "kwargs": {
+            "height": 2,
+            "bg": "#34495e"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 347
+        },
+        {
+          "var": "block_frame",
+          "class": "Frame",
+          "parent": "self.blocks_container",
+          "kwargs": {
+            "bd": 2,
+            "cursor": "hand2"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 2,
+                "padx": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 352
+        },
+        {
+          "var": "label",
+          "class": "Label",
+          "parent": "block_frame",
+          "kwargs": {
+            "fg": "white",
+            "font": [
+              "Arial",
+              9,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 357
+        },
+        {
+          "var": "var_frame",
+          "class": "Frame",
+          "parent": "self.block_settings_container",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 484
+        },
+        {
+          "var": "var_widget",
+          "class": "Entry",
+          "parent": "var_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 509
+        },
+        {
+          "var": "summary_frame",
+          "class": "Frame",
+          "parent": "self.summary_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 572
+        },
+        {
+          "var": "summary_scroll",
+          "class": "Scrollbar",
+          "parent": "summary_frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 580
+        },
+        {
+          "var": "button_frame",
+          "class": "Frame",
+          "parent": "self.summary_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 587
+        }
+      ],
+      "order": [
+        "notebook",
+        "main_container",
+        "top_section",
+        "partner_frame",
+        "trad_frame",
+        "offer_section",
+        "money_offer_frame",
+        "want_section",
+        "money_request_frame",
+        "bottom_section",
+        "side_frame",
+        "proposer_radio",
+        "blocks_container",
+        "blocks_frame",
+        "blocks_canvas",
+        "blocks_scrollbar",
+        "construction_frame",
+        "properties_frame",
+        "cb",
+        "cb",
+        "category_frame",
+        "category_label",
+        "separator",
+        "block_frame",
+        "label",
+        "var_frame",
+        "var_widget",
+        "var_widget",
+        "var_widget",
+        "summary_frame",
+        "summary_scroll",
+        "button_frame"
+      ],
+      "window_titles": [
+        "Advanced Trading System"
+      ],
+      "menu_items": [],
+      "texts": [
+        "🤝 Trading Partner",
+        "💰 Traditional Exchange",
+        "⚡ Advanced Function Blocks",
+        "🙋 {expr} (You)",
+        "📦 Available Blocks",
+        "🔨 Build Your Deal",
+        "⚙️ Block Settings"
+      ],
+      "colors": [
+        "#2c3e50",
+        "#34495e",
+        "#ecf0f1",
+        "white"
+      ],
+      "fonts": [
+        "['Arial', 10, 'bold']",
+        "['Arial', 9, 'bold']"
+      ]
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/combined_trading.py",
+      "widgets": [
+        {
+          "var": "main_frame",
+          "class": "Frame",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": 15,
+                "pady": 15
+              }
+            ]
+          },
+          "configs": [],
+          "line": 69
+        },
+        {
+          "var": "title_label",
+          "class": "Label",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "🔄⚡ Combined Trading System",
+            "font": [
+              "Arial",
+              16,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  15
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 73
+        },
+        {
+          "var": "header_frame",
+          "class": "Frame",
+          "parent": "main_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  15
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 78
+        },
+        {
+          "var": "partner_combo",
+          "class": "Combobox",
+          "parent": "header_frame",
+          "kwargs": {
+            "font": [
+              "Arial",
+              10
+            ],
+            "width": 25,
+            "state": "readonly"
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 83
+        },
+        {
+          "var": "notebook",
+          "class": "Notebook",
+          "parent": "main_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 94
+        },
+        {
+          "var": "offer_frame",
+          "class": "LabelFrame",
+          "parent": "self.traditional_frame",
+          "kwargs": {
+            "text": "📤 {expr}'s Offer",
+            "padding": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "nsew",
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 143
+        },
+        {
+          "var": "arrow_frame",
+          "class": "Frame",
+          "parent": "self.traditional_frame",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "sticky": "ns",
+                "padx": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 148
+        },
+        {
+          "var": "request_frame",
+          "class": "LabelFrame",
+          "parent": "self.traditional_frame",
+          "kwargs": {
+            "text": "📥 Partner's Offer",
+            "padding": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 2,
+                "sticky": "nsew",
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 153
+        },
+        {
+          "var": "prop_frame",
+          "class": "LabelFrame",
+          "parent": "self.request_content_frame",
+          "kwargs": {
+            "text": "🏠 Properties to Request"
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "pady": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 275
+        },
+        {
+          "var": "canvas",
+          "class": "Canvas",
+          "parent": "prop_frame",
+          "kwargs": {
+            "height": 150
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 279
+        },
+        {
+          "var": "scrollbar",
+          "class": "Scrollbar",
+          "parent": "prop_frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 280
+        },
+        {
+          "var": "scrollable_frame",
+          "class": "Frame",
+          "parent": "canvas",
+          "kwargs": {},
+          "layout": {},
+          "configs": [],
+          "line": 281
+        },
+        {
+          "var": "checkbox",
+          "class": "Checkbutton",
+          "parent": "scrollable_frame",
+          "kwargs": {
+            "text": "{expr} (${expr})"
+          },
+          "layout": {
+            "grid": [
+              {
+                "column": 0,
+                "sticky": "w",
+                "padx": 5,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 302
+        },
+        {
+          "var": "money_frame",
+          "class": "LabelFrame",
+          "parent": "self.request_content_frame",
+          "kwargs": {
+            "text": "💰 Money to Request"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 314
+        },
+        {
+          "var": "amount_entry",
+          "class": "Entry",
+          "parent": "money_frame",
+          "kwargs": {
+            "width": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 214
+        },
+        {
+          "var": "money_slider",
+          "class": "Scale",
+          "parent": "money_frame",
+          "kwargs": {
+            "from_": 0
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 2,
+                "sticky": "ew",
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 220
+        },
+        {
+          "var": "quick_frame",
+          "class": "Frame",
+          "parent": "money_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 336
+        },
+        {
+          "var": "btn",
+          "class": "Button",
+          "parent": "quick_frame",
+          "kwargs": {
+            "width": 6
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "padx": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 351
+        },
+        {
+          "var": "available_label",
+          "class": "Label",
+          "parent": "money_frame",
+          "kwargs": {
+            "text": "Available: ${expr}",
+            "font": [
+              "Arial",
+              8
+            ],
+            "foreground": "#7f8c8d"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 356
+        },
+        {
+          "var": "money_entry_frame",
+          "class": "Frame",
+          "parent": "money_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 317
+        },
+        {
+          "var": "request_entry",
+          "class": "Entry",
+          "parent": "money_entry_frame",
+          "kwargs": {
+            "width": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "padx": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 324
+        },
+        {
+          "var": "request_slider",
+          "class": "Scale",
+          "parent": "money_entry_frame",
+          "kwargs": {
+            "from_": 0
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 2,
+                "sticky": "ew",
+                "padx": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 330
+        },
+        {
+          "var": "container",
+          "class": "Frame",
+          "parent": "self.blocks_frame",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "nsew"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 366
+        },
+        {
+          "var": "note",
+          "class": "Label",
+          "parent": "container",
+          "kwargs": {
+            "text": "Select the functions to include in this deal.\nNote: 'Turns' means payer rounds — the payment runs at the start of the payer's turn.",
+            "foreground": "#7f8c8d"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "w",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 371
+        },
+        {
+          "var": "funcs",
+          "class": "LabelFrame",
+          "parent": "container",
+          "kwargs": {
+            "text": "Functions to bring to this deal",
+            "padding": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 1,
+                "column": 0,
+                "sticky": "ew"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 382
+        },
+        {
+          "var": "payer_row",
+          "class": "Frame",
+          "parent": "funcs",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  6
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 386
+        },
+        {
+          "var": "pay_row",
+          "class": "Frame",
+          "parent": "funcs",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": 4
+              }
+            ]
+          },
+          "configs": [],
+          "line": 394
+        },
+        {
+          "var": "turns_row",
+          "class": "Frame",
+          "parent": "funcs",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": 4
+              }
+            ]
+          },
+          "configs": [],
+          "line": 406
+        },
+        {
+          "var": "legacy_row",
+          "class": "Frame",
+          "parent": "funcs",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": 4
+              }
+            ]
+          },
+          "configs": [],
+          "line": 418
+        },
+        {
+          "var": "preview",
+          "class": "LabelFrame",
+          "parent": "container",
+          "kwargs": {
+            "text": "Selected Functions Summary",
+            "padding": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 2,
+                "column": 0,
+                "sticky": "ew",
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 433
+        },
+        {
+          "var": "summary_scrollbar",
+          "class": "Scrollbar",
+          "parent": "self.summary_frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "sticky": "ns"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 470
+        },
+        {
+          "var": "button_frame",
+          "class": "Frame",
+          "parent": "self.summary_frame",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 1,
+                "column": 0,
+                "columnspan": 2,
+                "sticky": "ew",
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 478
+        }
+      ],
+      "order": [
+        "main_frame",
+        "title_label",
+        "header_frame",
+        "partner_combo",
+        "notebook",
+        "offer_frame",
+        "arrow_frame",
+        "request_frame",
+        "prop_frame",
+        "canvas",
+        "scrollbar",
+        "scrollable_frame",
+        "checkbox",
+        "money_frame",
+        "amount_entry",
+        "money_slider",
+        "quick_frame",
+        "btn",
+        "available_label",
+        "prop_frame",
+        "canvas",
+        "scrollbar",
+        "scrollable_frame",
+        "checkbox",
+        "money_frame",
+        "money_entry_frame",
+        "request_entry",
+        "request_slider",
+        "quick_frame",
+        "btn",
+        "available_label",
+        "container",
+        "note",
+        "funcs",
+        "payer_row",
+        "pay_row",
+        "turns_row",
+        "legacy_row",
+        "preview",
+        "summary_scrollbar",
+        "button_frame"
+      ],
+      "window_titles": [
+        "Combined Trading System"
+      ],
+      "menu_items": [],
+      "texts": [
+        "🔄⚡ Combined Trading System",
+        "📤 {expr}'s Offer",
+        "📥 Partner's Offer",
+        "🏠 Properties to Request",
+        "{expr} (${expr})",
+        "💰 Money to Request",
+        "Available: ${expr}",
+        "Select the functions to include in this deal.\nNote: 'Turns' means payer rounds — the payment runs at the start of the payer's turn.",
+        "Functions to bring to this deal",
+        "Selected Functions Summary"
+      ],
+      "colors": [
+        "#7f8c8d"
+      ],
+      "fonts": [
+        "['Arial', 10]",
+        "['Arial', 16, 'bold']",
+        "['Arial', 8]"
+      ]
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/enhanced_trading.py",
+      "widgets": [
+        {
+          "var": "main_frame",
+          "class": "Frame",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 66
+        },
+        {
+          "var": "title_frame",
+          "class": "Frame",
+          "parent": "main_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 70
+        },
+        {
+          "var": "partner_frame",
+          "class": "Frame",
+          "parent": "title_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 77
+        },
+        {
+          "var": "partner_combo",
+          "class": "Combobox",
+          "parent": "partner_frame",
+          "kwargs": {
+            "state": "readonly",
+            "width": 15
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 84
+        },
+        {
+          "var": "trading_frame",
+          "class": "Frame",
+          "parent": "main_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 91
+        },
+        {
+          "var": "offer_frame",
+          "class": "LabelFrame",
+          "parent": "trading_frame",
+          "kwargs": {
+            "text": "📤 Your Offer",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 95
+        },
+        {
+          "var": "request_frame",
+          "class": "LabelFrame",
+          "parent": "trading_frame",
+          "kwargs": {
+            "text": "📥 Your Request",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 99
+        },
+        {
+          "var": "props_frame",
+          "class": "LabelFrame",
+          "parent": "parent",
+          "kwargs": {
+            "text": "Properties"
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "pady": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 161
+        },
+        {
+          "var": "props_canvas",
+          "class": "Canvas",
+          "parent": "props_frame",
+          "kwargs": {
+            "height": 120
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 165
+        },
+        {
+          "var": "props_scrollbar",
+          "class": "Scrollbar",
+          "parent": "props_frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 166
+        },
+        {
+          "var": "money_frame",
+          "class": "LabelFrame",
+          "parent": "parent",
+          "kwargs": {
+            "text": "Money"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  5,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 177
+        },
+        {
+          "var": "money_subframe",
+          "class": "Frame",
+          "parent": "money_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 180
+        },
+        {
+          "var": "money_entry",
+          "class": "Entry",
+          "parent": "money_subframe",
+          "kwargs": {
+            "width": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  2,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 185
+        },
+        {
+          "var": "blocks_frame",
+          "class": "LabelFrame",
+          "parent": "parent",
+          "kwargs": {
+            "text": "Function Blocks"
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "pady": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 189
+        },
+        {
+          "var": "drop_label",
+          "class": "Label",
+          "parent": "self.request_blocks_frame",
+          "kwargs": {
+            "text": "Drag function blocks here",
+            "bg": "#f0f0f0",
+            "fg": "#666666",
+            "font": [
+              "Arial",
+              10,
+              "italic"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 197
+        },
+        {
+          "var": "palette_frame",
+          "class": "LabelFrame",
+          "parent": "parent",
+          "kwargs": {
+            "text": "📦 Function Blocks Palette (Drag to add)"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 206
+        },
+        {
+          "var": "blocks_container",
+          "class": "Frame",
+          "parent": "palette_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 210
+        },
+        {
+          "var": "block_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "bd": 2
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": 10,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 226
+        },
+        {
+          "var": "content_frame",
+          "class": "Frame",
+          "parent": "block_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "padx": 8,
+                "pady": 6
+              }
+            ]
+          },
+          "configs": [],
+          "line": 230
+        },
+        {
+          "var": "header_frame",
+          "class": "Frame",
+          "parent": "block_container",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "padx": 5,
+                "pady": 3
+              }
+            ]
+          },
+          "configs": [],
+          "line": 338
+        },
+        {
+          "var": "icon_label",
+          "class": "Label",
+          "parent": "header_frame",
+          "kwargs": {
+            "font": [
+              "Arial",
+              14
+            ]
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 237
+        },
+        {
+          "var": "name_label",
+          "class": "Label",
+          "parent": "header_frame",
+          "kwargs": {
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 241
+        },
+        {
+          "var": "desc_label",
+          "class": "Label",
+          "parent": "content_frame",
+          "kwargs": {
+            "fg": "white",
+            "font": [
+              "Arial",
+              8
+            ]
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 246
+        },
+        {
+          "var": "placeholder",
+          "class": "Label",
+          "parent": "container",
+          "kwargs": {
+            "text": "Drag function blocks here",
+            "bg": "#f0f0f0",
+            "fg": "#666666",
+            "font": [
+              "Arial",
+              10,
+              "italic"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 322
+        },
+        {
+          "var": "block_container",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "bd": 2
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": 2,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 334
+        },
+        {
+          "var": "remove_btn",
+          "class": "Button",
+          "parent": "header_frame",
+          "kwargs": {
+            "text": "×",
+            "bg": "#e74c3c",
+            "fg": "white",
+            "font": [
+              "Arial",
+              8,
+              "bold"
+            ],
+            "width": 2
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 348
+        },
+        {
+          "var": "input_frame",
+          "class": "Frame",
+          "parent": "block_container",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "padx": 5,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 371
+        },
+        {
+          "var": "turns_entry",
+          "class": "Entry",
+          "parent": "input_frame",
+          "kwargs": {
+            "width": 8,
+            "font": [
+              "Arial",
+              8
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 362
+        },
+        {
+          "var": "amount_entry",
+          "class": "Entry",
+          "parent": "input_frame",
+          "kwargs": {
+            "width": 8,
+            "font": [
+              "Arial",
+              8
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 378
+        },
+        {
+          "var": "cb",
+          "class": "Checkbutton",
+          "parent": "self.request_props_frame",
+          "kwargs": {
+            "text": "{expr} (${expr})"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 1
+              }
+            ]
+          },
+          "configs": [],
+          "line": 426
+        },
+        {
+          "var": "buttons_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 434
+        }
+      ],
+      "order": [
+        "main_frame",
+        "title_frame",
+        "partner_frame",
+        "partner_combo",
+        "trading_frame",
+        "offer_frame",
+        "request_frame",
+        "props_frame",
+        "props_canvas",
+        "props_scrollbar",
+        "money_frame",
+        "money_subframe",
+        "money_entry",
+        "blocks_frame",
+        "drop_label",
+        "props_frame",
+        "props_canvas",
+        "props_scrollbar",
+        "money_frame",
+        "money_subframe",
+        "money_entry",
+        "blocks_frame",
+        "drop_label",
+        "palette_frame",
+        "blocks_container",
+        "block_frame",
+        "content_frame",
+        "header_frame",
+        "icon_label",
+        "name_label",
+        "desc_label",
+        "placeholder",
+        "block_container",
+        "header_frame",
+        "remove_btn",
+        "input_frame",
+        "turns_entry",
+        "input_frame",
+        "amount_entry",
+        "cb",
+        "cb",
+        "buttons_frame"
+      ],
+      "window_titles": [
+        "Enhanced Trading - Properties & Function Blocks"
+      ],
+      "menu_items": [],
+      "texts": [
+        "📤 Your Offer",
+        "📥 Your Request",
+        "Properties",
+        "Money",
+        "Function Blocks",
+        "Drag function blocks here",
+        "📦 Function Blocks Palette (Drag to add)",
+        "Drag function blocks here",
+        "×",
+        "{expr} (${expr})"
+      ],
+      "colors": [
+        "#666666",
+        "#e74c3c",
+        "#f0f0f0",
+        "white"
+      ],
+      "fonts": [
+        "['Arial', 10, 'bold']",
+        "['Arial', 10, 'italic']",
+        "['Arial', 14]",
+        "['Arial', 8, 'bold']",
+        "['Arial', 8]"
+      ]
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/enhanced_trading_new.py",
+      "widgets": [
+        {
+          "var": "header_frame",
+          "class": "Frame",
+          "parent": "block_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "padx": 5,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 265
+        },
+        {
+          "var": "main_frame",
+          "class": "Frame",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true,
+                "padx": 10,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 93
+        },
+        {
+          "var": "left_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Your Offer ({expr})"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "fill": "both",
+                "expand": true,
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 97
+        },
+        {
+          "var": "right_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Your Request (from {expr})"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "right",
+                "fill": "both",
+                "expand": true,
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 100
+        },
+        {
+          "var": "props_frame",
+          "class": "LabelFrame",
+          "parent": "parent",
+          "kwargs": {
+            "text": "Properties to Request"
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true,
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 164
+        },
+        {
+          "var": "props_canvas",
+          "class": "Canvas",
+          "parent": "props_frame",
+          "kwargs": {
+            "height": 150,
+            "bg": "white"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "fill": "both",
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 168
+        },
+        {
+          "var": "props_scrollbar",
+          "class": "Scrollbar",
+          "parent": "props_frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "right",
+                "fill": "y"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 169
+        },
+        {
+          "var": "money_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 182
+        },
+        {
+          "var": "blocks_frame",
+          "class": "LabelFrame",
+          "parent": "parent",
+          "kwargs": {
+            "text": "Function Blocks to Request"
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true,
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 189
+        },
+        {
+          "var": "palette_frame",
+          "class": "Frame",
+          "parent": "blocks_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 193
+        },
+        {
+          "var": "blocks_palette",
+          "class": "Frame",
+          "parent": "palette_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 197
+        },
+        {
+          "var": "block_button",
+          "class": "Button",
+          "parent": "parent",
+          "kwargs": {
+            "text": "{expr} {expr}"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "padx": 2,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 212
+        },
+        {
+          "var": "block_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "relief": "raised",
+            "borderwidth": 1
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "padx": 2,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 261
+        },
+        {
+          "var": "vars_frame",
+          "class": "Frame",
+          "parent": "block_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "padx": 5,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 277
+        },
+        {
+          "var": "var_frame",
+          "class": "Frame",
+          "parent": "vars_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": 1
+              }
+            ]
+          },
+          "configs": [],
+          "line": 281
+        },
+        {
+          "var": "var_entry",
+          "class": "Entry",
+          "parent": "var_frame",
+          "kwargs": {
+            "width": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "right"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 286
+        },
+        {
+          "var": "cb",
+          "class": "Checkbutton",
+          "parent": "self.requested_props_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "anchor": "w",
+                "padx": 5,
+                "pady": 1
+              }
+            ]
+          },
+          "configs": [],
+          "line": 333
+        },
+        {
+          "var": "button_frame",
+          "class": "Frame",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 340
+        }
+      ],
+      "order": [
+        "header_frame",
+        "main_frame",
+        "left_frame",
+        "right_frame",
+        "props_frame",
+        "props_canvas",
+        "props_scrollbar",
+        "money_frame",
+        "blocks_frame",
+        "palette_frame",
+        "blocks_palette",
+        "props_frame",
+        "props_canvas",
+        "props_scrollbar",
+        "money_frame",
+        "blocks_frame",
+        "palette_frame",
+        "blocks_palette",
+        "block_button",
+        "block_frame",
+        "header_frame",
+        "vars_frame",
+        "var_frame",
+        "var_entry",
+        "cb",
+        "cb",
+        "button_frame"
+      ],
+      "window_titles": [
+        "Enhanced Trade with {expr}"
+      ],
+      "menu_items": [],
+      "texts": [
+        "Your Offer ({expr})",
+        "Your Request (from {expr})",
+        "Properties to Request",
+        "Function Blocks to Request",
+        "{expr} {expr}"
+      ],
+      "colors": [
+        "white"
+      ],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/game.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/gui.py",
+      "widgets": [
+        {
+          "var": "main_frame",
+          "class": "Frame",
+          "parent": "dialog",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "fill": "both",
+                "padx": 20,
+                "pady": 20
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1596
+        },
+        {
+          "var": "right_panel",
+          "class": "Frame",
+          "parent": "main_frame",
+          "kwargs": {
+            "style": "Modern.TFrame"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "sticky": "nsew"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 113
+        },
+        {
+          "var": "board_container",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "nsew",
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 140
+        },
+        {
+          "var": "title_label",
+          "class": "Label",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "📊 Trade Details",
+            "font": [
+              "Arial",
+              16,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  15
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1200
+        },
+        {
+          "var": "controls_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "style": "Modern.TFrame"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 2,
+                "column": 0,
+                "sticky": "ew",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 372
+        },
+        {
+          "var": "save_load_frame",
+          "class": "Frame",
+          "parent": "controls_frame",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 6,
+                "column": 0,
+                "sticky": "ew",
+                "pady": 1
+              }
+            ]
+          },
+          "configs": [],
+          "line": 408
+        },
+        {
+          "var": "dice_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "style": "Modern.TFrame"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 3,
+                "column": 0,
+                "sticky": "ew",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 425
+        },
+        {
+          "var": "players_container",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "style": "Modern.TFrame"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 4,
+                "column": 0,
+                "sticky": "nsew",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 604
+        },
+        {
+          "var": "trades_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "style": "Modern.TFrame"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 5,
+                "column": 0,
+                "sticky": "ew",
+                "pady": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 623
+        },
+        {
+          "var": "trades_title_frame",
+          "class": "Frame",
+          "parent": "trades_frame",
+          "kwargs": {
+            "style": "Modern.TFrame"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "ew"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 628
+        },
+        {
+          "var": "trades_container",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "style": "Modern.TFrame"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 2,
+                "column": 0,
+                "sticky": "nsew",
+                "pady": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 863
+        },
+        {
+          "var": "title_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "style": "Modern.TFrame"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "ew",
+                "pady": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 838
+        },
+        {
+          "var": "trades_scrollbar",
+          "class": "Scrollbar",
+          "parent": "trades_container",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "sticky": "ns"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 871
+        },
+        {
+          "var": "trade_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "bd": 1
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "padx": 2,
+                "pady": 1
+              }
+            ]
+          },
+          "configs": [],
+          "line": 934
+        },
+        {
+          "var": "trade_label",
+          "class": "Label",
+          "parent": "trade_frame",
+          "kwargs": {
+            "font": [
+              "Arial",
+              8
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "anchor": "w",
+                "padx": 5,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 950
+        },
+        {
+          "var": "header",
+          "class": "Label",
+          "parent": "self.players_frame",
+          "kwargs": {
+            "text": "Players Overview",
+            "style": "Modern.TLabel",
+            "font": [
+              "Arial",
+              12,
+              "bold"
+            ]
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "columnspan": 3,
+                "sticky": "w",
+                "pady": [
+                  0,
+                  6
+                ],
+                "padx": [
+                  2,
+                  2
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 778
+        },
+        {
+          "var": "tile",
+          "class": "Frame",
+          "parent": "self.players_frame",
+          "kwargs": {
+            "padding": 4
+          },
+          "layout": {
+            "grid": [
+              {
+                "sticky": "ew",
+                "padx": 2,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 797
+        },
+        {
+          "var": "dot",
+          "class": "Canvas",
+          "parent": "tile",
+          "kwargs": {
+            "width": 14,
+            "height": 14,
+            "highlightthickness": 0
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "w"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 809
+        },
+        {
+          "var": "name",
+          "class": "Label",
+          "parent": "tile",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "sticky": "w",
+                "padx": [
+                  6,
+                  4
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 814
+        },
+        {
+          "var": "cash",
+          "class": "Label",
+          "parent": "tile",
+          "kwargs": {
+            "text": "${expr}"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 2,
+                "sticky": "e",
+                "padx": [
+                  6,
+                  4
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 817
+        },
+        {
+          "var": "props_lbl",
+          "class": "Label",
+          "parent": "tile",
+          "kwargs": {
+            "text": "{expr}🏠{expr}"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 3,
+                "sticky": "e"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 822
+        },
+        {
+          "var": "actions_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {
+            "style": "Modern.TFrame"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 1,
+                "column": 0,
+                "sticky": "ew",
+                "pady": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 846
+        },
+        {
+          "var": "no_trades_label",
+          "class": "Label",
+          "parent": "self.trades_frame",
+          "kwargs": {
+            "text": "No pending trades\nUse 'Trade Properties' button\nto create new trades",
+            "font": [
+              "Arial",
+              10
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 20
+              }
+            ]
+          },
+          "configs": [],
+          "line": 902
+        },
+        {
+          "var": "win",
+          "class": "Toplevel",
+          "parent": "self.root",
+          "kwargs": {},
+          "layout": {},
+          "configs": [],
+          "line": 1103
+        },
+        {
+          "var": "frame",
+          "class": "Frame",
+          "parent": "win",
+          "kwargs": {
+            "padding": 8
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1117
+        },
+        {
+          "var": "text",
+          "class": "Text",
+          "parent": "frame",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "nsew"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1122
+        },
+        {
+          "var": "scroll",
+          "class": "Scrollbar",
+          "parent": "frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "sticky": "ns"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1123
+        },
+        {
+          "var": "w",
+          "class": "Toplevel",
+          "parent": "self.root",
+          "kwargs": {},
+          "layout": {},
+          "configs": [],
+          "line": 1165
+        },
+        {
+          "var": "details_dialog",
+          "class": "Toplevel",
+          "parent": "self.root",
+          "kwargs": {},
+          "layout": {},
+          "configs": [
+            {
+              "bg": "#2c3e50"
+            },
+            {
+              "bg": "#2c3e50"
+            }
+          ],
+          "line": 1183
+        },
+        {
+          "var": "summary_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Trade Summary",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1205
+        },
+        {
+          "var": "summary_label",
+          "class": "Label",
+          "parent": "summary_frame",
+          "kwargs": {
+            "font": [
+              "Arial",
+              11
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "anchor": "w"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1209
+        },
+        {
+          "var": "timing_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Timing",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1214
+        },
+        {
+          "var": "props_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Property Details",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1226
+        },
+        {
+          "var": "money_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Money Exchange",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1245
+        },
+        {
+          "var": "dialog",
+          "class": "Toplevel",
+          "parent": "self.root",
+          "kwargs": {},
+          "layout": {},
+          "configs": [
+            {
+              "bg": "#2c3e50"
+            },
+            {
+              "bg": "#2c3e50"
+            }
+          ],
+          "line": 1583
+        },
+        {
+          "var": "header_frame",
+          "class": "Frame",
+          "parent": "main_frame",
+          "kwargs": {
+            "height": 40
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1287
+        },
+        {
+          "var": "name_label",
+          "class": "Label",
+          "parent": "header_frame",
+          "kwargs": {
+            "font": [
+              "Arial",
+              14,
+              "bold"
+            ],
+            "fg": "white"
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1292
+        },
+        {
+          "var": "details_frame",
+          "class": "Frame",
+          "parent": "main_frame",
+          "kwargs": {
+            "bg": "#2c3e50"
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1297
+        },
+        {
+          "var": "price_frame",
+          "class": "LabelFrame",
+          "parent": "details_frame",
+          "kwargs": {
+            "text": "💰 Property Information",
+            "bg": "#34495e",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ],
+                "padx": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1302
+        },
+        {
+          "var": "rent_frame",
+          "class": "LabelFrame",
+          "parent": "details_frame",
+          "kwargs": {
+            "text": "🏠 Rent Information",
+            "bg": "#34495e",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ],
+                "padx": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1316
+        },
+        {
+          "var": "owner_frame",
+          "class": "LabelFrame",
+          "parent": "details_frame",
+          "kwargs": {
+            "text": "👤 Ownership",
+            "bg": "#34495e",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ],
+                "padx": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1348
+        },
+        {
+          "var": "special_frame",
+          "class": "LabelFrame",
+          "parent": "details_frame",
+          "kwargs": {
+            "text": "ℹ️ Special Space",
+            "bg": "#34495e",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ],
+                "padx": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1366
+        },
+        {
+          "var": "button_frame",
+          "class": "Frame",
+          "parent": "main_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1618
+        },
+        {
+          "var": "buy_house_btn",
+          "class": "Button",
+          "parent": "button_frame",
+          "kwargs": {
+            "text": "🏠 Buy House (${expr})",
+            "bg": "#27ae60",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "padx": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1440
+        },
+        {
+          "var": "sell_house_btn",
+          "class": "Button",
+          "parent": "button_frame",
+          "kwargs": {
+            "text": "🏚️ Sell House (+${expr})",
+            "bg": "#c0392b",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "padx": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1443
+        },
+        {
+          "var": "mort_btn",
+          "class": "Button",
+          "parent": "button_frame",
+          "kwargs": {
+            "text": "🏦 Mortgage (+${expr})",
+            "bg": "#8e44ad",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "padx": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1448
+        },
+        {
+          "var": "unmort_btn",
+          "class": "Button",
+          "parent": "button_frame",
+          "kwargs": {
+            "text": "💳 Unmortgage (-${expr})",
+            "bg": "#2980b9",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "padx": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1452
+        },
+        {
+          "var": "sell_btn",
+          "class": "Button",
+          "parent": "button_frame",
+          "kwargs": {
+            "text": "🏦 Sell to Bank ($0)",
+            "bg": "#7f8c8d",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "padx": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1469
+        },
+        {
+          "var": "close_btn",
+          "class": "Button",
+          "parent": "button_frame",
+          "kwargs": {
+            "text": "❌ Close",
+            "bg": "#e74c3c",
+            "fg": "white",
+            "font": [
+              "Arial",
+              10,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "right"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1473
+        },
+        {
+          "var": "status_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Current Status",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1600
+        },
+        {
+          "var": "payments_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Pending Payments",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true,
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1607
+        },
+        {
+          "var": "payments_listbox",
+          "class": "Listbox",
+          "parent": "payments_frame",
+          "kwargs": {
+            "height": 5
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true,
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1611
+        }
+      ],
+      "order": [
+        "main_frame",
+        "right_panel",
+        "board_container",
+        "title_label",
+        "controls_frame",
+        "save_load_frame",
+        "dice_frame",
+        "players_container",
+        "trades_frame",
+        "trades_title_frame",
+        "trades_container",
+        "title_frame",
+        "trades_scrollbar",
+        "trade_frame",
+        "trade_label",
+        "header",
+        "tile",
+        "dot",
+        "name",
+        "cash",
+        "props_lbl",
+        "title_frame",
+        "title_label",
+        "actions_frame",
+        "trades_container",
+        "trades_scrollbar",
+        "no_trades_label",
+        "trade_frame",
+        "trade_label",
+        "win",
+        "frame",
+        "text",
+        "scroll",
+        "w",
+        "details_dialog",
+        "main_frame",
+        "title_label",
+        "summary_frame",
+        "summary_label",
+        "timing_frame",
+        "props_frame",
+        "money_frame",
+        "dialog",
+        "main_frame",
+        "header_frame",
+        "name_label",
+        "details_frame",
+        "price_frame",
+        "rent_frame",
+        "owner_frame",
+        "special_frame",
+        "button_frame",
+        "buy_house_btn",
+        "sell_house_btn",
+        "mort_btn",
+        "unmort_btn",
+        "sell_btn",
+        "close_btn",
+        "dialog",
+        "main_frame",
+        "status_frame",
+        "payments_frame",
+        "payments_listbox",
+        "button_frame"
+      ],
+      "window_titles": [
+        "Monopoly Game",
+        "Game Log",
+        "warmup",
+        "Trade Details",
+        "Property Card: {expr}",
+        "Manage Payments - {expr}"
+      ],
+      "menu_items": [],
+      "texts": [
+        "📊 Trade Details",
+        "Players Overview",
+        "${expr}",
+        "{expr}🏠{expr}",
+        "No pending trades\nUse 'Trade Properties' button\nto create new trades",
+        "Trade Summary",
+        "Timing",
+        "Property Details",
+        "Money Exchange",
+        "💰 Property Information",
+        "🏠 Rent Information",
+        "👤 Ownership",
+        "ℹ️ Special Space",
+        "🏠 Buy House (${expr})",
+        "🏚️ Sell House (+${expr})",
+        "🏦 Mortgage (+${expr})",
+        "💳 Unmortgage (-${expr})",
+        "🏦 Sell to Bank ($0)",
+        "❌ Close",
+        "Current Status",
+        "Pending Payments"
+      ],
+      "colors": [
+        "#27ae60",
+        "#2980b9",
+        "#2c3e50",
+        "#34495e",
+        "#7f8c8d",
+        "#8e44ad",
+        "#c0392b",
+        "#e74c3c",
+        "white"
+      ],
+      "fonts": [
+        "['Arial', 10, 'bold']",
+        "['Arial', 10]",
+        "['Arial', 11]",
+        "['Arial', 12, 'bold']",
+        "['Arial', 14, 'bold']",
+        "['Arial', 16, 'bold']",
+        "['Arial', 8]"
+      ]
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/save_load.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/super_simple_enhanced.py",
+      "widgets": [
+        {
+          "var": "main_frame",
+          "class": "Frame",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true,
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 59
+        },
+        {
+          "var": "title_label",
+          "class": "Label",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Enhanced Trade: {expr} ↔ {expr}",
+            "font": [
+              "Arial",
+              14,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 63
+        },
+        {
+          "var": "notebook",
+          "class": "Notebook",
+          "parent": "main_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 69
+        },
+        {
+          "var": "traditional_frame",
+          "class": "Frame",
+          "parent": "notebook",
+          "kwargs": {},
+          "layout": {},
+          "configs": [],
+          "line": 73
+        },
+        {
+          "var": "blocks_frame",
+          "class": "Frame",
+          "parent": "notebook",
+          "kwargs": {},
+          "layout": {},
+          "configs": [],
+          "line": 78
+        },
+        {
+          "var": "columns_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true,
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 88
+        },
+        {
+          "var": "left_frame",
+          "class": "LabelFrame",
+          "parent": "sections_frame",
+          "kwargs": {
+            "text": "{expr} will pay {expr}"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "fill": "both",
+                "expand": true,
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 133
+        },
+        {
+          "var": "right_frame",
+          "class": "LabelFrame",
+          "parent": "sections_frame",
+          "kwargs": {
+            "text": "{expr} will pay {expr}"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "right",
+                "fill": "both",
+                "expand": true,
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 139
+        },
+        {
+          "var": "info_label",
+          "class": "Label",
+          "parent": "parent",
+          "kwargs": {
+            "text": "Function Blocks: Create recurring payments using 2 simple blocks",
+            "font": [
+              "Arial",
+              11,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 123
+        },
+        {
+          "var": "sections_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true,
+                "padx": 10,
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 129
+        },
+        {
+          "var": "amount_entry",
+          "class": "Entry",
+          "parent": "parent",
+          "kwargs": {
+            "width": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "anchor": "w",
+                "padx": 5,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 149
+        },
+        {
+          "var": "turns_entry",
+          "class": "Entry",
+          "parent": "parent",
+          "kwargs": {
+            "width": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "anchor": "w",
+                "padx": 5,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 155
+        },
+        {
+          "var": "add_btn",
+          "class": "Button",
+          "parent": "parent",
+          "kwargs": {
+            "text": "Add Payment"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 192
+        },
+        {
+          "var": "display_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true,
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 196
+        },
+        {
+          "var": "payment_label",
+          "class": "Label",
+          "parent": "display_frame",
+          "kwargs": {
+            "text": "💰 {expr}",
+            "background": "lightgreen"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 214
+        },
+        {
+          "var": "remove_btn",
+          "class": "Button",
+          "parent": "display_frame",
+          "kwargs": {
+            "text": "Remove"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 226
+        },
+        {
+          "var": "cb",
+          "class": "Checkbutton",
+          "parent": "self.requested_props_frame",
+          "kwargs": {
+            "text": "{expr} (${expr})"
+          },
+          "layout": {
+            "pack": [
+              {
+                "anchor": "w",
+                "padx": 5,
+                "pady": 1
+              }
+            ]
+          },
+          "configs": [],
+          "line": 250
+        },
+        {
+          "var": "button_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 257
+        }
+      ],
+      "order": [
+        "main_frame",
+        "title_label",
+        "notebook",
+        "traditional_frame",
+        "blocks_frame",
+        "columns_frame",
+        "left_frame",
+        "right_frame",
+        "info_label",
+        "sections_frame",
+        "left_frame",
+        "right_frame",
+        "amount_entry",
+        "turns_entry",
+        "add_btn",
+        "display_frame",
+        "payment_label",
+        "remove_btn",
+        "cb",
+        "cb",
+        "button_frame"
+      ],
+      "window_titles": [
+        "Enhanced Trade with {expr}"
+      ],
+      "menu_items": [],
+      "texts": [
+        "Enhanced Trade: {expr} ↔ {expr}",
+        "{expr} will pay {expr}",
+        "{expr} will pay {expr}",
+        "Function Blocks: Create recurring payments using 2 simple blocks",
+        "Add Payment",
+        "💰 {expr}",
+        "Remove",
+        "{expr} (${expr})"
+      ],
+      "colors": [
+        "lightgreen"
+      ],
+      "fonts": [
+        "['Arial', 11, 'bold']",
+        "['Arial', 14, 'bold']"
+      ]
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/trades_viewer.py",
+      "widgets": [
+        {
+          "var": "main_frame",
+          "class": "Frame",
+          "parent": "details_window",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": 20,
+                "pady": 20
+              }
+            ]
+          },
+          "configs": [],
+          "line": 427
+        },
+        {
+          "var": "title_label",
+          "class": "Label",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Trade Details",
+            "font": [
+              "Arial",
+              16,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  20
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 431
+        },
+        {
+          "var": "info_label",
+          "class": "Label",
+          "parent": "main_frame",
+          "kwargs": {
+            "font": [
+              "Arial",
+              10
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 89
+        },
+        {
+          "var": "buttons_frame",
+          "class": "Frame",
+          "parent": "main_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 96
+        },
+        {
+          "var": "refresh_btn",
+          "class": "Button",
+          "parent": "buttons_frame",
+          "kwargs": {
+            "text": "🔄 Refresh"
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 100
+        },
+        {
+          "var": "new_trade_btn",
+          "class": "Button",
+          "parent": "buttons_frame",
+          "kwargs": {
+            "text": "➕ Create New Trade"
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 105
+        },
+        {
+          "var": "close_btn",
+          "class": "Button",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Close"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 443
+        },
+        {
+          "var": "scroll_frame",
+          "class": "Frame",
+          "parent": "parent",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 120
+        },
+        {
+          "var": "canvas",
+          "class": "Canvas",
+          "parent": "scroll_frame",
+          "kwargs": {
+            "bg": "white"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "fill": "both",
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 124
+        },
+        {
+          "var": "scrollbar",
+          "class": "Scrollbar",
+          "parent": "scroll_frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "right",
+                "fill": "y"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 125
+        },
+        {
+          "var": "no_trades_label",
+          "class": "Label",
+          "parent": "self.trades_frame",
+          "kwargs": {
+            "font": [
+              "Arial",
+              12
+            ],
+            "foreground": "gray"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 20
+              }
+            ]
+          },
+          "configs": [],
+          "line": 169
+        },
+        {
+          "var": "trade_frame",
+          "class": "LabelFrame",
+          "parent": "self.trades_frame",
+          "kwargs": {
+            "text": "Trade #{expr}",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 5,
+                "padx": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 176
+        },
+        {
+          "var": "participants_frame",
+          "class": "Frame",
+          "parent": "trade_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 182
+        },
+        {
+          "var": "proposer_label",
+          "class": "Label",
+          "parent": "participants_frame",
+          "kwargs": {
+            "text": "From: {expr}",
+            "font": [
+              "Arial",
+              12,
+              "bold"
+            ],
+            "foreground": "blue"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 185
+        },
+        {
+          "var": "arrow_label",
+          "class": "Label",
+          "parent": "participants_frame",
+          "kwargs": {
+            "text": " ➜ ",
+            "font": [
+              "Arial",
+              12
+            ]
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 191
+        },
+        {
+          "var": "recipient_label",
+          "class": "Label",
+          "parent": "participants_frame",
+          "kwargs": {
+            "text": "To: {expr}",
+            "font": [
+              "Arial",
+              12,
+              "bold"
+            ],
+            "foreground": "green"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 195
+        },
+        {
+          "var": "details_frame",
+          "class": "Frame",
+          "parent": "trade_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  10
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 202
+        },
+        {
+          "var": "offer_frame",
+          "class": "LabelFrame",
+          "parent": "details_frame",
+          "kwargs": {
+            "text": "Offering:",
+            "padding": 5
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 206
+        },
+        {
+          "var": "prop_label",
+          "class": "Label",
+          "parent": "request_frame",
+          "kwargs": {
+            "text": "🏠 {expr}"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 228
+        },
+        {
+          "var": "money_label",
+          "class": "Label",
+          "parent": "request_frame",
+          "kwargs": {
+            "text": "💰 ${expr}"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 232
+        },
+        {
+          "var": "nothing_label",
+          "class": "Label",
+          "parent": "request_frame",
+          "kwargs": {
+            "text": "Nothing",
+            "foreground": "gray"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 236
+        },
+        {
+          "var": "request_frame",
+          "class": "LabelFrame",
+          "parent": "details_frame",
+          "kwargs": {
+            "text": "Requesting:",
+            "padding": 5
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 223
+        },
+        {
+          "var": "advanced_frame",
+          "class": "LabelFrame",
+          "parent": "trade_frame",
+          "kwargs": {
+            "text": "⚡ Advanced Terms:",
+            "padding": 5
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 241
+        },
+        {
+          "var": "block_label",
+          "class": "Label",
+          "parent": "recipient_blocks_frame",
+          "kwargs": {
+            "foreground": "green"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 289
+        },
+        {
+          "var": "proposer_blocks_frame",
+          "class": "LabelFrame",
+          "parent": "trade_frame",
+          "kwargs": {
+            "text": "⚡ {expr}'s Terms:",
+            "padding": 5
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 259
+        },
+        {
+          "var": "recipient_blocks_frame",
+          "class": "LabelFrame",
+          "parent": "trade_frame",
+          "kwargs": {
+            "text": "⚡ {expr}'s Terms:",
+            "padding": 5
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 276
+        },
+        {
+          "var": "actions_frame",
+          "class": "Frame",
+          "parent": "trade_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 293
+        },
+        {
+          "var": "accept_btn",
+          "class": "Button",
+          "parent": "actions_frame",
+          "kwargs": {
+            "text": "✅ Accept Trade"
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 299
+        },
+        {
+          "var": "reject_btn",
+          "class": "Button",
+          "parent": "actions_frame",
+          "kwargs": {
+            "text": "❌ Reject Trade"
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 303
+        },
+        {
+          "var": "withdraw_btn",
+          "class": "Button",
+          "parent": "actions_frame",
+          "kwargs": {
+            "text": "🔙 Withdraw Trade"
+          },
+          "layout": {
+            "pack": [
+              {
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 309
+        },
+        {
+          "var": "details_btn",
+          "class": "Button",
+          "parent": "actions_frame",
+          "kwargs": {
+            "text": "👁️ View Details"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 314
+        },
+        {
+          "var": "details_window",
+          "class": "Toplevel",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {},
+          "configs": [],
+          "line": 413
+        },
+        {
+          "var": "summary_text",
+          "class": "Text",
+          "parent": "main_frame",
+          "kwargs": {
+            "height": 15,
+            "width": 70
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [
+            {
+              "state": "disabled"
+            },
+            {
+              "state": "disabled"
+            }
+          ],
+          "line": 437
+        }
+      ],
+      "order": [
+        "main_frame",
+        "title_label",
+        "info_label",
+        "buttons_frame",
+        "refresh_btn",
+        "new_trade_btn",
+        "close_btn",
+        "scroll_frame",
+        "canvas",
+        "scrollbar",
+        "no_trades_label",
+        "trade_frame",
+        "participants_frame",
+        "proposer_label",
+        "arrow_label",
+        "recipient_label",
+        "details_frame",
+        "offer_frame",
+        "prop_label",
+        "money_label",
+        "nothing_label",
+        "request_frame",
+        "prop_label",
+        "money_label",
+        "nothing_label",
+        "advanced_frame",
+        "block_label",
+        "proposer_blocks_frame",
+        "block_label",
+        "recipient_blocks_frame",
+        "block_label",
+        "actions_frame",
+        "accept_btn",
+        "reject_btn",
+        "withdraw_btn",
+        "details_btn",
+        "details_window",
+        "main_frame",
+        "title_label",
+        "summary_text",
+        "close_btn"
+      ],
+      "window_titles": [
+        "All Pending Trades",
+        "Trade Details"
+      ],
+      "menu_items": [],
+      "texts": [
+        "Trade Details",
+        "🔄 Refresh",
+        "➕ Create New Trade",
+        "Close",
+        "Trade #{expr}",
+        "From: {expr}",
+        " ➜ ",
+        "To: {expr}",
+        "Offering:",
+        "🏠 {expr}",
+        "💰 ${expr}",
+        "Nothing",
+        "Requesting:",
+        "⚡ Advanced Terms:",
+        "⚡ {expr}'s Terms:",
+        "⚡ {expr}'s Terms:",
+        "✅ Accept Trade",
+        "❌ Reject Trade",
+        "🔙 Withdraw Trade",
+        "👁️ View Details"
+      ],
+      "colors": [
+        "blue",
+        "gray",
+        "green",
+        "white"
+      ],
+      "fonts": [
+        "['Arial', 10]",
+        "['Arial', 12, 'bold']",
+        "['Arial', 12]",
+        "['Arial', 16, 'bold']"
+      ]
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/src/trading.py",
+      "widgets": [
+        {
+          "var": "main_frame",
+          "class": "Frame",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "padx": 15,
+                "pady": 15
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1415
+        },
+        {
+          "var": "notebook",
+          "class": "Notebook",
+          "parent": "main_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1184
+        },
+        {
+          "var": "header_frame",
+          "class": "Frame",
+          "parent": "self.new_trade_frame",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "ew",
+                "pady": [
+                  0,
+                  15
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 193
+        },
+        {
+          "var": "title_label",
+          "class": "Label",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "📬 Pending Trades for {expr}",
+            "font": [
+              "Arial",
+              14,
+              "bold"
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  15
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1419
+        },
+        {
+          "var": "partner_combo",
+          "class": "Combobox",
+          "parent": "header_frame",
+          "kwargs": {
+            "font": [
+              "Arial",
+              10
+            ],
+            "width": 25
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 1,
+                "column": 1,
+                "sticky": "ew",
+                "padx": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [
+            {
+              "state": "disabled"
+            },
+            {
+              "state": "disabled"
+            }
+          ],
+          "line": 206
+        },
+        {
+          "var": "trade_container",
+          "class": "Frame",
+          "parent": "self.new_trade_frame",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 1,
+                "column": 0,
+                "sticky": "nsew"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 223
+        },
+        {
+          "var": "offer_frame",
+          "class": "LabelFrame",
+          "parent": "trade_container",
+          "kwargs": {
+            "text": "📤 {expr}'s Offer",
+            "padding": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 0,
+                "sticky": "nsew",
+                "padx": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 230
+        },
+        {
+          "var": "arrow_frame",
+          "class": "Frame",
+          "parent": "trade_container",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "sticky": "ns",
+                "padx": 10
+              }
+            ]
+          },
+          "configs": [],
+          "line": 235
+        },
+        {
+          "var": "request_frame",
+          "class": "LabelFrame",
+          "parent": "trade_container",
+          "kwargs": {
+            "text": "📥 Partner's Offer",
+            "padding": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 2,
+                "sticky": "nsew",
+                "padx": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 240
+        },
+        {
+          "var": "bottom_frame",
+          "class": "Frame",
+          "parent": "self.new_trade_frame",
+          "kwargs": {},
+          "layout": {
+            "grid": [
+              {
+                "row": 2,
+                "column": 0,
+                "sticky": "ew",
+                "pady": [
+                  15,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 248
+        },
+        {
+          "var": "button_frame",
+          "class": "Frame",
+          "parent": "trade_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1487
+        },
+        {
+          "var": "canvas",
+          "class": "Canvas",
+          "parent": "main_frame",
+          "kwargs": {
+            "bg": "#34495e"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "left",
+                "fill": "both",
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1425
+        },
+        {
+          "var": "scrollbar",
+          "class": "Scrollbar",
+          "parent": "main_frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "pack": [
+              {
+                "side": "right",
+                "fill": "y"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1426
+        },
+        {
+          "var": "refresh_btn",
+          "class": "Button",
+          "parent": "self.pending_trades_frame",
+          "kwargs": {
+            "text": "🔄 Refresh Pending Trades"
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 2,
+                "column": 0,
+                "pady": [
+                  10,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 305
+        },
+        {
+          "var": "no_trades_label",
+          "class": "Label",
+          "parent": "self.scrollable_frame",
+          "kwargs": {
+            "text": "No pending trades",
+            "font": [
+              "Arial",
+              12
+            ],
+            "foreground": "#7f8c8d"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 20
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1462
+        },
+        {
+          "var": "trade_frame",
+          "class": "LabelFrame",
+          "parent": "self.scrollable_frame",
+          "kwargs": {
+            "text": "Trade Proposal #{expr}",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "padx": 10,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1475
+        },
+        {
+          "var": "details_label",
+          "class": "Label",
+          "parent": "trade_frame",
+          "kwargs": {
+            "justify": "left"
+          },
+          "layout": {
+            "pack": [
+              {
+                "anchor": "w"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1481
+        },
+        {
+          "var": "details_dialog",
+          "class": "Toplevel",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {},
+          "configs": [
+            {
+              "bg": "#2c3e50"
+            },
+            {
+              "bg": "#2c3e50"
+            }
+          ],
+          "line": 467
+        },
+        {
+          "var": "details_text",
+          "class": "Text",
+          "parent": "details_frame",
+          "kwargs": {
+            "height": 12,
+            "bg": "#34495e",
+            "fg": "#ecf0f1",
+            "font": [
+              "Arial",
+              10
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 935
+        },
+        {
+          "var": "prop_frame",
+          "class": "LabelFrame",
+          "parent": "self.request_content_frame",
+          "kwargs": {
+            "text": "🏠 Properties to Request"
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "pady": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 651
+        },
+        {
+          "var": "scrollable_frame",
+          "class": "Frame",
+          "parent": "canvas",
+          "kwargs": {},
+          "layout": {},
+          "configs": [],
+          "line": 657
+        },
+        {
+          "var": "checkbox",
+          "class": "Checkbutton",
+          "parent": "scrollable_frame",
+          "kwargs": {
+            "text": "{expr} (${expr})"
+          },
+          "layout": {
+            "grid": [
+              {
+                "column": 0,
+                "sticky": "w",
+                "padx": 5,
+                "pady": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 682
+        },
+        {
+          "var": "money_frame",
+          "class": "LabelFrame",
+          "parent": "self.request_content_frame",
+          "kwargs": {
+            "text": "💰 Money to Request"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 694
+        },
+        {
+          "var": "amount_entry",
+          "class": "Entry",
+          "parent": "money_frame",
+          "kwargs": {
+            "width": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 582
+        },
+        {
+          "var": "money_slider",
+          "class": "Scale",
+          "parent": "money_frame",
+          "kwargs": {
+            "from_": 0
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 2,
+                "sticky": "ew",
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 588
+        },
+        {
+          "var": "quick_frame",
+          "class": "Frame",
+          "parent": "money_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 717
+        },
+        {
+          "var": "btn",
+          "class": "Button",
+          "parent": "quick_frame",
+          "kwargs": {
+            "width": 6
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "padx": 2
+              }
+            ]
+          },
+          "configs": [],
+          "line": 732
+        },
+        {
+          "var": "available_label",
+          "class": "Label",
+          "parent": "money_frame",
+          "kwargs": {
+            "text": "Available: ${expr}",
+            "font": [
+              "Arial",
+              8
+            ],
+            "foreground": "#7f8c8d"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  5
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 743
+        },
+        {
+          "var": "money_entry_frame",
+          "class": "Frame",
+          "parent": "money_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "padx": 5,
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 697
+        },
+        {
+          "var": "request_entry",
+          "class": "Entry",
+          "parent": "money_entry_frame",
+          "kwargs": {
+            "width": 10
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 1,
+                "padx": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 705
+        },
+        {
+          "var": "request_slider",
+          "class": "Scale",
+          "parent": "money_entry_frame",
+          "kwargs": {
+            "from_": 0
+          },
+          "layout": {
+            "grid": [
+              {
+                "row": 0,
+                "column": 2,
+                "sticky": "ew",
+                "padx": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 711
+        },
+        {
+          "var": "proposal_dialog",
+          "class": "Toplevel",
+          "parent": "self.dialog",
+          "kwargs": {},
+          "layout": {},
+          "configs": [
+            {
+              "bg": "#2c3e50"
+            },
+            {
+              "bg": "#2c3e50"
+            }
+          ],
+          "line": 900
+        },
+        {
+          "var": "from_to_frame",
+          "class": "Frame",
+          "parent": "main_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "pady": [
+                  0,
+                  15
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 922
+        },
+        {
+          "var": "details_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "Trade Details",
+            "padding": 10
+          },
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "pady": [
+                  0,
+                  15
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 931
+        },
+        {
+          "var": "details_scrollbar",
+          "class": "Scrollbar",
+          "parent": "details_frame",
+          "kwargs": {
+            "orient": "vertical"
+          },
+          "layout": {
+            "pack": [
+              {}
+            ]
+          },
+          "configs": [],
+          "line": 937
+        },
+        {
+          "var": "pending_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "📬 You have {expr} pending trade(s)!",
+            "padding": 15
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": [
+                  0,
+                  20
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1102
+        },
+        {
+          "var": "new_trade_frame",
+          "class": "LabelFrame",
+          "parent": "main_frame",
+          "kwargs": {
+            "text": "📤 Create New Trade",
+            "padding": 15
+          },
+          "layout": {
+            "pack": [
+              {
+                "fill": "both",
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1112
+        },
+        {
+          "var": "player_frame",
+          "class": "Frame",
+          "parent": "new_trade_frame",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "fill": "x",
+                "pady": 5
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1120
+        },
+        {
+          "var": "summary_label",
+          "class": "Label",
+          "parent": "trade_frame",
+          "kwargs": {
+            "font": [
+              "Arial",
+              10
+            ]
+          },
+          "layout": {
+            "pack": [
+              {
+                "anchor": "w"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1307
+        },
+        {
+          "var": "time_label",
+          "class": "Label",
+          "parent": "trade_frame",
+          "kwargs": {
+            "text": "Proposed at: {expr}",
+            "font": [
+              "Arial",
+              9
+            ],
+            "foreground": "gray"
+          },
+          "layout": {
+            "pack": [
+              {
+                "anchor": "w",
+                "pady": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1314
+        },
+        {
+          "var": "status_label",
+          "class": "Label",
+          "parent": "trade_frame",
+          "kwargs": {
+            "text": "(Observing)",
+            "font": [
+              "Arial",
+              9
+            ],
+            "foreground": "lightblue"
+          },
+          "layout": {
+            "pack": [
+              {
+                "anchor": "e",
+                "pady": [
+                  5,
+                  0
+                ]
+              }
+            ]
+          },
+          "configs": [],
+          "line": 1337
+        }
+      ],
+      "order": [
+        "main_frame",
+        "notebook",
+        "header_frame",
+        "title_label",
+        "partner_combo",
+        "trade_container",
+        "offer_frame",
+        "arrow_frame",
+        "request_frame",
+        "bottom_frame",
+        "button_frame",
+        "title_label",
+        "canvas",
+        "scrollbar",
+        "refresh_btn",
+        "no_trades_label",
+        "trade_frame",
+        "details_label",
+        "button_frame",
+        "details_dialog",
+        "main_frame",
+        "details_text",
+        "prop_frame",
+        "canvas",
+        "scrollbar",
+        "scrollable_frame",
+        "checkbox",
+        "money_frame",
+        "amount_entry",
+        "money_slider",
+        "quick_frame",
+        "btn",
+        "available_label",
+        "prop_frame",
+        "canvas",
+        "scrollbar",
+        "scrollable_frame",
+        "checkbox",
+        "money_frame",
+        "money_entry_frame",
+        "request_entry",
+        "request_slider",
+        "quick_frame",
+        "btn",
+        "available_label",
+        "available_label",
+        "proposal_dialog",
+        "main_frame",
+        "title_label",
+        "from_to_frame",
+        "details_frame",
+        "details_text",
+        "details_scrollbar",
+        "button_frame",
+        "main_frame",
+        "title_label",
+        "pending_frame",
+        "new_trade_frame",
+        "player_frame",
+        "main_frame",
+        "title_label",
+        "notebook",
+        "button_frame",
+        "canvas",
+        "scrollbar",
+        "canvas",
+        "scrollbar",
+        "no_trades_label",
+        "no_trades_label",
+        "trade_frame",
+        "summary_label",
+        "time_label",
+        "button_frame",
+        "status_label",
+        "main_frame",
+        "title_label",
+        "canvas",
+        "scrollbar",
+        "button_frame",
+        "no_trades_label",
+        "trade_frame",
+        "details_label",
+        "button_frame"
+      ],
+      "window_titles": [
+        "Property Trading",
+        "Trade Details",
+        "Trade Proposal",
+        "Trading Options",
+        "All Pending Trades",
+        "Pending Trades"
+      ],
+      "menu_items": [],
+      "texts": [
+        "📬 Pending Trades for {expr}",
+        "📤 {expr}'s Offer",
+        "📥 Partner's Offer",
+        "🔄 Refresh Pending Trades",
+        "No pending trades",
+        "Trade Proposal #{expr}",
+        "🏠 Properties to Request",
+        "{expr} (${expr})",
+        "💰 Money to Request",
+        "Available: ${expr}",
+        "Trade Details",
+        "📬 You have {expr} pending trade(s)!",
+        "📤 Create New Trade",
+        "Proposed at: {expr}",
+        "(Observing)"
+      ],
+      "colors": [
+        "#2c3e50",
+        "#34495e",
+        "#7f8c8d",
+        "#ecf0f1",
+        "gray",
+        "lightblue"
+      ],
+      "fonts": [
+        "['Arial', 10]",
+        "['Arial', 12]",
+        "['Arial', 14, 'bold']",
+        "['Arial', 8]",
+        "['Arial', 9]"
+      ]
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/super_simple_demo.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [
+        "Super Simple Enhanced Trading - WORKING!"
+      ],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/test_combined_function_blocks.py",
+      "widgets": [],
+      "order": [],
+      "window_titles": [],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/test_dialog_difference.py",
+      "widgets": [
+        {
+          "var": "frame",
+          "class": "Frame",
+          "parent": "root",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "fill": "both",
+                "padx": 20,
+                "pady": 20
+              }
+            ]
+          },
+          "configs": [],
+          "line": 31
+        }
+      ],
+      "order": [
+        "frame"
+      ],
+      "window_titles": [
+        "Trading Dialog Comparison Test"
+      ],
+      "menu_items": [],
+      "texts": [],
+      "colors": [],
+      "fonts": []
+    },
+    {
+      "file": "/home/seeds/monopoly_v3/engine/new/docs/old_ui_dump/test_enhanced_vs_traditional.py",
+      "widgets": [
+        {
+          "var": "frame",
+          "class": "Frame",
+          "parent": "root",
+          "kwargs": {},
+          "layout": {
+            "pack": [
+              {
+                "expand": true,
+                "fill": "both",
+                "padx": 20,
+                "pady": 20
+              }
+            ]
+          },
+          "configs": [],
+          "line": 29
+        },
+        {
+          "var": "traditional_btn",
+          "class": "Button",
+          "parent": "frame",
+          "kwargs": {
+            "text": "🔄 Traditional Trading\n(Properties + Money only)"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 10,
+                "fill": "x"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 57
+        },
+        {
+          "var": "enhanced_btn",
+          "class": "Button",
+          "parent": "frame",
+          "kwargs": {
+            "text": "🔄⚡ Enhanced Trading\n(Properties + Money + Function Blocks)"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 10,
+                "fill": "x"
+              }
+            ]
+          },
+          "configs": [],
+          "line": 62
+        },
+        {
+          "var": "explanation_frame",
+          "class": "LabelFrame",
+          "parent": "frame",
+          "kwargs": {
+            "text": "What's the difference?"
+          },
+          "layout": {
+            "pack": [
+              {
+                "pady": 20,
+                "fill": "both",
+                "expand": true
+              }
+            ]
+          },
+          "configs": [],
+          "line": 67
+        }
+      ],
+      "order": [
+        "frame",
+        "traditional_btn",
+        "enhanced_btn",
+        "explanation_frame"
+      ],
+      "window_titles": [
+        "Trading Dialogs Comparison"
+      ],
+      "menu_items": [],
+      "texts": [
+        "🔄 Traditional Trading\n(Properties + Money only)",
+        "🔄⚡ Enhanced Trading\n(Properties + Money + Function Blocks)",
+        "What's the difference?"
+      ],
+      "colors": [],
+      "fonts": []
+    }
+  ]
+}

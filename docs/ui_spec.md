@@ -1,0 +1,838 @@
+# Legacy Tkinter UI Spec (Extracted)
+## Summary
+- Colors: #27ae60, #2980b9, #2c3e50, #34495e, #666666, #7f8c8d, #8e44ad, #95a5a6, #c0392b, #e74c3c, #ecf0f1, #f0f0f0, #f39c12, blue, gray, green, lightblue, lightgreen, red, white, yellow
+- Fonts: ['Arial', 10, 'bold'], ['Arial', 10, 'italic'], ['Arial', 10], ['Arial', 11, 'bold'], ['Arial', 11], ['Arial', 12, 'bold'], ['Arial', 12], ['Arial', 14, 'bold'], ['Arial', 14], ['Arial', 16, 'bold'], ['Arial', 8, 'bold'], ['Arial', 8], ['Arial', 9, 'bold'], ['Arial', 9]
+- Sample labels/buttons:
+  -  ➜ 
+  - ${expr}
+  - (Observing)
+  - Add Payment
+  - Available: ${expr}
+  - Close
+  - Current Status
+  - Drag function blocks here
+  - Enhanced Trade: {expr} ↔ {expr}
+  - From: {expr}
+  - Function Blocks
+  - Function Blocks to Request
+  - Functions to bring to this deal
+  - Money
+  - Money Exchange
+  - No pending trades
+  - Nothing
+  - Offering:
+  - Pending Payments
+  - Players Overview
+  - Properties
+  - Properties to Request
+  - Property Details
+  - Proposed at: {expr}
+  - Remove
+  - Requesting:
+  - Selected Functions Summary
+  - Timing
+  - To: {expr}
+  - Trade #{expr}
+  - Trade Details
+  - Trade Proposal #{expr}
+  - Trade Summary
+  - What's the difference?
+  - Your Offer ({expr})
+  - Your Request (from {expr})
+  - {expr} (${expr})
+  - {expr} will pay {expr}
+  - {expr} {expr}
+  - {expr}🏠{expr}
+  - ×
+  - ℹ️ Special Space
+  - ⚙️ Block Settings
+  - ⚡ Advanced Function Blocks
+  - ⚡ Advanced Terms:
+  - ⚡ {expr}'s Terms:
+  - ✅ Accept Trade
+  - ❌ Close
+  - ❌ Reject Trade
+  - ➕ Create New Trade
+  - 🏚️ Sell House (+${expr})
+  - 🏠 Buy House (${expr})
+  - 🏠 Properties to Request
+  - 🏠 Rent Information
+  - 🏠 {expr}
+  - 🏦 Mortgage (+${expr})
+  - 🏦 Sell to Bank ($0)
+  - 👁️ View Details
+  - 👤 Ownership
+  - 💰 ${expr}
+  - 💰 Money to Request
+  - 💰 Property Information
+  - 💰 Traditional Exchange
+  - 💰 {expr}
+  - 💳 Unmortgage (-${expr})
+  - 📊 Trade Details
+  - 📤 Create New Trade
+  - 📤 Your Offer
+  - 📤 {expr}'s Offer
+  - 📥 Partner's Offer
+  - 📥 Your Request
+  - 📦 Available Blocks
+  - 📬 Pending Trades for {expr}
+  - 🔄 Refresh
+  - 🔄 Refresh Pending Trades
+  - 🔄⚡ Combined Trading System
+  - 🔙 Withdraw Trade
+  - 🔨 Build Your Deal
+  - 🙋 {expr} (You)
+  - 🤝 Trading Partner
+
+## File: ../docs/old_ui_dump/board_demo.py
+- Window titles:
+  - Monopoly Board - Responsive Display Test
+- Widgets:
+  - Frame `demo_frame` (parent=self.root, line=42)
+    - bg='#2c3e50'
+    - pack({'padx': 10, 'pady': 5})
+  - Label `demo_label` (parent=demo_frame, line=45)
+    - text='🎯 Responsive Monopoly Board Demo - Resize window to see scaling in action!'; bg='#2c3e50'; font=['Arial', 12, 'bold']
+    - pack({})
+  - Label `info_label` (parent=demo_frame, line=50)
+    - text='✓ Board auto-scales to fit screen ✓ All 40 spaces visible ✓ Player tokens scale ✓ Industry-standard responsive design'; bg='#2c3e50'; font=['Arial', 9]
+    - pack({})
+  - Label `instructions` (parent=self.root, line=114)
+    - text='Try resizing this window to see the responsive board scaling!'; bg='#2c3e50'; font=['Arial', 10]
+    - pack({'pady': 5})
+
+## File: ../docs/old_ui_dump/complete_function_blocks_test.py
+- Window titles:
+  - 🎯 Complete Function Blocks Test - WORKING SYSTEM!
+
+## File: ../docs/old_ui_dump/debug_enhanced_button.py
+- Window titles:
+  - 🔍 Enhanced Trade Button Debug
+- Widgets:
+  - Frame `debug_frame` (parent=root, line=73)
+    - bg='red'
+    - pack({'pady': 10})
+  - Button `debug_btn` (parent=debug_frame, line=76)
+    - text='🔍 DEBUG: Test Enhanced Trade Button'; bg='yellow'; font=['Arial', 12, 'bold']
+    - pack({'pady': 5})
+
+## File: ../docs/old_ui_dump/definitive_working_demo.py
+- Window titles:
+  - 🚀 Super Simple Enhanced Trading - WORKING SYSTEM!
+
+## File: ../docs/old_ui_dump/final_enhanced_trade_demo.py
+- Parse error: SyntaxError: unterminated string literal (detected at line 136) (final_enhanced_trade_demo.py, line 136)
+
+## File: ../docs/old_ui_dump/final_integration_test.py
+- Window titles:
+  - 🎯 Final Combined Trading Integration Test
+
+## File: ../docs/old_ui_dump/final_super_simple_test.py
+
+## File: ../docs/old_ui_dump/final_verification_test.py
+- Window titles:
+  - 🔍 FINAL VERIFICATION - Enhanced Trading Test
+
+## File: ../docs/old_ui_dump/full_integration_test.py
+
+## File: ../docs/old_ui_dump/monopoly_launcher.py
+
+## File: ../docs/old_ui_dump/src/advanced_trading.py
+- Window titles:
+  - Advanced Trading System
+- Widgets:
+  - Notebook `notebook` (parent=self.dialog, line=66)
+    - pack({'expand': True, 'padx': 10, 'pady': 10})
+  - Frame `main_container` (parent=self.combined_frame, line=82)
+    - pack({'expand': True, 'padx': 10, 'pady': 10})
+  - Frame `top_section` (parent=main_container, line=86)
+    - pack({'pady': [0, 10]})
+  - LabelFrame `partner_frame` (parent=top_section, line=90)
+    - text='🤝 Trading Partner'
+    - pack({'pady': [0, 10]})
+  - LabelFrame `trad_frame` (parent=top_section, line=103)
+    - text='💰 Traditional Exchange'
+    - pack({})
+  - Frame `offer_section` (parent=trad_frame, line=107)
+    - pack({'expand': True, 'padx': [0, 10]})
+  - Frame `money_offer_frame` (parent=offer_section, line=117)
+    - pack({'pady': 2})
+  - Frame `want_section` (parent=trad_frame, line=125)
+    - pack({'expand': True, 'padx': [10, 0]})
+  - Frame `money_request_frame` (parent=want_section, line=135)
+    - pack({'pady': 2})
+  - LabelFrame `bottom_section` (parent=main_container, line=143)
+    - text='⚡ Advanced Function Blocks'
+    - pack({'expand': True})
+  - Frame `side_frame` (parent=bottom_section, line=147)
+    - pack({'pady': [0, 10]})
+  - Radiobutton `proposer_radio` (parent=side_frame, line=153)
+    - text='🙋 {expr} (You)'
+    - pack({'padx': [10, 5]})
+  - Frame `blocks_container` (parent=bottom_section, line=164)
+    - pack({'expand': True})
+  - LabelFrame `blocks_frame` (parent=blocks_container, line=168)
+    - text='📦 Available Blocks'
+    - pack({'padx': [0, 5]})
+  - Canvas `blocks_canvas` (parent=blocks_frame, line=172)
+    - bg='#34495e'
+    - pack({'expand': True})
+  - Scrollbar `blocks_scrollbar` (parent=blocks_frame, line=173)
+    - pack({})
+  - LabelFrame `construction_frame` (parent=blocks_container, line=186)
+    - text='🔨 Build Your Deal'
+    - pack({'expand': True, 'padx': 5})
+  - LabelFrame `properties_frame` (parent=blocks_container, line=203)
+    - text='⚙️ Block Settings'
+    - pack({'padx': [5, 0]})
+  - Checkbutton `cb` (parent=self.request_properties_frame, line=254)
+    - pack({})
+  - Frame `category_frame` (parent=self.blocks_container, line=338)
+    - bg='#2c3e50'
+    - pack({'pady': [10, 5]})
+  - Label `category_label` (parent=category_frame, line=341)
+    - bg='#2c3e50'; font=['Arial', 10, 'bold']
+    - pack({})
+  - Frame `separator` (parent=self.blocks_container, line=347)
+    - bg='#34495e'
+    - pack({'pady': [0, 5]})
+  - Frame `block_frame` (parent=self.blocks_container, line=352)
+    - pack({'pady': 2, 'padx': 2})
+  - Label `label` (parent=block_frame, line=357)
+    - font=['Arial', 9, 'bold']
+    - pack({'pady': 5})
+  - Frame `var_frame` (parent=self.block_settings_container, line=484)
+    - pack({'pady': 2})
+  - Entry `var_widget` (parent=var_frame, line=509)
+    - pack({})
+  - Frame `summary_frame` (parent=self.summary_frame, line=572)
+    - pack({'expand': True, 'padx': 10, 'pady': 10})
+  - Scrollbar `summary_scroll` (parent=summary_frame, line=580)
+    - pack({})
+  - Frame `button_frame` (parent=self.summary_frame, line=587)
+    - pack({'padx': 10, 'pady': 10})
+
+## File: ../docs/old_ui_dump/src/combined_trading.py
+- Window titles:
+  - Combined Trading System
+- Widgets:
+  - Frame `main_frame` (parent=self.dialog, line=69)
+    - pack({'expand': True, 'padx': 15, 'pady': 15})
+  - Label `title_label` (parent=main_frame, line=73)
+    - text='🔄⚡ Combined Trading System'; font=['Arial', 16, 'bold']
+    - pack({'pady': [0, 15]})
+  - Frame `header_frame` (parent=main_frame, line=78)
+    - pack({'pady': [0, 15]})
+  - Combobox `partner_combo` (parent=header_frame, line=83)
+    - font=['Arial', 10]
+    - pack({'padx': [10, 0]})
+  - Notebook `notebook` (parent=main_frame, line=94)
+    - pack({'expand': True})
+  - LabelFrame `offer_frame` (parent=self.traditional_frame, line=143)
+    - text="📤 {expr}'s Offer"
+    - grid({'row': 0, 'column': 0, 'sticky': 'nsew', 'padx': [0, 5]})
+  - Frame `arrow_frame` (parent=self.traditional_frame, line=148)
+    - grid({'row': 0, 'column': 1, 'sticky': 'ns', 'padx': 10})
+  - LabelFrame `request_frame` (parent=self.traditional_frame, line=153)
+    - text="📥 Partner's Offer"
+    - grid({'row': 0, 'column': 2, 'sticky': 'nsew', 'padx': [5, 0]})
+  - LabelFrame `prop_frame` (parent=self.request_content_frame, line=275)
+    - text='🏠 Properties to Request'
+    - pack({'expand': True, 'pady': [0, 5]})
+  - Canvas `canvas` (parent=prop_frame, line=279)
+    - pack({'expand': True, 'padx': 5, 'pady': 5})
+  - Scrollbar `scrollbar` (parent=prop_frame, line=280)
+    - pack({})
+  - Frame `scrollable_frame` (parent=canvas, line=281)
+  - Checkbutton `checkbox` (parent=scrollable_frame, line=302)
+    - text='{expr} (${expr})'
+    - grid({'column': 0, 'sticky': 'w', 'padx': 5, 'pady': 2})
+  - LabelFrame `money_frame` (parent=self.request_content_frame, line=314)
+    - text='💰 Money to Request'
+    - pack({'pady': [5, 0]})
+  - Entry `amount_entry` (parent=money_frame, line=214)
+    - grid({'row': 0, 'column': 1, 'padx': 5, 'pady': 5})
+  - Scale `money_slider` (parent=money_frame, line=220)
+    - grid({'row': 0, 'column': 2, 'sticky': 'ew', 'padx': 5, 'pady': 5})
+  - Frame `quick_frame` (parent=money_frame, line=336)
+    - pack({'pady': 5})
+  - Button `btn` (parent=quick_frame, line=351)
+    - grid({'row': 0, 'padx': 2})
+  - Label `available_label` (parent=money_frame, line=356)
+    - text='Available: ${expr}'; font=['Arial', 8]
+    - pack({'pady': [0, 5]})
+  - Frame `money_entry_frame` (parent=money_frame, line=317)
+    - pack({'padx': 5, 'pady': 5})
+  - Entry `request_entry` (parent=money_entry_frame, line=324)
+    - grid({'row': 0, 'column': 1, 'padx': 5})
+  - Scale `request_slider` (parent=money_entry_frame, line=330)
+    - grid({'row': 0, 'column': 2, 'sticky': 'ew', 'padx': 5})
+  - Frame `container` (parent=self.blocks_frame, line=366)
+    - grid({'row': 0, 'column': 0, 'sticky': 'nsew'})
+  - Label `note` (parent=container, line=371)
+    - text="Select the functions to include in this deal.\nNote: 'Turns' means payer rounds — the payment runs at the start of the payer's turn."
+    - grid({'row': 0, 'column': 0, 'sticky': 'w', 'pady': [0, 10]})
+  - LabelFrame `funcs` (parent=container, line=382)
+    - text='Functions to bring to this deal'
+    - grid({'row': 1, 'column': 0, 'sticky': 'ew'})
+  - Frame `payer_row` (parent=funcs, line=386)
+    - pack({'fill': 'x', 'pady': [0, 6]})
+  - Frame `pay_row` (parent=funcs, line=394)
+    - pack({'fill': 'x', 'pady': 4})
+  - Frame `turns_row` (parent=funcs, line=406)
+    - pack({'fill': 'x', 'pady': 4})
+  - Frame `legacy_row` (parent=funcs, line=418)
+    - pack({'fill': 'x', 'pady': 4})
+  - LabelFrame `preview` (parent=container, line=433)
+    - text='Selected Functions Summary'
+    - grid({'row': 2, 'column': 0, 'sticky': 'ew', 'pady': [10, 0]})
+  - Scrollbar `summary_scrollbar` (parent=self.summary_frame, line=470)
+    - grid({'row': 0, 'column': 1, 'sticky': 'ns'})
+  - Frame `button_frame` (parent=self.summary_frame, line=478)
+    - grid({'row': 1, 'column': 0, 'columnspan': 2, 'sticky': 'ew', 'pady': [10, 0]})
+
+## File: ../docs/old_ui_dump/src/enhanced_trading.py
+- Window titles:
+  - Enhanced Trading - Properties & Function Blocks
+- Widgets:
+  - Frame `main_frame` (parent=self.dialog, line=66)
+    - pack({'expand': True, 'padx': 10, 'pady': 10})
+  - Frame `title_frame` (parent=main_frame, line=70)
+    - pack({'pady': [0, 10]})
+  - Frame `partner_frame` (parent=title_frame, line=77)
+    - pack({})
+  - Combobox `partner_combo` (parent=partner_frame, line=84)
+    - pack({})
+  - Frame `trading_frame` (parent=main_frame, line=91)
+    - pack({'expand': True, 'pady': [0, 10]})
+  - LabelFrame `offer_frame` (parent=trading_frame, line=95)
+    - text='📤 Your Offer'
+    - pack({'expand': True, 'padx': [0, 5]})
+  - LabelFrame `request_frame` (parent=trading_frame, line=99)
+    - text='📥 Your Request'
+    - pack({'expand': True, 'padx': [5, 0]})
+  - LabelFrame `props_frame` (parent=parent, line=161)
+    - text='Properties'
+    - pack({'expand': True, 'pady': [0, 5]})
+  - Canvas `props_canvas` (parent=props_frame, line=165)
+    - pack({'expand': True})
+  - Scrollbar `props_scrollbar` (parent=props_frame, line=166)
+    - pack({})
+  - LabelFrame `money_frame` (parent=parent, line=177)
+    - text='Money'
+    - pack({'pady': [5, 5]})
+  - Frame `money_subframe` (parent=money_frame, line=180)
+    - pack({'padx': 5, 'pady': 5})
+  - Entry `money_entry` (parent=money_subframe, line=185)
+    - pack({'padx': [2, 0]})
+  - LabelFrame `blocks_frame` (parent=parent, line=189)
+    - text='Function Blocks'
+    - pack({'expand': True, 'pady': [5, 0]})
+  - Label `drop_label` (parent=self.request_blocks_frame, line=197)
+    - text='Drag function blocks here'; bg='#f0f0f0'; font=['Arial', 10, 'italic']
+    - pack({'expand': True})
+  - LabelFrame `palette_frame` (parent=parent, line=206)
+    - text='📦 Function Blocks Palette (Drag to add)'
+    - pack({'pady': [10, 0]})
+  - Frame `blocks_container` (parent=palette_frame, line=210)
+    - pack({'padx': 10, 'pady': 10})
+  - Frame `block_frame` (parent=parent, line=226)
+    - pack({'padx': 10, 'pady': 5})
+  - Frame `content_frame` (parent=block_frame, line=230)
+    - pack({'padx': 8, 'pady': 6})
+  - Frame `header_frame` (parent=block_container, line=338)
+    - pack({'padx': 5, 'pady': 3})
+  - Label `icon_label` (parent=header_frame, line=237)
+    - font=['Arial', 14]
+    - pack({})
+  - Label `name_label` (parent=header_frame, line=241)
+    - font=['Arial', 10, 'bold']
+    - pack({'padx': [5, 0]})
+  - Label `desc_label` (parent=content_frame, line=246)
+    - font=['Arial', 8]
+    - pack({})
+  - Label `placeholder` (parent=container, line=322)
+    - text='Drag function blocks here'; bg='#f0f0f0'; font=['Arial', 10, 'italic']
+    - pack({'expand': True})
+  - Frame `block_container` (parent=parent, line=334)
+    - pack({'padx': 2, 'pady': 2})
+  - Button `remove_btn` (parent=header_frame, line=348)
+    - text='×'; bg='#e74c3c'; font=['Arial', 8, 'bold']
+    - pack({})
+  - Frame `input_frame` (parent=block_container, line=371)
+    - pack({'padx': 5, 'pady': 2})
+  - Entry `turns_entry` (parent=input_frame, line=362)
+    - font=['Arial', 8]
+    - pack({'padx': [5, 0]})
+  - Entry `amount_entry` (parent=input_frame, line=378)
+    - font=['Arial', 8]
+    - pack({'padx': [5, 0]})
+  - Checkbutton `cb` (parent=self.request_props_frame, line=426)
+    - text='{expr} (${expr})'
+    - pack({'pady': 1})
+  - Frame `buttons_frame` (parent=parent, line=434)
+    - pack({'pady': [10, 0]})
+
+## File: ../docs/old_ui_dump/src/enhanced_trading_new.py
+- Window titles:
+  - Enhanced Trade with {expr}
+- Widgets:
+  - Frame `header_frame` (parent=block_frame, line=265)
+    - pack({'fill': 'x', 'padx': 5, 'pady': 2})
+  - Frame `main_frame` (parent=self.dialog, line=93)
+    - pack({'fill': 'both', 'expand': True, 'padx': 10, 'pady': 5})
+  - LabelFrame `left_frame` (parent=main_frame, line=97)
+    - text='Your Offer ({expr})'
+    - pack({'side': 'left', 'fill': 'both', 'expand': True, 'padx': [0, 5]})
+  - LabelFrame `right_frame` (parent=main_frame, line=100)
+    - text='Your Request (from {expr})'
+    - pack({'side': 'right', 'fill': 'both', 'expand': True, 'padx': [5, 0]})
+  - LabelFrame `props_frame` (parent=parent, line=164)
+    - text='Properties to Request'
+    - pack({'fill': 'both', 'expand': True, 'padx': 5, 'pady': 5})
+  - Canvas `props_canvas` (parent=props_frame, line=168)
+    - bg='white'
+    - pack({'side': 'left', 'fill': 'both', 'expand': True})
+  - Scrollbar `props_scrollbar` (parent=props_frame, line=169)
+    - pack({'side': 'right', 'fill': 'y'})
+  - Frame `money_frame` (parent=parent, line=182)
+    - pack({'fill': 'x', 'padx': 5, 'pady': 5})
+  - LabelFrame `blocks_frame` (parent=parent, line=189)
+    - text='Function Blocks to Request'
+    - pack({'fill': 'both', 'expand': True, 'padx': 5, 'pady': 5})
+  - Frame `palette_frame` (parent=blocks_frame, line=193)
+    - pack({'fill': 'x', 'pady': 5})
+  - Frame `blocks_palette` (parent=palette_frame, line=197)
+    - pack({'fill': 'x', 'pady': 5})
+  - Button `block_button` (parent=parent, line=212)
+    - text='{expr} {expr}'
+    - pack({'side': 'left', 'padx': 2, 'pady': 2})
+  - Frame `block_frame` (parent=parent, line=261)
+    - pack({'fill': 'x', 'padx': 2, 'pady': 2})
+  - Frame `vars_frame` (parent=block_frame, line=277)
+    - pack({'fill': 'x', 'padx': 5, 'pady': 2})
+  - Frame `var_frame` (parent=vars_frame, line=281)
+    - pack({'fill': 'x', 'pady': 1})
+  - Entry `var_entry` (parent=var_frame, line=286)
+    - pack({'side': 'right'})
+  - Checkbutton `cb` (parent=self.requested_props_frame, line=333)
+    - pack({'anchor': 'w', 'padx': 5, 'pady': 1})
+  - Frame `button_frame` (parent=self.dialog, line=340)
+    - pack({'fill': 'x', 'padx': 10, 'pady': 10})
+
+## File: ../docs/old_ui_dump/src/game.py
+
+## File: ../docs/old_ui_dump/src/gui.py
+- Window titles:
+  - Monopoly Game
+  - Game Log
+  - warmup
+  - Trade Details
+  - Property Card: {expr}
+  - Manage Payments - {expr}
+- Widgets:
+  - Frame `main_frame` (parent=dialog, line=1596)
+    - pack({'expand': True, 'fill': 'both', 'padx': 20, 'pady': 20})
+  - Frame `right_panel` (parent=main_frame, line=113)
+    - grid({'row': 0, 'column': 1, 'sticky': 'nsew'})
+  - Frame `board_container` (parent=parent, line=140)
+    - grid({'row': 0, 'column': 0, 'sticky': 'nsew', 'padx': 5, 'pady': 5})
+  - Label `title_label` (parent=main_frame, line=1200)
+    - text='📊 Trade Details'; font=['Arial', 16, 'bold']
+    - pack({'pady': [0, 15]})
+  - Frame `controls_frame` (parent=parent, line=372)
+    - grid({'row': 2, 'column': 0, 'sticky': 'ew', 'pady': [0, 10]})
+  - Frame `save_load_frame` (parent=controls_frame, line=408)
+    - grid({'row': 6, 'column': 0, 'sticky': 'ew', 'pady': 1})
+  - Frame `dice_frame` (parent=parent, line=425)
+    - grid({'row': 3, 'column': 0, 'sticky': 'ew', 'pady': [0, 10]})
+  - Frame `players_container` (parent=parent, line=604)
+    - grid({'row': 4, 'column': 0, 'sticky': 'nsew', 'pady': [0, 10]})
+  - Frame `trades_frame` (parent=parent, line=623)
+    - grid({'row': 5, 'column': 0, 'sticky': 'ew', 'pady': [5, 0]})
+  - Frame `trades_title_frame` (parent=trades_frame, line=628)
+    - grid({'row': 0, 'column': 0, 'sticky': 'ew'})
+  - Frame `trades_container` (parent=parent, line=863)
+    - grid({'row': 2, 'column': 0, 'sticky': 'nsew', 'pady': [5, 0]})
+  - Frame `title_frame` (parent=parent, line=838)
+    - grid({'row': 0, 'column': 0, 'sticky': 'ew', 'pady': [0, 5]})
+  - Scrollbar `trades_scrollbar` (parent=trades_container, line=871)
+    - grid({'row': 0, 'column': 1, 'sticky': 'ns'})
+  - Frame `trade_frame` (parent=parent, line=934)
+    - pack({'fill': 'x', 'padx': 2, 'pady': 1})
+  - Label `trade_label` (parent=trade_frame, line=950)
+    - font=['Arial', 8]
+    - pack({'anchor': 'w', 'padx': 5, 'pady': 2})
+  - Label `header` (parent=self.players_frame, line=778)
+    - text='Players Overview'; font=['Arial', 12, 'bold']
+    - grid({'row': 0, 'column': 0, 'columnspan': 3, 'sticky': 'w', 'pady': [0, 6], 'padx': [2, 2]})
+  - Frame `tile` (parent=self.players_frame, line=797)
+    - grid({'sticky': 'ew', 'padx': 2, 'pady': 2})
+  - Canvas `dot` (parent=tile, line=809)
+    - grid({'row': 0, 'column': 0, 'sticky': 'w'})
+  - Label `name` (parent=tile, line=814)
+    - grid({'row': 0, 'column': 1, 'sticky': 'w', 'padx': [6, 4]})
+  - Label `cash` (parent=tile, line=817)
+    - text='${expr}'
+    - grid({'row': 0, 'column': 2, 'sticky': 'e', 'padx': [6, 4]})
+  - Label `props_lbl` (parent=tile, line=822)
+    - text='{expr}🏠{expr}'
+    - grid({'row': 0, 'column': 3, 'sticky': 'e'})
+  - Frame `actions_frame` (parent=parent, line=846)
+    - grid({'row': 1, 'column': 0, 'sticky': 'ew', 'pady': [0, 5]})
+  - Label `no_trades_label` (parent=self.trades_frame, line=902)
+    - text="No pending trades\nUse 'Trade Properties' button\nto create new trades"; font=['Arial', 10]
+    - pack({'pady': 20})
+  - Toplevel `win` (parent=self.root, line=1103)
+  - Frame `frame` (parent=win, line=1117)
+    - pack({'expand': True})
+  - Text `text` (parent=frame, line=1122)
+    - grid({'row': 0, 'column': 0, 'sticky': 'nsew'})
+  - Scrollbar `scroll` (parent=frame, line=1123)
+    - grid({'row': 0, 'column': 1, 'sticky': 'ns'})
+  - Toplevel `w` (parent=self.root, line=1165)
+  - Toplevel `details_dialog` (parent=self.root, line=1183)
+  - LabelFrame `summary_frame` (parent=main_frame, line=1205)
+    - text='Trade Summary'
+    - pack({'fill': 'x', 'pady': [0, 10]})
+  - Label `summary_label` (parent=summary_frame, line=1209)
+    - font=['Arial', 11]
+    - pack({'anchor': 'w'})
+  - LabelFrame `timing_frame` (parent=main_frame, line=1214)
+    - text='Timing'
+    - pack({'fill': 'x', 'pady': [0, 10]})
+  - LabelFrame `props_frame` (parent=main_frame, line=1226)
+    - text='Property Details'
+    - pack({'fill': 'x', 'pady': [0, 10]})
+  - LabelFrame `money_frame` (parent=main_frame, line=1245)
+    - text='Money Exchange'
+    - pack({'fill': 'x', 'pady': [0, 10]})
+  - Toplevel `dialog` (parent=self.root, line=1583)
+  - Frame `header_frame` (parent=main_frame, line=1287)
+    - pack({'fill': 'x', 'pady': [0, 10]})
+  - Label `name_label` (parent=header_frame, line=1292)
+    - font=['Arial', 14, 'bold']
+    - pack({'expand': True})
+  - Frame `details_frame` (parent=main_frame, line=1297)
+    - bg='#2c3e50'
+    - pack({'fill': 'both', 'expand': True})
+  - LabelFrame `price_frame` (parent=details_frame, line=1302)
+    - text='💰 Property Information'; bg='#34495e'; font=['Arial', 10, 'bold']
+    - pack({'fill': 'x', 'pady': [0, 10], 'padx': 5})
+  - LabelFrame `rent_frame` (parent=details_frame, line=1316)
+    - text='🏠 Rent Information'; bg='#34495e'; font=['Arial', 10, 'bold']
+    - pack({'fill': 'x', 'pady': [0, 10], 'padx': 5})
+  - LabelFrame `owner_frame` (parent=details_frame, line=1348)
+    - text='👤 Ownership'; bg='#34495e'; font=['Arial', 10, 'bold']
+    - pack({'fill': 'x', 'pady': [0, 10], 'padx': 5})
+  - LabelFrame `special_frame` (parent=details_frame, line=1366)
+    - text='ℹ️ Special Space'; bg='#34495e'; font=['Arial', 10, 'bold']
+    - pack({'fill': 'x', 'pady': [0, 10], 'padx': 5})
+  - Frame `button_frame` (parent=main_frame, line=1618)
+    - pack({'fill': 'x'})
+  - Button `buy_house_btn` (parent=button_frame, line=1440)
+    - text='🏠 Buy House (${expr})'; bg='#27ae60'; font=['Arial', 10, 'bold']
+    - pack({'side': 'left', 'padx': [0, 10]})
+  - Button `sell_house_btn` (parent=button_frame, line=1443)
+    - text='🏚️ Sell House (+${expr})'; bg='#c0392b'; font=['Arial', 10, 'bold']
+    - pack({'side': 'left', 'padx': [0, 10]})
+  - Button `mort_btn` (parent=button_frame, line=1448)
+    - text='🏦 Mortgage (+${expr})'; bg='#8e44ad'; font=['Arial', 10, 'bold']
+    - pack({'side': 'left', 'padx': [0, 10]})
+  - Button `unmort_btn` (parent=button_frame, line=1452)
+    - text='💳 Unmortgage (-${expr})'; bg='#2980b9'; font=['Arial', 10, 'bold']
+    - pack({'side': 'left', 'padx': [0, 10]})
+  - Button `sell_btn` (parent=button_frame, line=1469)
+    - text='🏦 Sell to Bank ($0)'; bg='#7f8c8d'; font=['Arial', 10, 'bold']
+    - pack({'side': 'left', 'padx': [0, 10]})
+  - Button `close_btn` (parent=button_frame, line=1473)
+    - text='❌ Close'; bg='#e74c3c'; font=['Arial', 10, 'bold']
+    - pack({'side': 'right'})
+  - LabelFrame `status_frame` (parent=main_frame, line=1600)
+    - text='Current Status'
+    - pack({'fill': 'x', 'pady': [0, 10]})
+  - LabelFrame `payments_frame` (parent=main_frame, line=1607)
+    - text='Pending Payments'
+    - pack({'fill': 'both', 'expand': True, 'pady': [0, 10]})
+  - Listbox `payments_listbox` (parent=payments_frame, line=1611)
+    - pack({'fill': 'both', 'expand': True, 'pady': [0, 10]})
+
+## File: ../docs/old_ui_dump/src/save_load.py
+
+## File: ../docs/old_ui_dump/src/super_simple_enhanced.py
+- Window titles:
+  - Enhanced Trade with {expr}
+- Widgets:
+  - Frame `main_frame` (parent=self.dialog, line=59)
+    - pack({'fill': 'both', 'expand': True, 'padx': 10, 'pady': 10})
+  - Label `title_label` (parent=main_frame, line=63)
+    - text='Enhanced Trade: {expr} ↔ {expr}'; font=['Arial', 14, 'bold']
+    - pack({'pady': [0, 10]})
+  - Notebook `notebook` (parent=main_frame, line=69)
+    - pack({'fill': 'both', 'expand': True})
+  - Frame `traditional_frame` (parent=notebook, line=73)
+  - Frame `blocks_frame` (parent=notebook, line=78)
+  - Frame `columns_frame` (parent=parent, line=88)
+    - pack({'fill': 'both', 'expand': True, 'padx': 10, 'pady': 10})
+  - LabelFrame `left_frame` (parent=sections_frame, line=133)
+    - text='{expr} will pay {expr}'
+    - pack({'side': 'left', 'fill': 'both', 'expand': True, 'padx': [0, 5]})
+  - LabelFrame `right_frame` (parent=sections_frame, line=139)
+    - text='{expr} will pay {expr}'
+    - pack({'side': 'right', 'fill': 'both', 'expand': True, 'padx': [5, 0]})
+  - Label `info_label` (parent=parent, line=123)
+    - text='Function Blocks: Create recurring payments using 2 simple blocks'; font=['Arial', 11, 'bold']
+    - pack({'pady': 10})
+  - Frame `sections_frame` (parent=parent, line=129)
+    - pack({'fill': 'both', 'expand': True, 'padx': 10, 'pady': 10})
+  - Entry `amount_entry` (parent=parent, line=149)
+    - pack({'anchor': 'w', 'padx': 5, 'pady': 2})
+  - Entry `turns_entry` (parent=parent, line=155)
+    - pack({'anchor': 'w', 'padx': 5, 'pady': 2})
+  - Button `add_btn` (parent=parent, line=192)
+    - text='Add Payment'
+    - pack({'pady': 10})
+  - Frame `display_frame` (parent=parent, line=196)
+    - pack({'fill': 'both', 'expand': True, 'padx': 5, 'pady': 5})
+  - Label `payment_label` (parent=display_frame, line=214)
+    - text='💰 {expr}'; bg='lightgreen'
+    - pack({'pady': 5})
+  - Button `remove_btn` (parent=display_frame, line=226)
+    - text='Remove'
+    - pack({})
+  - Checkbutton `cb` (parent=self.requested_props_frame, line=250)
+    - text='{expr} (${expr})'
+    - pack({'anchor': 'w', 'padx': 5, 'pady': 1})
+  - Frame `button_frame` (parent=parent, line=257)
+    - pack({'fill': 'x', 'pady': 10})
+
+## File: ../docs/old_ui_dump/src/trades_viewer.py
+- Window titles:
+  - All Pending Trades
+  - Trade Details
+- Widgets:
+  - Frame `main_frame` (parent=details_window, line=427)
+    - pack({'expand': True, 'padx': 20, 'pady': 20})
+  - Label `title_label` (parent=main_frame, line=431)
+    - text='Trade Details'; font=['Arial', 16, 'bold']
+    - pack({'pady': [0, 20]})
+  - Label `info_label` (parent=main_frame, line=89)
+    - font=['Arial', 10]
+    - pack({'pady': [0, 10]})
+  - Frame `buttons_frame` (parent=main_frame, line=96)
+    - pack({'pady': [10, 0]})
+  - Button `refresh_btn` (parent=buttons_frame, line=100)
+    - text='🔄 Refresh'
+    - pack({'padx': [0, 5]})
+  - Button `new_trade_btn` (parent=buttons_frame, line=105)
+    - text='➕ Create New Trade'
+    - pack({'padx': [0, 5]})
+  - Button `close_btn` (parent=main_frame, line=443)
+    - text='Close'
+    - pack({'pady': [10, 0]})
+  - Frame `scroll_frame` (parent=parent, line=120)
+    - pack({'expand': True})
+  - Canvas `canvas` (parent=scroll_frame, line=124)
+    - bg='white'
+    - pack({'side': 'left', 'fill': 'both', 'expand': True})
+  - Scrollbar `scrollbar` (parent=scroll_frame, line=125)
+    - pack({'side': 'right', 'fill': 'y'})
+  - Label `no_trades_label` (parent=self.trades_frame, line=169)
+    - font=['Arial', 12]
+    - pack({'pady': 20})
+  - LabelFrame `trade_frame` (parent=self.trades_frame, line=176)
+    - text='Trade #{expr}'
+    - pack({'pady': 5, 'padx': 10})
+  - Frame `participants_frame` (parent=trade_frame, line=182)
+    - pack({'pady': [0, 10]})
+  - Label `proposer_label` (parent=participants_frame, line=185)
+    - text='From: {expr}'; font=['Arial', 12, 'bold']
+    - pack({})
+  - Label `arrow_label` (parent=participants_frame, line=191)
+    - text=' ➜ '; font=['Arial', 12]
+    - pack({})
+  - Label `recipient_label` (parent=participants_frame, line=195)
+    - text='To: {expr}'; font=['Arial', 12, 'bold']
+    - pack({})
+  - Frame `details_frame` (parent=trade_frame, line=202)
+    - pack({'pady': [0, 10]})
+  - LabelFrame `offer_frame` (parent=details_frame, line=206)
+    - text='Offering:'
+    - pack({'expand': True, 'padx': [0, 5]})
+  - Label `prop_label` (parent=request_frame, line=228)
+    - text='🏠 {expr}'
+    - pack({})
+  - Label `money_label` (parent=request_frame, line=232)
+    - text='💰 ${expr}'
+    - pack({})
+  - Label `nothing_label` (parent=request_frame, line=236)
+    - text='Nothing'
+    - pack({})
+  - LabelFrame `request_frame` (parent=details_frame, line=223)
+    - text='Requesting:'
+    - pack({'expand': True, 'padx': [5, 0]})
+  - LabelFrame `advanced_frame` (parent=trade_frame, line=241)
+    - text='⚡ Advanced Terms:'
+    - pack({'pady': [10, 0]})
+  - Label `block_label` (parent=recipient_blocks_frame, line=289)
+    - pack({})
+  - LabelFrame `proposer_blocks_frame` (parent=trade_frame, line=259)
+    - text="⚡ {expr}'s Terms:"
+    - pack({'pady': [5, 0]})
+  - LabelFrame `recipient_blocks_frame` (parent=trade_frame, line=276)
+    - text="⚡ {expr}'s Terms:"
+    - pack({'pady': [5, 0]})
+  - Frame `actions_frame` (parent=trade_frame, line=293)
+    - pack({'pady': [10, 0]})
+  - Button `accept_btn` (parent=actions_frame, line=299)
+    - text='✅ Accept Trade'
+    - pack({'padx': [0, 5]})
+  - Button `reject_btn` (parent=actions_frame, line=303)
+    - text='❌ Reject Trade'
+    - pack({'padx': [0, 5]})
+  - Button `withdraw_btn` (parent=actions_frame, line=309)
+    - text='🔙 Withdraw Trade'
+    - pack({'padx': [0, 5]})
+  - Button `details_btn` (parent=actions_frame, line=314)
+    - text='👁️ View Details'
+    - pack({})
+  - Toplevel `details_window` (parent=self.dialog, line=413)
+  - Text `summary_text` (parent=main_frame, line=437)
+    - pack({'expand': True})
+
+## File: ../docs/old_ui_dump/src/trading.py
+- Window titles:
+  - Property Trading
+  - Trade Details
+  - Trade Proposal
+  - Trading Options
+  - All Pending Trades
+  - Pending Trades
+- Widgets:
+  - Frame `main_frame` (parent=self.dialog, line=1415)
+    - pack({'expand': True, 'padx': 15, 'pady': 15})
+  - Notebook `notebook` (parent=main_frame, line=1184)
+    - pack({'expand': True})
+  - Frame `header_frame` (parent=self.new_trade_frame, line=193)
+    - grid({'row': 0, 'column': 0, 'sticky': 'ew', 'pady': [0, 15]})
+  - Label `title_label` (parent=main_frame, line=1419)
+    - text='📬 Pending Trades for {expr}'; font=['Arial', 14, 'bold']
+    - pack({'pady': [0, 15]})
+  - Combobox `partner_combo` (parent=header_frame, line=206)
+    - font=['Arial', 10]
+    - grid({'row': 1, 'column': 1, 'sticky': 'ew', 'padx': [10, 0]})
+  - Frame `trade_container` (parent=self.new_trade_frame, line=223)
+    - grid({'row': 1, 'column': 0, 'sticky': 'nsew'})
+  - LabelFrame `offer_frame` (parent=trade_container, line=230)
+    - text="📤 {expr}'s Offer"
+    - grid({'row': 0, 'column': 0, 'sticky': 'nsew', 'padx': [0, 5]})
+  - Frame `arrow_frame` (parent=trade_container, line=235)
+    - grid({'row': 0, 'column': 1, 'sticky': 'ns', 'padx': 10})
+  - LabelFrame `request_frame` (parent=trade_container, line=240)
+    - text="📥 Partner's Offer"
+    - grid({'row': 0, 'column': 2, 'sticky': 'nsew', 'padx': [5, 0]})
+  - Frame `bottom_frame` (parent=self.new_trade_frame, line=248)
+    - grid({'row': 2, 'column': 0, 'sticky': 'ew', 'pady': [15, 0]})
+  - Frame `button_frame` (parent=trade_frame, line=1487)
+    - pack({'fill': 'x', 'pady': [10, 0]})
+  - Canvas `canvas` (parent=main_frame, line=1425)
+    - bg='#34495e'
+    - pack({'side': 'left', 'fill': 'both', 'expand': True})
+  - Scrollbar `scrollbar` (parent=main_frame, line=1426)
+    - pack({'side': 'right', 'fill': 'y'})
+  - Button `refresh_btn` (parent=self.pending_trades_frame, line=305)
+    - text='🔄 Refresh Pending Trades'
+    - grid({'row': 2, 'column': 0, 'pady': [10, 0]})
+  - Label `no_trades_label` (parent=self.scrollable_frame, line=1462)
+    - text='No pending trades'; font=['Arial', 12]
+    - pack({'pady': 20})
+  - LabelFrame `trade_frame` (parent=self.scrollable_frame, line=1475)
+    - text='Trade Proposal #{expr}'
+    - pack({'fill': 'x', 'padx': 10, 'pady': 5})
+  - Label `details_label` (parent=trade_frame, line=1481)
+    - pack({'anchor': 'w'})
+  - Toplevel `details_dialog` (parent=self.dialog, line=467)
+  - Text `details_text` (parent=details_frame, line=935)
+    - bg='#34495e'; font=['Arial', 10]
+    - pack({'expand': True})
+  - LabelFrame `prop_frame` (parent=self.request_content_frame, line=651)
+    - text='🏠 Properties to Request'
+    - pack({'expand': True, 'pady': [0, 5]})
+  - Frame `scrollable_frame` (parent=canvas, line=657)
+  - Checkbutton `checkbox` (parent=scrollable_frame, line=682)
+    - text='{expr} (${expr})'
+    - grid({'column': 0, 'sticky': 'w', 'padx': 5, 'pady': 2})
+  - LabelFrame `money_frame` (parent=self.request_content_frame, line=694)
+    - text='💰 Money to Request'
+    - pack({'pady': [5, 0]})
+  - Entry `amount_entry` (parent=money_frame, line=582)
+    - grid({'row': 0, 'column': 1, 'padx': 5, 'pady': 5})
+  - Scale `money_slider` (parent=money_frame, line=588)
+    - grid({'row': 0, 'column': 2, 'sticky': 'ew', 'padx': 5, 'pady': 5})
+  - Frame `quick_frame` (parent=money_frame, line=717)
+    - pack({'pady': 5})
+  - Button `btn` (parent=quick_frame, line=732)
+    - grid({'row': 0, 'padx': 2})
+  - Label `available_label` (parent=money_frame, line=743)
+    - text='Available: ${expr}'; font=['Arial', 8]
+    - pack({'pady': [0, 5]})
+  - Frame `money_entry_frame` (parent=money_frame, line=697)
+    - pack({'padx': 5, 'pady': 5})
+  - Entry `request_entry` (parent=money_entry_frame, line=705)
+    - grid({'row': 0, 'column': 1, 'padx': 5})
+  - Scale `request_slider` (parent=money_entry_frame, line=711)
+    - grid({'row': 0, 'column': 2, 'sticky': 'ew', 'padx': 5})
+  - Toplevel `proposal_dialog` (parent=self.dialog, line=900)
+  - Frame `from_to_frame` (parent=main_frame, line=922)
+    - pack({'pady': [0, 15]})
+  - LabelFrame `details_frame` (parent=main_frame, line=931)
+    - text='Trade Details'
+    - pack({'expand': True, 'pady': [0, 15]})
+  - Scrollbar `details_scrollbar` (parent=details_frame, line=937)
+    - pack({})
+  - LabelFrame `pending_frame` (parent=main_frame, line=1102)
+    - text='📬 You have {expr} pending trade(s)!'
+    - pack({'fill': 'x', 'pady': [0, 20]})
+  - LabelFrame `new_trade_frame` (parent=main_frame, line=1112)
+    - text='📤 Create New Trade'
+    - pack({'fill': 'both', 'expand': True})
+  - Frame `player_frame` (parent=new_trade_frame, line=1120)
+    - pack({'fill': 'x', 'pady': 5})
+  - Label `summary_label` (parent=trade_frame, line=1307)
+    - font=['Arial', 10]
+    - pack({'anchor': 'w'})
+  - Label `time_label` (parent=trade_frame, line=1314)
+    - text='Proposed at: {expr}'; font=['Arial', 9]
+    - pack({'anchor': 'w', 'pady': [5, 0]})
+  - Label `status_label` (parent=trade_frame, line=1337)
+    - text='(Observing)'; font=['Arial', 9]
+    - pack({'anchor': 'e', 'pady': [5, 0]})
+
+## File: ../docs/old_ui_dump/super_simple_demo.py
+- Window titles:
+  - Super Simple Enhanced Trading - WORKING!
+
+## File: ../docs/old_ui_dump/test_combined_function_blocks.py
+
+## File: ../docs/old_ui_dump/test_dialog_difference.py
+- Window titles:
+  - Trading Dialog Comparison Test
+- Widgets:
+  - Frame `frame` (parent=root, line=31)
+    - pack({'expand': True, 'fill': 'both', 'padx': 20, 'pady': 20})
+
+## File: ../docs/old_ui_dump/test_enhanced_vs_traditional.py
+- Window titles:
+  - Trading Dialogs Comparison
+- Widgets:
+  - Frame `frame` (parent=root, line=29)
+    - pack({'expand': True, 'fill': 'both', 'padx': 20, 'pady': 20})
+  - Button `traditional_btn` (parent=frame, line=57)
+    - text='🔄 Traditional Trading\n(Properties + Money only)'
+    - pack({'pady': 10, 'fill': 'x'})
+  - Button `enhanced_btn` (parent=frame, line=62)
+    - text='🔄⚡ Enhanced Trading\n(Properties + Money + Function Blocks)'
+    - pack({'pady': 10, 'fill': 'x'})
+  - LabelFrame `explanation_frame` (parent=frame, line=67)
+    - text="What's the difference?"
+    - pack({'pady': 20, 'fill': 'both', 'expand': True})

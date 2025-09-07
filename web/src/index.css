@@ -1,0 +1,71 @@
+:root {
+  /* legacy UI variables */
+  --ui-bg: #ecf0f1;
+  --ui-surface: #f0f0f0;
+  --ui-text: #2c3e50;
+  --ui-muted: #7f8c8d;
+  --ui-border: #95a5a6;
+  --ui-primary: #2980b9;
+  --ui-success: #27ae60;
+  --ui-danger: #e74c3c;
+  --ui-warning: #f39c12;
+  --ui-dark: #2c3e50;
+
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color-scheme: light;
+  color: var(--ui-text);
+  background-color: var(--ui-bg);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button { font-family: inherit; cursor: pointer; }
+
+/* legacy-styled utilities */
+.ui-h1 { font-size: 16px; font-weight: bold; }
+.ui-h2 { font-size: 14px; font-weight: bold; }
+.ui-h3 { font-size: 12px; font-weight: bold; }
+.ui-sm { font-size: 9px; }
+.ui-xs { font-size: 8px; }
+
+.ui-labelframe { background: var(--ui-surface); border: 1px solid var(--ui-border); border-radius: 6px; padding: 10px 12px; }
+.ui-labelframe > .ui-title { display: inline-block; margin-top: -18px; background: var(--ui-surface); padding: 0 6px; color: var(--ui-dark); font-weight: bold; }
+
+.btn { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; border-radius: 4px; padding: 6px 10px; font-weight: bold; }
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--ui-primary); color: #fff; }
+.btn-success { background: var(--ui-success); color: #fff; }
+.btn-danger { background: var(--ui-danger); color: #fff; }
+.btn-warning { background: var(--ui-warning); color: #2c3e50; }
+.btn-ghost { background: transparent; color: var(--ui-text); border-color: var(--ui-border); border: 1px solid var(--ui-border); }
+
+.badge { display: inline-block; padding: 2px 6px; border-radius: 10px; font-size: 10px; }
+.badge-success { background: var(--ui-success); color: #fff; }
+.badge-danger { background: var(--ui-danger); color: #fff; }
+.badge-muted { background: var(--ui-border); color: var(--ui-text); }
+
+.actions-panel { background: var(--ui-bg); border-left: 1px solid var(--ui-border); padding: 12px; }
+
+.list { background: #fff; border: 1px solid var(--ui-border); border-radius: 4px; }
+.list-item { padding: 6px 8px; border-bottom: 1px solid var(--ui-surface); }
+.list-item:last-child { border-bottom: none; }

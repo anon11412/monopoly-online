@@ -1,0 +1,88 @@
+/* Legacy Tkinter theme mapped to web CSS variables and utility classes.
+   Copy/adapt these into your web app (e.g., src/index.css or App.css). */
+
+:root {
+  /* Flat UI–style palette from legacy Tk labels */
+  --ui-bg: #ecf0f1;           /* light background */
+  --ui-surface: #f0f0f0;      /* panels/cards */
+  --ui-text: #2c3e50;         /* primary text */
+  --ui-muted: #7f8c8d;        /* secondary text */
+  --ui-border: #95a5a6;       /* borders */
+
+  --ui-primary: #2980b9;      /* primary buttons/links */
+  --ui-success: #27ae60;      /* success/ready */
+  --ui-danger: #e74c3c;       /* danger/decline */
+  --ui-warning: #f39c12;      /* warning */
+  --ui-dark: #2c3e50;         /* dark header */
+}
+
+/* Typography: legacy uses Arial 8–16 with bold variants */
+body, button, input, select, textarea {
+  font-family: Arial, Helvetica, sans-serif;
+  color: var(--ui-text);
+}
+
+.ui-h1 { font-size: 16px; font-weight: bold; }
+.ui-h2 { font-size: 14px; font-weight: bold; }
+.ui-h3 { font-size: 12px; font-weight: bold; }
+.ui-sm { font-size: 9px; }
+.ui-xs { font-size: 8px; }
+
+/* Panels resembling Tk LabelFrame */
+.ui-labelframe {
+  background: var(--ui-surface);
+  border: 1px solid var(--ui-border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+.ui-labelframe > .ui-title {
+  display: inline-block;
+  margin-top: -18px; /* simulate LabelFrame caption */
+  background: var(--ui-surface);
+  padding: 0 6px;
+  color: var(--ui-dark);
+  font-weight: bold;
+}
+
+/* Buttons aligned with legacy colors */
+.btn { 
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 1px solid transparent; border-radius: 4px;
+  padding: 6px 10px; font-weight: bold; cursor: pointer;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--ui-primary); color: white; }
+.btn-success { background: var(--ui-success); color: white; }
+.btn-danger  { background: var(--ui-danger); color: white; }
+.btn-warning { background: var(--ui-warning); color: #2c3e50; }
+.btn-ghost   { background: transparent; color: var(--ui-text); border-color: var(--ui-border); }
+
+/* Dice and badges */
+.badge { display: inline-block; padding: 2px 6px; border-radius: 10px; font-size: 10px; }
+.badge-success { background: var(--ui-success); color: white; }
+.badge-danger  { background: var(--ui-danger); color: white; }
+.badge-muted   { background: var(--ui-border); color: var(--ui-text); }
+
+/* Right-side panel */
+.actions-panel {
+  background: var(--ui-bg);
+  border-left: 1px solid var(--ui-border);
+  padding: 12px;
+}
+
+/* Lists */
+.list {
+  background: white;
+  border: 1px solid var(--ui-border);
+  border-radius: 4px;
+}
+.list-item { padding: 6px 8px; border-bottom: 1px solid var(--ui-surface); }
+.list-item:last-child { border-bottom: none; }
+
+/* Trade modal/dialog headers */
+.dialog-header {
+  background: var(--ui-dark);
+  color: white;
+  padding: 8px 10px;
+  border-radius: 6px 6px 0 0;
+}
