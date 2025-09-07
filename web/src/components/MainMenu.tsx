@@ -15,6 +15,7 @@ export default function MainMenu({ onEnterLobby }: Props) {
   const [newLobbyName, setNewLobbyName] = useState('My Game');
   const [pendingJoinId, setPendingJoinId] = useState<string | null>(null);
   const [status, setStatus] = useState<string>('');
+  const lastLobbyId = (saved.lastLobbyId || '').trim();
 
   async function handleConnect() {
     await connectSocket(name);
@@ -37,6 +38,22 @@ export default function MainMenu({ onEnterLobby }: Props) {
   onEnterLobby(resp.lobby as LobbyInfo);
       }
     });
+  }
+
+  function rejoinLast() {
+    if (!lastLobbyId) return;
+    const s = getSocket();
+    joinLobby(lastLobbyId);
+    // Ensure server has our auth/name and then join; connect first if needed
+    if (!connected) {
+      connectSocket(name).then(() => {
+        s.emit('auth', { display: name });
+        s.emit('lobby_join', { id: lastLobbyId, lobby_id: lastLobbyId });
+      });
+    } else {
+      s.emit('auth', { display: name });
+      s.emit('lobby_join', { id: lastLobbyId, lobby_id: lastLobbyId });
+    }
   }
 
   function joinLobby(id: string) {
@@ -91,11 +108,19 @@ export default function MainMenu({ onEnterLobby }: Props) {
             Display name
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
-          <button onClick={handleConnect}>Connect</button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button onClick={handleConnect}>Connect</button>
+            {lastLobbyId ? <button onClick={rejoinLast} title={`Rejoin lobby ${lastLobbyId}`}>Rejoin Last Game</button> : null}
+          </div>
         </div>
       ) : (
         <div className="lobbies">
           {status ? <div style={{ fontSize: 12, opacity: 0.8 }}>{status}</div> : null}
+          {lastLobbyId ? (
+            <div className="rejoin" style={{ margin: '6px 0 10px' }}>
+              <button onClick={rejoinLast}>Rejoin Last Game</button>
+            </div>
+          ) : null}
           <div className="create">
             <input value={newLobbyName} onChange={(e) => setNewLobbyName(e.target.value)} />
             <button onClick={createLobby} disabled={creating}>Create Lobby</button>

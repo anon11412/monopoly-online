@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getSocket } from '../lib/socket';
+import { getSocket, getRemembered } from '../lib/socket';
 import TradePanel from './TradePanel';
 import type { GameSnapshot } from '../types';
 import { buildDefaultBoardTiles } from '../lib/boardFallback';
@@ -10,7 +10,8 @@ type Props = { lobbyId: string; snapshot: GameSnapshot };
 export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const s = getSocket();
   const me = snapshot.players?.[snapshot.current_turn];
-  const myName = me?.name || '';
+  const myName = (getRemembered().displayName || '').trim() || (me?.name || '');
+  const myPlayer = (snapshot.players || []).find(p => p.name === myName);
   const [showTrade, setShowTrade] = useState(false);
   const [showTradeAdvanced, setShowTradeAdvanced] = useState(false);
   const [showLog, setShowLog] = useState(false);
@@ -46,7 +47,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     const la: any = snapshot.last_action;
     if (['landed_on_unowned', 'offer_buy', 'can_buy'].includes(String(la?.type || ''))) return true;
     // fallback heuristic: if on a buyable tile with a price and no owner
-    const pos = me?.position ?? -1;
+    const pos = myPlayer?.position ?? -1;
     if (pos < 0) return false;
     const t = tiles[pos];
     if (!t) return false;
@@ -54,7 +55,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     if (!t.price || t.price <= 0) return false;
     const prop: any = (snapshot.properties as any)?.[pos];
     return !prop || !prop.owner;
-  }, [myTurn, snapshot.last_action, me?.position, tiles, snapshot.properties]);
+  }, [myTurn, snapshot.last_action, myPlayer?.position, tiles, snapshot.properties]);
 
   const lastDice = useMemo(() => {
     const la: any = snapshot.last_action;
@@ -101,9 +102,9 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
   // Derive current tile info for Buy UI
   const currentTile = useMemo(() => {
-    const pos = me?.position ?? -1;
+    const pos = myPlayer?.position ?? -1;
     return pos >= 0 ? tiles[pos] : undefined;
-  }, [me?.position, tiles]);
+  }, [myPlayer?.position, tiles]);
 
   return (
     <div className="actions actions-panel">
@@ -111,9 +112,9 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
         <div className="ui-title ui-h3">Current Turn</div>
         <div className="ui-h3" style={{ marginTop: 6 }}>Turn: {snapshot.players?.[snapshot.current_turn || 0]?.name ?? '\u2014'}</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-          <button className="btn btn-primary" disabled={!canRoll} onClick={() => act('roll_dice')}>🎲 Roll {lastDice ? <span style={{ marginLeft: 6, opacity: 0.8 }}>last: {lastDice}</span> : null}</button>
+          <button className="btn btn-primary" disabled={!canRoll} title={!myTurn ? 'Not your turn' : (rolledThisTurn && rollsLeft === 0 ? 'No rolls left' : undefined)} onClick={() => act('roll_dice')}>🎲 Roll {lastDice ? <span style={{ marginLeft: 6, opacity: 0.8 }}>last: {lastDice}</span> : null}</button>
           <button className="btn btn-success" disabled={!canBuy} onClick={() => act('buy_property')} title={canBuy && currentTile ? `${currentTile.name} — $${currentTile.price ?? 0}` : undefined}>🏠 Buy</button>
-          {me?.in_jail && (me?.jail_cards || 0) > 0 ? (
+          {myPlayer?.in_jail && (myPlayer?.jail_cards || 0) > 0 ? (
             <button className="btn btn-warning" onClick={() => act('use_jail_card')}>🪪 Use Jail Card</button>
           ) : null}
           <button className="btn btn-ghost" disabled={!canEndTurn} onClick={() => act('end_turn')}>⏭ End Turn</button>
