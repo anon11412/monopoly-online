@@ -76,6 +76,8 @@ class Lobby:
     sid_to_name: Dict[str, str] = field(default_factory=dict)
     ready: List[str] = field(default_factory=list)  # sids
     game: Optional[Game] = None
+    bots: List[str] = field(default_factory=list)  # bot player names
+    bot_task_running: bool = False
 
 
 # ---------------------------
@@ -94,6 +96,9 @@ app.add_middleware(
 )
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 asgi = socketio.ASGIApp(sio, other_asgi_app=app)
+
+# Track background bot tasks per lobby
+BOT_TASKS: Dict[str, asyncio.Task] = {}
 
 
 # ---------------------------
@@ -260,6 +265,7 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
         "players": l.players,
         "players_map": l.sid_to_name,
         "ready": l.ready,
+    "bots": l.bots,
     }
 
 
@@ -294,7 +300,8 @@ async def auth(sid, data):
 
 @sio.event
 async def lobby_list(sid):
-    await sio.emit("lobby_list", {"lobbies": [lobby_state(l) for l in LOBBIES.values()]}, to=sid)
+    # Only include lobbies without an active game
+    await sio.emit("lobby_list", {"lobbies": [lobby_state(l) for l in LOBBIES.values() if not l.game]}, to=sid)
 
 
 @sio.event
@@ -304,7 +311,7 @@ async def lobby_create(sid, data):
     l = Lobby(id=lobby_id, name=name, host_sid=sid)
     LOBBIES[lobby_id] = l
     await lobby_join(sid, {"id": lobby_id})
-    await sio.emit("lobby_list", {"lobbies": [lobby_state(x) for x in LOBBIES.values()]})
+    await sio.emit("lobby_list", {"lobbies": [lobby_state(x) for x in LOBBIES.values() if not x.game]})
     return {"ok": True, "lobby": lobby_state(l)}
 
 
@@ -321,6 +328,9 @@ async def lobby_join(sid, data):
     await sio.enter_room(sid, lobby_id)
     await sio.emit("lobby_joined", lobby_state(l), to=sid)
     await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
+    # If a game is already running, send the current snapshot to allow resume
+    if l.game:
+        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": l.game.snapshot()}, to=sid)
     return {"ok": True, "lobby": lobby_state(l)}
 
 
@@ -349,12 +359,6 @@ async def lobby_start(sid, data):
     if len(l.players) < 2:
         return {"ok": False, "error": "Need at least 2 players"}
 
-    # Require all connected human players to be ready; ignore bots (no sid)
-    human_sids = list(l.sid_to_name.keys())
-    not_ready = [hsid for hsid in human_sids if hsid not in l.ready]
-    if not_ready:
-        return {"ok": False, "error": "All players must be ready"}
-
     players = [Player(name=p) for p in l.players]
     game = Game(players=players)
     # Assign colors
@@ -367,6 +371,10 @@ async def lobby_start(sid, data):
     l.game = game
     game.log.append({"type": "info", "text": f"Game started with players: {', '.join(l.players)}"})
     await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": game.snapshot()}, room=lobby_id)
+    # Update lobby list so started lobby disappears
+    await sio.emit("lobby_list", {"lobbies": [lobby_state(x) for x in LOBBIES.values() if not x.game]})
+    # Start bot runner if needed
+    await _ensure_bot_runner(l)
     return {"ok": True}
 
 
@@ -1084,8 +1092,164 @@ async def bot_add(sid, data):
     # Add a simple bot as a named player; bots share lobby player list
     bot_name = f"Bot-{random.randint(100,999)}"
     l.players.append(bot_name)
+    l.bots.append(bot_name)
     await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
+    # Ensure bot runner is active
+    await _ensure_bot_runner(l)
     return {"ok": True, "name": bot_name}
+
+
+async def _ensure_bot_runner(l: Lobby):
+    if l.bot_task_running:
+        return
+    l.bot_task_running = True
+    lid = l.id
+    async def loop():
+        try:
+            while True:
+                await asyncio.sleep(0.6)
+                lref = LOBBIES.get(lid)
+                if not lref or not lref.game:
+                    break
+                g = lref.game
+                # If current player is a bot, take a very simple turn
+                if 0 <= g.current_turn < len(g.players):
+                    cur = g.players[g.current_turn]
+                    if cur.name in lref.bots:
+                        await _bot_take_simple_turn(lref)
+        finally:
+            lref2 = LOBBIES.get(lid)
+            if lref2:
+                lref2.bot_task_running = False
+            BOT_TASKS.pop(lid, None)
+    task = asyncio.create_task(loop())
+    BOT_TASKS[l.id] = task
+
+
+async def _bot_take_simple_turn(l: Lobby):
+    """Very basic bot: roll once, auto-handle effects, attempt buy if possible, end turn."""
+    g = l.game
+    if not g:
+        return
+    cur = g.players[g.current_turn]
+    # Roll dice (reuse logic similar to game_action but simplified)
+    d1 = random.randint(1, 6)
+    d2 = random.randint(1, 6)
+    roll = d1 + d2
+    was_in_jail = cur.in_jail
+    g.rolled_this_turn = True
+    g.last_action = {"type": "rolled", "by": cur.name, "roll": roll, "d1": d1, "d2": d2}
+    g.log.append({"type": "rolled", "text": f"{cur.name} rolled {d1} + {d2} = {roll}"})
+
+    if cur.in_jail:
+        if d1 == d2:
+            cur.in_jail = False
+            cur.jail_turns = 0
+        else:
+            cur.jail_turns += 1
+            if cur.jail_turns < 3:
+                g.log.append({"type": "jail", "text": f"{cur.name} did not roll doubles and remains in jail ({cur.jail_turns}/3)"})
+                g.rolls_left = 0
+                await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
+                return
+            cur.cash -= 50
+            g.log.append({"type": "jail", "text": f"{cur.name} paid $50 to leave jail on the 3rd attempt"})
+            cur.in_jail = False
+            cur.jail_turns = 0
+
+    if d1 == d2 and not was_in_jail:
+        cur.doubles_count += 1
+        if cur.doubles_count >= 3:
+            cur.position = 10
+            cur.in_jail = True
+            cur.jail_turns = 0
+            cur.doubles_count = 0
+            g.rolls_left = 0
+            g.log.append({"type": "gotojail", "text": f"{cur.name} rolled three consecutive doubles and was sent to Jail"})
+            await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
+            return
+    else:
+        cur.doubles_count = 0
+
+    old_pos = cur.position
+    new_pos = (cur.position + roll) % 40
+    if old_pos + roll >= 40:
+        cur.cash += 200
+        g.log.append({"type": "pass_go", "text": f"{cur.name} collected $200 for passing GO"})
+    cur.position = new_pos
+
+    tiles = monopoly_tiles()
+    tile = tiles[new_pos]
+    if tile.get("type") == "gotojail":
+        cur.position = 10
+        cur.in_jail = True
+        cur.jail_turns = 0
+        g.log.append({"type": "gotojail", "text": f"{cur.name} was sent to Jail"})
+        g.rolls_left = 0
+        await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
+        return
+
+    # Taxes
+    if tile.get("type") == "tax":
+        name = tile.get("name", "")
+        amount = 0
+        if "Income Tax" in name:
+            tenpct = math.floor(_total_worth(g, cur) * 0.1)
+            amount = min(200, tenpct)
+        elif "Luxury Tax" in name:
+            amount = 100
+        if amount:
+            cur.cash -= amount
+            g.log.append({"type": "tax", "text": f"{cur.name} paid ${amount} in taxes"})
+
+    # Chance/Chest
+    if tile.get("type") in {"chance", "chest"}:
+        card = _draw_card(tile.get("type"))
+        _apply_card(g, cur, card, last_roll=roll)
+        new_pos = cur.position
+        tile = tiles[new_pos]
+        if cur.in_jail:
+            g.rolls_left = 0
+            await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
+            return
+        if tile.get("type") == "tax":
+            name = tile.get("name", "")
+            amount = 0
+            if "Income Tax" in name:
+                tenpct = math.floor(_total_worth(g, cur) * 0.1)
+                amount = min(200, tenpct)
+            elif "Luxury Tax" in name:
+                amount = 100
+            if amount:
+                cur.cash -= amount
+                g.log.append({"type": "tax", "text": f"{cur.name} paid ${amount} in taxes (card move)"})
+
+    # Rent
+    try:
+        _handle_rent(g, cur, cur.position, d1 + d2)
+    except Exception:
+        pass
+
+    # Simple buy decision
+    p = cur.position
+    tile = tiles[p]
+    buyable = tile.get("type") in {"property", "railroad", "utility"}
+    price = int(tile.get("price") or 0)
+    st = g.properties.get(p) or PropertyState(pos=p)
+    if buyable and st.owner is None and price > 0 and cur.cash >= price:
+        st.owner = cur.name
+        g.properties[p] = st
+        cur.cash -= price
+        g.last_action = {"type": "buy", "by": cur.name, "pos": p, "price": price, "name": tile.get("name")}
+        g.log.append({"type": "buy", "text": f"{cur.name} bought {tile.get('name')} for ${price}"})
+
+    # End turn (bots do not chain doubles in this simple AI)
+    g.current_turn = (g.current_turn + 1) % len(g.players)
+    g.rolls_left = 1
+    g.rolled_this_turn = False
+    cur.doubles_count = 0
+    g.last_action = {"type": "end_turn", "by": cur.name}
+    await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
 
 
 # ---------------------------

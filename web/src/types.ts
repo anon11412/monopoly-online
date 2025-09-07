@@ -5,6 +5,7 @@ export type LobbyInfo = {
   players: string[];
   players_map?: Record<string, string>;
   ready?: string[];
+  bots?: string[];
 };
 
 export type BoardTile = {

@@ -87,8 +87,17 @@ export default function LobbyRoom({ lobby, onGameStarted }: Props) {
 
   const sidToName = state.players_map || {};
   const hasSidMap = Object.keys(sidToName).length > 0;
-  const playersBySid = hasSidMap ? Object.entries(sidToName).map(([sid, name]) => ({ sid, name })) : [] as { sid?: string; name: string }[];
-  const playersByName = !hasSidMap ? (state.players || []).map((name) => ({ name })) : [] as { sid?: string; name: string }[];
+  type PlayerRow = { sid?: string; name: string };
+  const playersBySid: PlayerRow[] = hasSidMap ? Object.entries(sidToName).map(([sid, name]) => ({ sid, name })) : [];
+  const playersByName: PlayerRow[] = !hasSidMap ? (state.players || []).map((name) => ({ name })) : [];
+  // Merge in any names not present in sid map (e.g., server bots or disconnected players)
+  const mergedPlayers: PlayerRow[] = useMemo(() => {
+    if (!hasSidMap) return playersByName;
+    const byName = new Set(playersBySid.map(p => p.name));
+    const extras: PlayerRow[] = (state.players || []).filter(n => !byName.has(n)).map(name => ({ name }));
+    return [...playersBySid, ...extras];
+  }, [hasSidMap, playersBySid, playersByName, state.players]);
+  const botSet = useMemo(() => new Set(state.bots || []), [state.bots]);
   const readySet = useMemo(() => new Set(state.ready || []), [state.ready]);
   const players = hasSidMap ? playersBySid : playersByName;
   const readyCount = hasSidMap
@@ -111,13 +120,15 @@ export default function LobbyRoom({ lobby, onGameStarted }: Props) {
           </div>
         <ul>
           {hasSidMap ? (
-            playersBySid.map((p) => {
-              const isReady = p.sid ? readySet.has(p.sid) : false;
-              const isHostRow = p.sid === state.host_sid;
+            mergedPlayers.map((p) => {
+              const hasSid = typeof p.sid === 'string' && p.sid.length > 0;
+              const isReady = hasSid ? readySet.has(p.sid!) : false;
+              const isHostRow = hasSid && p.sid === state.host_sid;
+              const isBot = botSet.has(p.name);
               return (
-                <li key={p.sid!} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <li key={`${p.sid || p.name}`} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: isBot ? 0.9 : 1 }}>
                   <span className={`dot ${isReady ? 'ready' : 'not-ready'}`} />
-                  <span>{p.name}{isHostRow ? ' (host)' : ''}</span>
+                  <span>{p.name}{isHostRow ? ' (host)' : ''}{isBot ? ' [BOT]' : ''}</span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
                 </li>
               );
@@ -125,10 +136,11 @@ export default function LobbyRoom({ lobby, onGameStarted }: Props) {
           ) : (
             playersByName.map((p, idx) => {
               const isReady = readySet.has(p.name);
+              const isBot = botSet.has(p.name);
               return (
-                <li key={`${p.name}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <li key={`${p.name}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: isBot ? 0.9 : 1 }}>
                   <span className={`dot ${isReady ? 'ready' : 'not-ready'}`} />
-                  <span>{p.name}</span>
+                  <span>{p.name}{isBot ? ' [BOT]' : ''}</span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
                 </li>
               );
