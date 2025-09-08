@@ -8,45 +8,46 @@
 .game-view { display: grid; grid-template-columns: minmax(480px, 1fr) 480px; gap: 12px; align-items: start; }
 .board { background: transparent; padding: 0; border: none; height: auto; }
 /* Keep the inner board perfectly square and as large as possible within viewport */
+
 .board .board-wrap {
 	position: relative;
-	/* Keep it square and fit on screen: width limited by viewport height and container width */
-	--board-max-h: calc(100vh - 140px);
-	width: min(100%, var(--board-max-h));
-	height: auto;
-	max-width: 100%;
+	width: 626px; /* 736 * 0.85 */
+	height: 626px; /* 736 * 0.85 */
 	margin: 0 auto;
-	aspect-ratio: 1 / 1;
 	background: #e7f0f3;
 	border-radius: 10px;
 	border: 2px solid #2c3e50;
-	overflow: hidden; /* ensure inner content never extends beyond the square */
+	overflow: hidden;
 }
 .board .grid {
 	position: absolute; inset: 0;
 	display: grid;
-	grid-template-columns: repeat(11, 1fr);
-	grid-template-rows: repeat(11, 1fr);
+	/* 11 tracks: 82px outer ring (~96*0.85); gaps reduced proportionally */
+	grid-template-columns: 82px repeat(9, 1fr) 82px;
+	grid-template-rows: 82px repeat(9, 1fr) 82px;
 	gap: 3px;
 	width: 100%;
 	height: 100%;
-	align-content: stretch;
-	justify-content: stretch;
 }
-.tile { background: #fffef5; color: #111; border-radius: 4px; padding: 3px; position: relative; overflow: visible; border: 1px solid #ddd; box-shadow: inset 0 0 0 1px #f2f2e6; min-width: 0; min-height: 0; }
-.tile .stripe { height: 10%; min-height: 8px; border-bottom: 1px solid #999; }
-.tile .name { font-size: 9px; padding: 2px; text-align: center; line-height: 1.05; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; }
-.tile .tokens { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; gap: 4px; }
-.tile .token { width: 40px; height: 40px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.4); box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
-.tile .owner { position: absolute; width: 10px; height: 10px; border-radius: 50%; border: 1px solid #444; }
+.tile { background: #fffef5; color: #111; border-radius: 6px; padding: 4px; position: relative; overflow: visible; border: 1px solid #ddd; box-shadow: inset 0 0 0 1px #f2f2e6; min-width: 0; min-height: 0; }
+/* Property color stripe positioned on the inner edge */
+.tile .stripe { position: absolute; background: transparent; }
+.tile .stripe.h { left: 0; right: 0; height: 14px; border-top: 1px solid #999; border-bottom: 1px solid #999; }
+.tile .stripe.v { top: 0; bottom: 0; width: 14px; border-left: 1px solid #999; border-right: 1px solid #999; }
+.tile .stripe.top { top: 0; }
+.tile .stripe.bottom { bottom: 0; }
+.tile .stripe.left { left: 0; }
+.tile .stripe.right { right: 0; }
+.tile .name { font-size: 11px; padding: 2px; text-align: center; line-height: 1.1; word-break: break-word; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; }
+.tile .tokens { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; gap: 5px; }
+.tile .token { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.4); box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+.tile .owner { position: absolute; width: 9px; height: 9px; border-radius: 50%; border: 1px solid #444; }
 .tile .owner.top { bottom: 100%; left: 50%; transform: translate(-50%, -2px); }
 .tile .owner.bottom { top: 100%; left: 50%; transform: translate(-50%, 2px); }
 .tile .owner.left { right: 100%; top: 50%; transform: translate(2px, -50%); }
 .tile .owner.right { left: 100%; top: 50%; transform: translate(-2px, -50%); }
-.tile .houses { position: absolute; top: 24px; right: 2px; display: flex; gap: 2px; }
-.tile .house { width: 8px; height: 8px; background: #2ecc71; border: 1px solid #196f3d; }
-.tile .hotel { width: 10px; height: 10px; background: #e74c3c; border: 1px solid #922b21; }
-.tile .mortgage { position: absolute; top: 2px; left: 2px; font-size: 9px; color: #b03a2e; font-weight: 700; }
+.tile .buildings-bar { position: absolute; right: 4px; bottom: 4px; background: rgba(0,0,0,0.7); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.tile .mortgage { position: absolute; top: 4px; left: 4px; font-size: 11px; color: #b03a2e; font-weight: 700; }
 .actions { display: flex; flex-direction: column; gap: 8px; position: sticky; top: 8px; }
 .actions-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; }
 .actions-panel > .ui-labelframe { min-height: 0; }
@@ -64,8 +65,19 @@
 .btn-badge { position: absolute; top: -6px; right: -6px; background: #e74c3c; color: #fff; border-radius: 999px; min-width: 18px; height: 18px; font-size: 11px; display: inline-flex; align-items: center; justify-content: center; padding: 0 5px; border: 2px solid #fff; }
 @keyframes jiggle { 0% { transform: translate(0,0) rotate(0); } 20% { transform: translate(1px, -1px) rotate(-2deg); } 40% { transform: translate(-1px, 1px) rotate(2deg); } 60% { transform: translate(1px, 0) rotate(-1deg); } 80% { transform: translate(-1px, 0) rotate(1deg); } 100% { transform: translate(0,0) rotate(0); } }
 .jiggle { animation: jiggle 0.6s ease-in-out 1; }
+.rent-highlight { background: rgba(241, 196, 15, 0.18); border-radius: 4px; padding: 2px 4px; }
+.badge { display: inline-block; padding: 2px 6px; border-radius: 999px; border: 1px solid #ccd5db; font-size: 11px; }
 
 /* Responsive tweaks for smaller screens */
 @media (max-width: 1100px) {
 	.game-view { grid-template-columns: 1fr; }
 }
+
+/* Board embedded overlays */
+.board .board-overlay { position: absolute; background: rgba(255,255,255,0.9); border: 1px solid #ccd5db; border-radius: 8px; padding: 6px 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); max-width: 42%; }
+.board .board-overlay .bo-title { font-size: 11px; font-weight: 700; margin-bottom: 4px; color: #2c3e50; }
+.board .board-overlay .bo-body { font-size: 12px; }
+.board .board-overlay.top-left { top: 8px; left: 8px; }
+.board .board-overlay.top-right { top: 8px; right: 8px; }
+.board .board-overlay.bottom-left { bottom: 8px; left: 8px; }
+.board .board-overlay.bottom-right { bottom: 8px; right: 8px; }

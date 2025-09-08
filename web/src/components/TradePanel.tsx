@@ -9,14 +9,25 @@ type Props = {
   snapshot: GameSnapshot;
   onClose: () => void;
   variant?: 'properties' | 'advanced';
+  initialPartner?: string;
 };
 
-export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'properties' }: Props) {
+export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'properties', initialPartner }: Props) {
   const s = getSocket();
-  const me = snapshot.players?.[snapshot.current_turn];
+  const me = (snapshot.players || []).find(p => p.name === (snapshot as any).me) || snapshot.players?.[snapshot.current_turn];
   const myName = me?.name || '';
-  const others = (snapshot.players || []).filter(p => p.name !== myName);
-  const [counterparty, setCounterparty] = useState<string>(others[0]?.name || '');
+  const [allPlayers, setAllPlayers] = useState<string[]>(() => (snapshot.players || []).map(p => p.name));
+  useEffect(() => {
+    const onPlayers = (payload: any) => {
+      const arr = Array.isArray(payload?.players) ? payload.players : [];
+      if (arr.length) setAllPlayers(arr);
+    };
+    s.on('players_list', onPlayers);
+    s.emit('get_players', { id: lobbyId });
+    return () => { s.off('players_list', onPlayers); };
+  }, [s, lobbyId]);
+  const others = allPlayers.filter(n => n !== myName).map(name => ({ name } as any));
+  const [counterparty, setCounterparty] = useState<string>(initialPartner || others[0]?.name || '');
   const [giveCash, setGiveCash] = useState<number>(0);
   const [receiveCash, setReceiveCash] = useState<number>(0);
   const [giveProps, setGiveProps] = useState<Set<number>>(new Set());
@@ -25,12 +36,14 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
   const [receiveJailCard, setReceiveJailCard] = useState<boolean>(false);
   const [tiles, setTiles] = useState<BoardTile[]>([]);
   const [err, setErr] = useState<string>('');
+  // Advanced terms: per-turn payments
+  const [advPayments, setAdvPayments] = useState<Array<{ from: 'me' | 'them', amount: number, turns: number }>>([]);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setErr('');
-  const bases = [BACKEND_URL || '', 'http://127.0.0.1:8001', 'http://127.0.0.1:8000'];
+  const bases = [BACKEND_URL || '', 'http://127.0.0.1:8000'];
       for (const base of bases) {
         try {
           const url = base ? `${base}${BOARD_META_PATH}` : BOARD_META_PATH;
@@ -70,6 +83,14 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
 
   function sendOffer() {
     if (!canSend) return;
+    const terms = variant === 'advanced' ? {
+      payments: advPayments.filter(p => p.amount > 0 && p.turns > 0).map(p => ({
+        from: p.from === 'me' ? myName : counterparty,
+        to: p.from === 'me' ? counterparty : myName,
+        amount: p.amount,
+        turns: p.turns,
+      }))
+    } : undefined;
     s.emit('game_action', {
       id: lobbyId,
       action: {
@@ -77,6 +98,7 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
         to: counterparty,
         give: { cash: giveCash, properties: Array.from(giveProps), jail_card: giveJailCard },
         receive: { cash: receiveCash, properties: Array.from(receiveProps), jail_card: receiveJailCard },
+        terms,
       }
     });
     onClose();
@@ -169,18 +191,77 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
           {!canSend ? <span style={{ fontSize: 12, opacity: 0.8 }}>Select a player and include cash or at least one property</span> : null}
         </div>
 
+        {variant === 'advanced' ? (
+          <div className="ui-labelframe" style={{ marginTop: 12 }}>
+            <div className="ui-title ui-h3">📆 Per-turn Payments</div>
+            <div style={{ fontSize: 12, margin: '6px 0' }}>Add recurring payments that trigger at the payer's end of turn.</div>
+            <AdvPaymentsEditor
+              payments={advPayments}
+              setPayments={setAdvPayments}
+              myName={myName}
+              counterparty={counterparty}
+            />
+          </div>
+        ) : null}
+
         {incomingOffer ? (
           <div style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>📊 Trade Details</div>
             <div style={{ fontSize: 12, marginBottom: 6 }}>They give: ${incomingOffer.give?.cash || 0}, properties: {(incomingOffer.give?.properties || []).join(', ')}, jail card: {incomingOffer.give?.jail_card ? 'yes' : 'no'}</div>
             <div style={{ fontSize: 12, marginBottom: 6 }}>You give: ${incomingOffer.receive?.cash || 0}, properties: {(incomingOffer.receive?.properties || []).join(', ')}, jail card: {incomingOffer.receive?.jail_card ? 'yes' : 'no'}</div>
+            {incomingOffer.terms?.payments?.length ? (
+              <div style={{ fontSize: 12, marginBottom: 6 }}>
+                Recurring payments:
+                <ul>
+                  {incomingOffer.terms.payments.map((p: any, i: number) => (
+                    <li key={i}>{p.from} pays ${p.amount} to {p.to} for {p.turns} turns</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div style={{ display: 'flex', gap: 8 }}>
-              <button className="btn btn-success" onClick={acceptOffer}>✅ Accept Trade</button>
+              <button className="btn btn-success" onClick={acceptOffer} disabled={incomingOffer.to !== myName}>✅ Accept Trade</button>
               <button className="btn btn-danger" onClick={declineOffer}>❌ Reject Trade</button>
             </div>
           </div>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function AdvPaymentsEditor({ payments, setPayments, myName, counterparty }: {
+  payments: Array<{ from: 'me' | 'them', amount: number, turns: number }>;
+  setPayments: (p: Array<{ from: 'me' | 'them', amount: number, turns: number }>) => void;
+  myName: string;
+  counterparty: string;
+}) {
+  const add = () => setPayments([...payments, { from: 'me', amount: 10, turns: 3 }]);
+  const update = (i: number, patch: Partial<{ from: 'me' | 'them', amount: number, turns: number }>) => {
+    const next = payments.slice();
+    next[i] = { ...next[i], ...patch } as any;
+    setPayments(next);
+  };
+  const remove = (i: number) => setPayments(payments.filter((_, idx) => idx !== i));
+  return (
+    <div>
+      {payments.length === 0 ? <div className="ui-sm" style={{ opacity: 0.75 }}>No recurring payments added.</div> : null}
+      {payments.map((p, i) => (
+        <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
+          <select value={p.from} onChange={(e) => update(i, { from: (e.target.value as any) })}>
+            <option value="me">{myName} pays</option>
+            <option value="them">{counterparty} pays</option>
+          </select>
+          <label style={{ fontSize: 12 }}>amount
+            <input type="number" min={1} value={p.amount} onChange={(e) => update(i, { amount: parseInt(e.target.value || '0', 10) })} style={{ width: 90, marginLeft: 6 }} />
+          </label>
+          <label style={{ fontSize: 12 }}>turns
+            <input type="number" min={1} value={p.turns} onChange={(e) => update(i, { turns: parseInt(e.target.value || '0', 10) })} style={{ width: 90, marginLeft: 6 }} />
+          </label>
+          <button className="btn btn-ghost" onClick={() => remove(i)}>🗑️</button>
+        </div>
+      ))}
+      <button className="btn" onClick={add}>➕ Add payment</button>
     </div>
   );
 }

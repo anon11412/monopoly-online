@@ -18,14 +18,30 @@ export default function MainMenu({ onEnterLobby }: Props) {
   const lastLobbyId = (saved.lastLobbyId || '').trim();
 
   async function handleConnect() {
-    await connectSocket(name);
-    setConnected(true);
     const s = getSocket();
-    s.emit('lobby_list');
-    s.on('lobby_list', (data: { lobbies: LobbyInfo[] }) => {
-      console.debug('lobby_list', data);
-      setLobbies(data.lobbies);
-    });
+    setStatus('Connecting…');
+    const onConnectError = (err: any) => {
+      console.warn('connect_error', err);
+      setStatus('Failed to connect to server. Is the backend running on 127.0.0.1:8000?');
+    };
+    s.once('connect_error', onConnectError);
+    try {
+      await connectSocket(name);
+      s.off('connect_error', onConnectError);
+      setConnected(true);
+      setStatus('Connected. Loading lobbies…');
+      // Register handler before requesting list to avoid race
+      s.off('lobby_list');
+      s.on('lobby_list', (data: { lobbies: LobbyInfo[] }) => {
+        console.debug('lobby_list', data);
+        setLobbies(data.lobbies);
+        setStatus(data.lobbies.length ? '' : 'No open lobbies. Create one below.');
+      });
+      s.emit('lobby_list');
+    } catch (e: any) {
+      s.off('connect_error', onConnectError);
+      setStatus('Failed to connect. Please retry.');
+    }
   }
 
   function createLobby() {

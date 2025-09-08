@@ -35,7 +35,7 @@ export type TradeSide = {
 };
 
 export type TradeOffer = {
-  id: number;
+  id: string | number;
   from: string; // player name
   to: string;   // player name
   give?: TradeSide;
@@ -55,6 +55,11 @@ export type GameSnapshot = {
   pending_trades?: TradeOffer[];
   // Optional tiles metadata included by server snapshot to avoid extra fetches
   tiles?: BoardTile[];
+  // Advanced recurring obligations (if server includes them)
+  recurring?: Array<{ id: string; from: string; to: string; amount: number; turns_left: number }>;
+  // Stats & end state
+  turns?: number;
+  game_over?: { winner?: string | null; turns?: number; most_landed?: { pos?: number | null; name?: string | null; count?: number } | null } | null;
 };
 
 // Server may send variants; normalize into PropertyState

@@ -7,12 +7,13 @@ export default defineConfig({
   server: {
     proxy: {
       '/socket.io': {
-  target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         ws: true,
         changeOrigin: true,
+        rewrite: (path) => path, // keep as-is
       },
       '/board_meta': {
-  target: 'http://127.0.0.1:8001',
+        target: 'http://127.0.0.1:8000',
         changeOrigin: true,
       },
     },

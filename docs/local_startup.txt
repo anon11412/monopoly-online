@@ -1,0 +1,49 @@
+Monopoly Online - Local Startup (Linux, bash)
+
+Minimal, repeatable steps to start the backend (FastAPI/Uvicorn) and frontend (Vite/React) locally.
+
+Order: start backend first, then frontend.
+
+Prereqs
+- Python 3.11+
+- Node.js 22.12+ (install via nvm)
+
+Backend (127.0.0.1:8000)
+1) Create/activate venv and install deps:
+   cd /home/seeds/monopoly_v3/engine/new/server
+   python3 -m venv .venv
+   . .venv/bin/activate
+   python -m pip install --upgrade pip
+   pip install -r requirements.txt uvicorn
+
+2) Start server (reload enabled):
+   python -m uvicorn main:asgi --host 127.0.0.1 --port 8000 --reload
+
+3) Optional verify:
+   curl -sS http://127.0.0.1:8000/board_meta | head -c 200 && echo
+
+Frontend (127.0.0.1:5173)
+1) Ensure Node 22.12+ with nvm:
+   export NVM_DIR="$HOME/.nvm"
+   mkdir -p "$NVM_DIR"
+   [ -s "$NVM_DIR/nvm.sh" ] || curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
+   . "$NVM_DIR/nvm.sh"
+   nvm install 22.12.0
+   nvm use 22.12.0
+   node -v   # should show v22.12.0 or newer
+
+2) Install deps and start Vite:
+   cd /home/seeds/monopoly_v3/engine/new/web
+   npm install
+   npm run dev -- --strictPort --host 127.0.0.1 --port 5173
+
+3) Open in browser:
+   http://127.0.0.1:5173
+
+Stop/Restart
+- Backend: Ctrl+C in the uvicorn terminal.
+- Frontend: Ctrl+C in the Vite terminal.
+- If a port is busy, find PIDs:
+   ss -ltnp | grep 8000
+   ss -ltnp | grep 5173
+  then kill the shown PID(s).

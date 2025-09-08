@@ -14,14 +14,14 @@ export function getSocket() {
   if (!socket) {
     socket = io(BACKEND_URL, {
       path: SOCKET_PATH,
-      transports: ['websocket'],
+      // Use default transports for robustness (polling + websocket)
       autoConnect: false,
     });
 
     // Auto re-auth and rejoin
-    socket.on('connect', () => {
+  socket.on('connect', () => {
       try {
-        const savedName = displayName ?? localStorage.getItem('displayName');
+    const savedName = displayName ?? (sessionStorage.getItem('displayName') || localStorage.getItem('displayName'));
         if (savedName) {
           socket!.emit('auth', { display: savedName });
         }
@@ -45,9 +45,11 @@ export function connectSocket(displayName: string): Promise<void> {
     const s = getSocket();
     const onConnect = () => {
       try {
-        localStorage.setItem('displayName', displayName);
+  sessionStorage.setItem('displayName', displayName);
       } catch {}
       s.emit('auth', { display: displayName });
+  // Let the caller know we're definitely connected
+  s.emit('ping', {}, () => {});
       s.off('connect', onConnect);
       resolve();
     };
@@ -72,7 +74,7 @@ export function rememberLobby(id: string | null) {
 export function getRemembered() {
   try {
     return {
-      displayName: localStorage.getItem('displayName') || '',
+  displayName: sessionStorage.getItem('displayName') || localStorage.getItem('displayName') || '',
       lastLobbyId: localStorage.getItem('lastLobbyId') || '',
     };
   } catch {

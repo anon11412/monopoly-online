@@ -3,7 +3,7 @@ import { BACKEND_URL, BOARD_META_PATH } from '../config';
 import { buildDefaultBoardTiles } from '../lib/boardFallback';
 import type { BoardTile, GameSnapshot, PropertyState, PropertyStateLike } from '../types';
 import { buildPlayerColorMap } from '../lib/colors';
-import { getSocket } from '../lib/socket';
+import { getSocket, getRemembered } from '../lib/socket';
 import { getStreetRent, houseCostForGroup, mortgageValue, RAILROAD_RENTS } from '../lib/rentData';
 
 type Props = { snapshot: GameSnapshot | null; lobbyId?: string };
@@ -13,12 +13,18 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   const [err, setErr] = useState<string>('');
   const [openPropPos, setOpenPropPos] = useState<number | null>(null);
   const s = getSocket();
+  const [highlightedPlayer, setHighlightedPlayer] = useState<string | null>(null);
+  useEffect(() => {
+    const onHi = (ev: any) => setHighlightedPlayer(ev?.detail?.name || null);
+    window.addEventListener('highlight-player' as any, onHi);
+    return () => window.removeEventListener('highlight-player' as any, onHi);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       setErr('');
-  const bases = [BACKEND_URL || '', 'http://127.0.0.1:8001', 'http://127.0.0.1:8000'];
+  const bases = [BACKEND_URL || '', 'http://127.0.0.1:8000'];
       for (const base of bases) {
         try {
       const url = base ? `${base}${BOARD_META_PATH}` : BOARD_META_PATH;
@@ -61,11 +67,20 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   };
   const props = snapshot?.properties || {};
 
+  const lastRoll = (() => {
+    const la: any = snapshot?.last_action;
+    if (la?.type === 'rolled') return { d1: la.d1 || 0, d2: la.d2 || 0 };
+    return null;
+  })();
+  const act = (type: string, payload: any = {}) => s.emit('game_action', { id: lobbyId || (window as any).__lobbyId || '', action: { type, ...payload } });
+  // No embedded panels here; board-only visuals
+  
+
   return (
-    <div className="board">
+    <div className="board" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
       {err ? <div style={{ color: '#e74c3c', fontSize: 12, marginBottom: 6 }}>{err}</div> : null}
       <div style={{ padding: '4px 6px', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Turn: {curName || '—'}</div>
-      <div className="board-wrap">
+      <div className="board-wrap" style={{ position: 'relative' }}>
         <div className="grid">
         {tiles.length === 0 ? (
           <div style={{ gridColumn: 6, gridRow: 6, alignSelf: 'center', justifySelf: 'center', fontSize: 12, opacity: 0.8 }}>No board to display</div>
@@ -85,15 +100,23 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             if (t.x === 10) return 'left'; // right col -> owner to left
             return 'top';
           })();
+          // Choose stripe orientation and side (inner edge toward board center)
+          const stripeClass = (() => {
+            if (t.y === 0) return 'h bottom';      // top row: stripe at bottom
+            if (t.y === 10) return 'h top';        // bottom row: stripe at top
+            if (t.x === 0) return 'v right';       // left col: stripe at right
+            if (t.x === 10) return 'v left';       // right col: stripe at left
+            return 'h bottom';
+          })();
           return (
             <div key={t.pos} className={`tile type-${t.type || 'prop'}`} style={{ gridColumn: t.x + 1, gridRow: t.y + 1, outline: isCurrent ? '2px solid #f1c40f' : undefined, cursor: clickable ? 'pointer' : undefined }} onClick={() => clickable ? setOpenPropPos(t.pos) : undefined}>
-              <div className="stripe" style={{ background: t.color || 'transparent' }} />
+              <div className={`stripe ${stripeClass}`} style={{ background: t.color || 'transparent' }} />
               <div className="name">{t.name}</div>
               {ownerColor ? <div className={`owner ${edge}`} style={{ background: ownerColor }} /> : null}
-              {(houses > 0 && houses < 5) ? (
-                <div className="houses">{Array.from({ length: houses }).map((_, i) => <div key={i} className="house" />)}</div>
+              {/* Buildings bar: 🏠 xN or 🏨 x1 */}
+              {(houses > 0 || hotel) ? (
+                <div className="buildings-bar">{hotel ? '🏨 x1' : `🏠 x${houses}`}</div>
               ) : null}
-              {hotel ? <div className="houses"><div className="hotel" /></div> : null}
               {mortgaged ? <div className="mortgage">M</div> : null}
               {(() => {
                 const here = (snapshot?.players || []).filter(pl => pl.position === t.pos);
@@ -112,7 +135,54 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           );
         })}
         </div>
-      </div>
+          {/* Dice overlay centered */}
+          <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center' }}>
+              <span className="badge badge-muted" style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{lastRoll ? lastRoll.d1 : '–'}</span>
+              <span className="badge badge-muted" style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{lastRoll ? lastRoll.d2 : '–'}</span>
+            </div>
+          </div>
+  </div>
+      {/* Core action buttons centered under board; hidden unless actionable */}
+      {(() => {
+        const me = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
+        const myName = (getRemembered().displayName || '').trim() || me?.name || '';
+        const myTurn = me?.name === myName;
+        const rolledThisTurn = !!snapshot?.rolled_this_turn;
+        const rollsLeft = snapshot?.rolls_left ?? 0;
+        const canRollC = myTurn && (!rolledThisTurn || rollsLeft > 0);
+        // compute canBuy similar to ActionPanel
+        let canBuyC = false;
+        if (myTurn) {
+          const la: any = snapshot?.last_action;
+          if (['landed_on_unowned', 'offer_buy', 'can_buy'].includes(String(la?.type || ''))) {
+            canBuyC = true;
+          } else {
+            const pos = me?.position ?? -1;
+            if (pos >= 0) {
+              const tilesArr: any[] = (snapshot as any)?.tiles || [];
+              const tile = tilesArr.find((x) => x?.pos === pos);
+              const propsMap: any = (snapshot as any)?.properties || {};
+              const st = propsMap?.[pos];
+              const buyable = tile && ['property', 'railroad', 'utility'].includes(String(tile.type)) && (tile.price || 0) > 0 && !(st && st.owner);
+              canBuyC = !!buyable;
+            }
+          }
+        }
+        const canEndC = myTurn && rolledThisTurn && rollsLeft === 0;
+        const show = canRollC || canBuyC || canEndC || (myTurn && (me?.in_jail && (me?.jail_cards || 0) > 0));
+        if (!show) return null;
+        return (
+          <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', justifyContent: 'center' }}>
+            <button className="btn btn-primary" disabled={!canRollC} onClick={() => act('roll_dice')}>🎲 Roll</button>
+            <button className="btn btn-success" disabled={!canBuyC} onClick={() => act('buy_property')}>🏠 Buy</button>
+            {myTurn && (me?.in_jail && (me?.jail_cards || 0) > 0) ? (
+              <button className="btn btn-warning" onClick={() => act('use_jail_card')}>🪪 Use Jail Card</button>
+            ) : null}
+            <button className="btn btn-ghost" disabled={!canEndC} onClick={() => act('end_turn')}>⏭ End Turn</button>
+          </div>
+        );
+      })()}
       {openPropPos != null ? (() => {
         const t = tileByPos[openPropPos!];
   const p = normalize(openPropPos!, props[openPropPos as any]);
@@ -140,12 +210,21 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                   return r ? (
                     <div className="ui-card" style={{ marginTop: 10, fontSize: 12 }}>
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>Rent Details</div>
-                      <div>Base: ${r.base} {t.group ? <span style={{ opacity: 0.7 }}>(double with full set: ${r.withSet})</span> : null}</div>
-                      <div>With 1 House: ${r.house1}</div>
-                      <div>With 2 Houses: ${r.house2}</div>
-                      <div>With 3 Houses: ${r.house3}</div>
-                      <div>With 4 Houses: ${r.house4}</div>
-                      <div>With Hotel: ${r.hotel}</div>
+                      {(() => {
+            const owner = p?.owner;
+            const shouldHi = owner && highlightedPlayer && owner === highlightedPlayer;
+            const cls = shouldHi ? 'rent-highlight' : '';
+                        return (
+                          <>
+              <div className={cls}>Base: ${r.base} {t.group ? <span style={{ opacity: 0.7 }}>(double with full set: ${r.withSet})</span> : null}</div>
+              <div className={cls}>With 1 House: ${r.house1}</div>
+              <div className={cls}>With 2 Houses: ${r.house2}</div>
+              <div className={cls}>With 3 Houses: ${r.house3}</div>
+              <div className={cls}>With 4 Houses: ${r.house4}</div>
+              <div className={cls}>With Hotel: ${r.hotel}</div>
+                          </>
+                        );
+                      })()}
                       <div style={{ marginTop: 6 }}>House cost: ${hc} each, Hotel: ${hc} + return 4 houses</div>
                     </div>
                   ) : null;
@@ -182,7 +261,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 {(() => {
                   const meIdx = snapshot?.current_turn ?? -1;
                   const me = meIdx >= 0 ? snapshot?.players?.[meIdx] : undefined;
-                  const iOwn = me && p?.owner === me.name;
+                  const iOwn = !!(me?.name && p?.owner === me.name);
                   const buyable = t && (t.type === 'property' || t.type === 'railroad' || t.type === 'utility');
                   const isProp = t?.type === 'property';
                   const pos = t?.pos ?? 0;

@@ -86,6 +86,8 @@ export default function LobbyRoom({ lobby, onGameStarted }: Props) {
   }
 
   const sidToName = state.players_map || {};
+  const disconnectRemain = (state as any).disconnect_remain || {} as Record<string, number>;
+  const kickVotes = (state as any).kick_votes || {} as Record<string, string[]>;
   const hasSidMap = Object.keys(sidToName).length > 0;
   type PlayerRow = { sid?: string; name: string };
   const playersBySid: PlayerRow[] = hasSidMap ? Object.entries(sidToName).map(([sid, name]) => ({ sid, name })) : [];
@@ -125,11 +127,22 @@ export default function LobbyRoom({ lobby, onGameStarted }: Props) {
               const isReady = hasSid ? readySet.has(p.sid!) : false;
               const isHostRow = hasSid && p.sid === state.host_sid;
               const isBot = botSet.has(p.name);
+              const votes = kickVotes[p.name] ? kickVotes[p.name].length : 0;
+              const total = (state.players || []).filter(n => !(state.bots || []).includes(n)).length;
+              const self = getSocket().id === p.sid;
+              const remain = disconnectRemain[p.name] ? Math.max(0, Math.ceil(disconnectRemain[p.name])) : 0;
               return (
                 <li key={`${p.sid || p.name}`} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: isBot ? 0.9 : 1 }}>
                   <span className={`dot ${isReady ? 'ready' : 'not-ready'}`} />
-                  <span>{p.name}{isHostRow ? ' (host)' : ''}{isBot ? ' [BOT]' : ''}</span>
+                  <span>{p.name}{isHostRow ? ' (host)' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}</span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
+                  {!self && !isBot ? (
+                    <button className="btn btn-ghost" title={`Vote kick (${votes}/${Math.floor(total/2)+1})`} onClick={() => {
+                      const s = getSocket();
+                      s.emit('vote_kick', { id: state.id, target: p.name });
+                    }}>👎</button>
+                  ) : null}
+                  {votes ? <span className="badge" title="Votes">{votes}</span> : null}
                 </li>
               );
             })
@@ -137,11 +150,22 @@ export default function LobbyRoom({ lobby, onGameStarted }: Props) {
             playersByName.map((p, idx) => {
               const isReady = readySet.has(p.name);
               const isBot = botSet.has(p.name);
+              const votes = kickVotes[p.name] ? kickVotes[p.name].length : 0;
+              const total = (state.players || []).filter(n => !(state.bots || []).includes(n)).length;
+              const self = false;
+              const remain = disconnectRemain[p.name] ? Math.max(0, Math.ceil(disconnectRemain[p.name])) : 0;
               return (
                 <li key={`${p.name}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: isBot ? 0.9 : 1 }}>
                   <span className={`dot ${isReady ? 'ready' : 'not-ready'}`} />
-                  <span>{p.name}{isBot ? ' [BOT]' : ''}</span>
+                  <span>{p.name}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}</span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
+                  {!self && !isBot ? (
+                    <button className="btn btn-ghost" title={`Vote kick (${votes}/${Math.floor(total/2)+1})`} onClick={() => {
+                      const s = getSocket();
+                      s.emit('vote_kick', { id: state.id, target: p.name });
+                    }}>👎</button>
+                  ) : null}
+                  {votes ? <span className="badge" title="Votes">{votes}</span> : null}
                 </li>
               );
             })
