@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { getSocket } from '../lib/socket';
+import { getSocket, getRemembered } from '../lib/socket';
 import { BACKEND_URL, BOARD_META_PATH } from '../config';
 import { buildDefaultBoardTiles } from '../lib/boardFallback';
 import type { BoardTile, GameSnapshot, PropertyStateLike } from '../types';
@@ -14,8 +14,10 @@ type Props = {
 
 export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'properties', initialPartner }: Props) {
   const s = getSocket();
-  const me = (snapshot.players || []).find(p => p.name === (snapshot as any).me) || snapshot.players?.[snapshot.current_turn];
-  const myName = me?.name || '';
+  // Prefer local remembered displayName to avoid mis-identifying "me" when it's not my turn
+  const remembered = (getRemembered().displayName || '').trim();
+  const fallbackMe = (snapshot.players || []).find(p => p.name === (snapshot as any).me) || snapshot.players?.[snapshot.current_turn];
+  const myName = remembered || (fallbackMe?.name || '');
   const [allPlayers, setAllPlayers] = useState<string[]>(() => (snapshot.players || []).map(p => p.name));
   useEffect(() => {
     const onPlayers = (payload: any) => {
@@ -26,7 +28,7 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
     s.emit('get_players', { id: lobbyId });
     return () => { s.off('players_list', onPlayers); };
   }, [s, lobbyId]);
-  const others = allPlayers.filter(n => n !== myName).map(name => ({ name } as any));
+  const others = allPlayers.filter(n => n && n !== myName).map(name => ({ name } as any));
   const [counterparty, setCounterparty] = useState<string>(initialPartner || others[0]?.name || '');
   const [giveCash, setGiveCash] = useState<number>(0);
   const [receiveCash, setReceiveCash] = useState<number>(0);
@@ -249,8 +251,8 @@ function AdvPaymentsEditor({ payments, setPayments, myName, counterparty }: {
       {payments.map((p, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
           <select value={p.from} onChange={(e) => update(i, { from: (e.target.value as any) })}>
-            <option value="me">{myName} pays</option>
-            <option value="them">{counterparty} pays</option>
+            <option value="me">{myName || 'Me'} pays</option>
+            <option value="them">{counterparty || 'Partner'} pays</option>
           </select>
           <label style={{ fontSize: 12 }}>amount
             <input type="number" min={1} value={p.amount} onChange={(e) => update(i, { amount: parseInt(e.target.value || '0', 10) })} style={{ width: 90, marginLeft: 6 }} />

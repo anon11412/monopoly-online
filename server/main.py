@@ -99,6 +99,8 @@ class Lobby:
     # Vote-kick timer state
     kick_target: Optional[str] = None
     kick_deadline: Optional[float] = None  # monotonic deadline seconds
+    # Simple chat history for lobby (recent messages only)
+    chat: List[Dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------
@@ -284,6 +286,8 @@ except Exception:
 
 LOBBIES: Dict[str, Lobby] = {}
 USERNAMES: Dict[str, str] = {}  # sid -> display
+# Track per-connection client IDs for multi-tab isolation
+CLIENT_IDS: Dict[str, str] = {}  # sid -> client_id
 
 
 def lobby_state(l: Lobby) -> Dict[str, Any]:
@@ -294,8 +298,7 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
     # Remaining seconds for kick deadline
     kick_remaining = None
     if l.kick_deadline:
-        remain = int(max(0, (l.kick_deadline - now)))
-        kick_remaining = remain
+        kick_remaining = int(max(0, (l.kick_deadline - now)))
     return {
         "id": l.id,
         "name": l.name,
@@ -308,25 +311,38 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
         "kick_target": l.kick_target,
         "kick_remaining": kick_remaining,
         "disconnect_remain": remain,
+        "chat": l.chat[-50:],
     }
 
 
 @sio.event
 async def connect(sid, environ, auth):
-    # Nothing on connect yet
+    # No implicit lobby join on bare connect
+    # Keep optional client_id from auth for early availability
+    try:
+        cid = None
+        if isinstance(auth, dict):
+            cid = auth.get("client_id")
+        if cid:
+            CLIENT_IDS[sid] = str(cid)
+    except Exception:
+        pass
     return
 
 
 @sio.event
 async def disconnect(sid):
     USERNAMES.pop(sid, None)
+    CLIENT_IDS.pop(sid, None)
     # remove sid from lobbies
     for l in list(LOBBIES.values()):
         if sid in l.sid_to_name:
             name = l.sid_to_name.pop(sid)
+            # Is there another active connection for the same display name?
+            still_connected = any(v == name for v in l.sid_to_name.values())
             # If a game is not started yet, removing the player entirely is fine.
             # If a game is active, keep the name in the players list to support reconnection.
-            if not l.game and name in l.players:
+            if not l.game and name in l.players and not still_connected:
                 l.players.remove(name)
             if sid in l.ready:
                 l.ready.remove(sid)
@@ -334,7 +350,7 @@ async def disconnect(sid):
             if l.host_sid == sid:
                 l.host_sid = next(iter(l.sid_to_name.keys()), l.host_sid)
             # Track disconnect deadline if game active
-            if l.game and name:
+            if l.game and name and not still_connected:
                 l.disconnect_deadlines[name] = asyncio.get_event_loop().time() + 120.0
                 # schedule cleanup if not reconnected
                 async def timeout_check(lobby_id: str, pname: str, due: float):
@@ -354,6 +370,9 @@ async def disconnect(sid):
 @sio.event
 async def auth(sid, data):
     USERNAMES[sid] = data.get("display") or f"User-{sid[:4]}"
+    cid = data.get("client_id")
+    if cid:
+        CLIENT_IDS[sid] = str(cid)
     # Clear any pending disconnect deadline for this name in any lobby
     name = USERNAMES[sid]
     for l in LOBBIES.values():
@@ -490,10 +509,24 @@ async def lobby_join(sid, data):
     if not lobby_id or lobby_id not in LOBBIES:
         return {"ok": False, "error": "Lobby not found"}
     l = LOBBIES[lobby_id]
-    name = USERNAMES.get(sid) or f"User-{sid[:4]}"
-    l.sid_to_name[sid] = name
+    name = USERNAMES.get(sid)
+    if not name:
+        # Attempt to reuse existing display for same client_id within this lobby
+        cid = CLIENT_IDS.get(sid)
+        if cid:
+            try:
+                for other_sid, nm in list(l.sid_to_name.items()):
+                    if CLIENT_IDS.get(other_sid) == cid and nm:
+                        name = nm
+                        break
+            except Exception:
+                pass
+    if not name:
+        name = f"User-{sid[:4]}"
+    # Prevent duplicate phantom entries: ensure name appears once in players
     if name not in l.players:
         l.players.append(name)
+    l.sid_to_name[sid] = name
     await sio.enter_room(sid, lobby_id)
     await sio.emit("lobby_joined", lobby_state(l), to=sid)
     await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
@@ -545,6 +578,65 @@ async def lobby_start(sid, data):
     # Start bot runner if needed
     await _ensure_bot_runner(l)
     return {"ok": True}
+
+
+@sio.event
+async def lobby_reset(sid, data):
+    lobby_id = data.get("id") or data.get("lobby_id")
+    l = LOBBIES.get(lobby_id)
+    if not l:
+        return
+    # Only host can reset
+    if sid != l.host_sid:
+        return {"ok": False, "error": "Only host"}
+    # Clear game and vote-kick/session timers
+    l.game = None
+    l.kick_votes.clear()
+    l.kick_target = None
+    l.kick_deadline = None
+    t = KICK_TASKS.pop(lobby_id, None)
+    if t:
+        try:
+            t.cancel()
+        except Exception:
+            pass
+    # Clear disconnect deadlines
+    l.disconnect_deadlines.clear()
+    await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
+    # Re-advertise in lobby list
+    await sio.emit("lobby_list", {"lobbies": [lobby_state(x) for x in LOBBIES.values() if not x.game]})
+    return {"ok": True}
+
+
+@sio.event
+async def lobby_rematch(sid, data):
+    """Create a new lobby with the same members and move everyone there. Only host can trigger."""
+    lobby_id = data.get("id") or data.get("lobby_id")
+    l = LOBBIES.get(lobby_id)
+    if not l:
+        return {"ok": False, "error": "Lobby missing"}
+    if sid != l.host_sid:
+        return {"ok": False, "error": "Only host"}
+    # Create new lobby
+    new_id = f"l{random.randint(1000, 9999)}"
+    new_name = f"{l.name} (Rematch)"
+    l2 = Lobby(id=new_id, name=new_name, host_sid=sid)
+    # Copy player list and bots
+    l2.players = list(dict.fromkeys(l.players))
+    l2.bots = list(l.bots)
+    LOBBIES[new_id] = l2
+    # Move all current connections (sids) into the new lobby room and map names
+    for osid, pname in list(l.sid_to_name.items()):
+        l2.sid_to_name[osid] = pname
+        try:
+            await sio.enter_room(osid, new_id)
+            await sio.emit("lobby_joined", lobby_state(l2), to=osid)
+        except Exception:
+            pass
+    # Notify both lobbies of state and update lobby list (new lobby has no game; old might have been finished)
+    await sio.emit("lobby_state", lobby_state(l2), room=new_id)
+    await sio.emit("lobby_list", {"lobbies": [lobby_state(x) for x in LOBBIES.values() if not x.game]})
+    return {"ok": True, "lobby": lobby_state(l2)}
 
 
 # ---------------------------
@@ -707,10 +799,21 @@ async def game_action(sid, data):
             g.rolls_left = 1
         else:
             g.rolls_left = 0
-        # Any activity cancels kick votes against current player
+        # Any activity cancels kick votes/timer against current player
         for l in LOBBIES.values():
             if l.game is g:
                 l.kick_votes.pop(cur.name, None)
+                if l.kick_target == cur.name:
+                    l.kick_target = None
+                    l.kick_deadline = None
+                    task = KICK_TASKS.pop(l.id, None)
+                    if task:
+                        try:
+                            task.cancel()
+                        except Exception:
+                            pass
+                # Inform lobby about cleared votes/timer
+                await sio.emit("lobby_state", lobby_state(l), room=l.id)
                 break
 
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
@@ -932,6 +1035,8 @@ async def game_action(sid, data):
         if not give and not receive and (action.get("cash") is not None):
             give = {"cash": int(action.get("cash") or 0)}
             receive = {}
+        # Advanced terms (e.g., recurring payments)
+        terms = action.get("terms") or {}
         offer = {
             "id": f"tr{random.randint(1000,9999)}",
             "type": "trade_offer",
@@ -939,6 +1044,7 @@ async def game_action(sid, data):
             "to": action.get("to"),
             "give": give or {},
             "receive": receive or {},
+            "terms": terms,  # persist advanced terms so accept can process them
         }
         g.pending_trades.append(offer)
         g.last_action = offer
@@ -1611,8 +1717,16 @@ async def chat_send(sid, data):
         return
     if lobby_id not in LOBBIES:
         return
-    name = USERNAMES.get(sid) or f"User-{sid[:4]}"
-    await sio.emit("lobby_chat", {"id": lobby_id, "from": name, "message": message}, room=lobby_id)
+    l = LOBBIES[lobby_id]
+    name = USERNAMES.get(sid) or l.sid_to_name.get(sid) or f"User-{sid[:4]}"
+    payload = {"id": lobby_id, "from": name, "message": message, "ts": int(asyncio.get_event_loop().time())}
+    try:
+        l.chat.append(payload)
+        if len(l.chat) > 200:
+            l.chat = l.chat[-200:]
+    except Exception:
+        pass
+    await sio.emit("lobby_chat", payload, room=lobby_id)
 
 
 # ---------------------------

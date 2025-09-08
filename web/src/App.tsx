@@ -12,6 +12,7 @@ export default function App() {
   const [lobby, setLobby] = useState<LobbyInfo | null>(null);
   const [game, setGame] = useState<GameSnapshot | null>(null);
   const [conn, setConn] = useState(getConnectionStatus());
+  const [fadingOut, setFadingOut] = useState(false);
 
   useEffect(() => {
     const s = getSocket();
@@ -39,12 +40,12 @@ export default function App() {
           <MainMenu onEnterLobby={(l) => setLobby(l)} />
         ) : !game ? (
           <LobbyRoom lobby={lobby} onGameStarted={() => { /* state updates on game_state */ }} />
-        ) : (
+    ) : (
           <div className="game-view">
             <GameBoard snapshot={game} lobbyId={lobby.id} />
             <ActionPanel lobbyId={lobby.id} snapshot={game} />
             {game?.game_over ? (
-              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, transition: 'opacity 220ms ease', opacity: fadingOut ? 0 : 1 }}>
                 <div style={{ background: '#fff', borderRadius: 10, padding: 16, minWidth: 360, maxWidth: '85vw', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
                   <h2 style={{ marginTop: 0, marginBottom: 8 }}>🏆 Game Over</h2>
                   <div style={{ fontSize: 14, display: 'grid', gap: 6 }}>
@@ -53,7 +54,22 @@ export default function App() {
                     <div><strong>Most-landed:</strong> {game.game_over?.most_landed?.name || '—'} {typeof game.game_over?.most_landed?.count === 'number' ? `(x${game.game_over?.most_landed?.count})` : ''}</div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
-                    <button className="btn" onClick={() => window.location.reload()}>🔄 New Game</button>
+        <button className="btn" onClick={() => {
+                      // Host-only rematch: ask server to create a new lobby with same members
+                      const s = getSocket();
+                      s.emit('lobby_rematch', { id: lobby?.id }, (resp: any) => {
+                        if (resp?.ok && resp.lobby) {
+                          setFadingOut(true);
+                          setTimeout(() => {
+                            // Move UI back to pre-game lobby state with new lobby info
+                            setGame(null);
+                            setLobby(resp.lobby);
+                            setFadingOut(false);
+                          }, 220);
+                        }
+                      });
+                    }}>🔄 New Game</button>
+        <button className="btn" onClick={() => { setFadingOut(true); setTimeout(() => { setGame(null); setLobby(null); setFadingOut(false); }, 220); }}>🏁 Exit to Menu</button>
                   </div>
                 </div>
               </div>

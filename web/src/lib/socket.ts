@@ -3,7 +3,24 @@ import { BACKEND_URL, SOCKET_PATH } from '../config';
 
 let socket: Socket | null = null;
 let displayName: string | null = null;
-let lastLobbyId: string | null = null;
+
+export function getClientId(): string {
+  // One unique ID per browser tab (sessionStorage is tab-scoped)
+  try {
+    const k = 'clientId';
+    let id = sessionStorage.getItem(k) || '';
+    if (!id) {
+      id = (typeof crypto !== 'undefined' && 'randomUUID' in crypto)
+        ? (crypto as any).randomUUID()
+        : `tab-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+      sessionStorage.setItem(k, id);
+    }
+    return id;
+  } catch {
+    // Fallback if storage unavailable
+    return `tab-${Math.random().toString(36).slice(2)}-${Date.now()}`;
+  }
+}
 
 export function getConnectionStatus() {
   const s = getSocket();
@@ -16,19 +33,15 @@ export function getSocket() {
       path: SOCKET_PATH,
       // Use default transports for robustness (polling + websocket)
       autoConnect: false,
+      auth: { client_id: getClientId() },
     });
 
-    // Auto re-auth and rejoin
-  socket.on('connect', () => {
+    // Re-auth on reconnect (no implicit lobby join)
+    socket.on('connect', () => {
       try {
-    const savedName = displayName ?? (sessionStorage.getItem('displayName') || localStorage.getItem('displayName'));
+        const savedName = displayName ?? (sessionStorage.getItem('displayName') || localStorage.getItem('displayName'));
         if (savedName) {
-          socket!.emit('auth', { display: savedName });
-        }
-        const savedLobby = lastLobbyId ?? localStorage.getItem('lastLobbyId');
-        if (savedLobby) {
-          // ask server for latest state; if join is needed, emit join
-          socket!.emit('lobby_join', { id: savedLobby, lobby_id: savedLobby });
+          socket!.emit('auth', { display: savedName, client_id: getClientId() });
         }
       } catch {}
     });
@@ -43,13 +56,22 @@ export function getSocket() {
 export function connectSocket(displayName: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const s = getSocket();
+    // If already connected, authenticate and resolve immediately
+    if (s.connected) {
+      try {
+        sessionStorage.setItem('displayName', displayName);
+      } catch {}
+      s.emit('auth', { display: displayName, client_id: getClientId() });
+      s.emit('lobby_list');
+      return resolve();
+    }
     const onConnect = () => {
       try {
-  sessionStorage.setItem('displayName', displayName);
+        sessionStorage.setItem('displayName', displayName);
       } catch {}
-      s.emit('auth', { display: displayName });
-  // Let the caller know we're definitely connected
-  s.emit('ping', {}, () => {});
+      s.emit('auth', { display: displayName, client_id: getClientId() });
+      // Optional: app-level ping for visibility (no-op server-side)
+      s.emit('ping', {}, () => {});
       s.off('connect', onConnect);
       resolve();
     };
@@ -64,7 +86,6 @@ export function connectSocket(displayName: string): Promise<void> {
 }
 
 export function rememberLobby(id: string | null) {
-  lastLobbyId = id;
   try {
     if (id) localStorage.setItem('lastLobbyId', id);
     else localStorage.removeItem('lastLobbyId');

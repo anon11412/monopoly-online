@@ -51,7 +51,14 @@
 .actions { display: flex; flex-direction: column; gap: 8px; position: sticky; top: 8px; }
 .actions-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; }
 .actions-panel > .ui-labelframe { min-height: 0; }
-.main-menu, .lobby-room { background: #101826; padding: 12px; border-radius: 8px; }
+.main-menu, .lobby-room { background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%); padding: 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 8px 24px rgba(0,0,0,0.25); color: #e6edf3; }
+.main-menu h1 { margin: 0 0 10px; letter-spacing: 0.5px; font-weight: 800; }
+.main-menu .connect, .lobby-room .controls { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.main-menu .lobbies { display: flex; flex-direction: column; gap: 10px; }
+.main-menu input, .lobby-room input, .lobby-room select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: #e6edf3; border-radius: 6px; padding: 6px 8px; }
+.lobby-room h2, .lobby-room h3 { margin: 6px 0; }
+.lobby-room .players { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px; }
+.lobby-room .controls .btn { align-self: flex-start; }
 .lobby-room .players ul { list-style: none; padding: 0; }
 .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .dot.ready { background: #2ecc71; box-shadow: 0 0 0 1px #196f3d inset; }

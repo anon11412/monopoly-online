@@ -1,5 +1,6 @@
 import { io, Socket } from 'socket.io-client';
 import { BACKEND_URL, SOCKET_PATH } from '../config';
+import { getClientId } from './socket';
 
 export type BotHandle = { id: string; name: string; socket: Socket; stop: () => void };
 
@@ -26,7 +27,7 @@ export async function spawnBot(lobbyId: string, name: string): Promise<BotHandle
     };
     socket.once('connect', () => {
       console.debug('[bot] connect', { lobbyId, name });
-      socket.emit('auth', { display: name });
+      socket.emit('auth', { display: name, client_id: getClientId() });
   // Nudge server to process auth by requesting lobby_list, then join shortly after
   socket.emit('lobby_list');
       socket.on('lobby_state', onState);

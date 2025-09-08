@@ -26,7 +26,7 @@ export default function MainMenu({ onEnterLobby }: Props) {
     };
     s.once('connect_error', onConnectError);
     try {
-      await connectSocket(name);
+  await connectSocket(name);
       s.off('connect_error', onConnectError);
       setConnected(true);
       setStatus('Connected. Loading lobbies…');
@@ -37,7 +37,11 @@ export default function MainMenu({ onEnterLobby }: Props) {
         setLobbies(data.lobbies);
         setStatus(data.lobbies.length ? '' : 'No open lobbies. Create one below.');
       });
-      s.emit('lobby_list');
+  s.emit('lobby_list');
+      // Start periodic refresh every 10 seconds
+      const tick = () => s.emit('lobby_list');
+      try { (window as any).__lobbyTick && clearInterval((window as any).__lobbyTick); } catch {}
+      ;(window as any).__lobbyTick = setInterval(tick, 10000);
     } catch (e: any) {
       s.off('connect_error', onConnectError);
       setStatus('Failed to connect. Please retry.');
@@ -59,16 +63,15 @@ export default function MainMenu({ onEnterLobby }: Props) {
   function rejoinLast() {
     if (!lastLobbyId) return;
     const s = getSocket();
-    joinLobby(lastLobbyId);
-    // Ensure server has our auth/name and then join; connect first if needed
+    // Explicit join only
     if (!connected) {
       connectSocket(name).then(() => {
         s.emit('auth', { display: name });
-        s.emit('lobby_join', { id: lastLobbyId, lobby_id: lastLobbyId });
+        joinLobby(lastLobbyId);
       });
     } else {
       s.emit('auth', { display: name });
-      s.emit('lobby_join', { id: lastLobbyId, lobby_id: lastLobbyId });
+      joinLobby(lastLobbyId);
     }
   }
 
@@ -116,7 +119,7 @@ export default function MainMenu({ onEnterLobby }: Props) {
   }
 
   return (
-    <div className="main-menu">
+  <div className="main-menu" style={{ maxWidth: 800, margin: '0 auto' }}>
       <h1>Monopoly Online</h1>
       {!connected ? (
         <div className="connect">
@@ -144,9 +147,10 @@ export default function MainMenu({ onEnterLobby }: Props) {
           <h3>Available Lobbies</h3>
           <ul>
             {lobbies.map((l) => (
-              <li key={l.id}>
+              <li key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="badge">{(l.players || []).length} in lobby</span>
                 <span>{l.name}</span>
-                <button onClick={() => joinLobby(l.id)} disabled={pendingJoinId === l.id}>
+                <button onClick={() => joinLobby(l.id)} disabled={pendingJoinId === l.id} style={{ marginLeft: 'auto' }}>
                   {pendingJoinId === l.id ? 'Joining…' : 'Join'}
                 </button>
               </li>

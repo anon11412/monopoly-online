@@ -40,6 +40,7 @@ export type TradeOffer = {
   to: string;   // player name
   give?: TradeSide;
   receive?: TradeSide;
+  terms?: { payments?: Array<{ from: string; to: string; amount: number; turns: number }> };
 };
 
 export type GameSnapshot = {

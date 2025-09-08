@@ -22,6 +22,9 @@ export default function LobbyRoom({ lobby, onGameStarted }: Props) {
     const s = getSocket();
     const onLobbyState = (data: any) => {
       if (data?.id === state.id) setState(data);
+      if (data?.id === state.id && Array.isArray((data as any).chat)) {
+        setChat((data as any).chat.map((c: any) => `${c.from || 'anon'}: ${c.message}`));
+      }
     };
     const onChat = (payload: any) => {
       if (payload?.id === state.id && payload?.message) {
@@ -92,25 +95,35 @@ export default function LobbyRoom({ lobby, onGameStarted }: Props) {
   type PlayerRow = { sid?: string; name: string };
   const playersBySid: PlayerRow[] = hasSidMap ? Object.entries(sidToName).map(([sid, name]) => ({ sid, name })) : [];
   const playersByName: PlayerRow[] = !hasSidMap ? (state.players || []).map((name) => ({ name })) : [];
-  // Merge in any names not present in sid map (e.g., server bots or disconnected players)
+  // Merge in any names not present in sid map (e.g., server bots or disconnected players), then dedupe by display name
   const mergedPlayers: PlayerRow[] = useMemo(() => {
-    if (!hasSidMap) return playersByName;
-    const byName = new Set(playersBySid.map(p => p.name));
-    const extras: PlayerRow[] = (state.players || []).filter(n => !byName.has(n)).map(name => ({ name }));
-    return [...playersBySid, ...extras];
+    const list: PlayerRow[] = hasSidMap ? (() => {
+      const byName = new Set(playersBySid.map(p => p.name));
+      const extras: PlayerRow[] = (state.players || []).filter(n => !byName.has(n)).map(name => ({ name }));
+      return [...playersBySid, ...extras];
+    })() : playersByName;
+    const seen = new Set<string>();
+    const unique: PlayerRow[] = [];
+    for (const p of list) {
+      if (p && typeof p.name === 'string' && !seen.has(p.name)) {
+        seen.add(p.name);
+        unique.push(p);
+      }
+    }
+    return unique;
   }, [hasSidMap, playersBySid, playersByName, state.players]);
   const botSet = useMemo(() => new Set(state.bots || []), [state.bots]);
   const readySet = useMemo(() => new Set(state.ready || []), [state.ready]);
-  const players = hasSidMap ? playersBySid : playersByName;
+  const players = mergedPlayers;
   const readyCount = hasSidMap
-    ? playersBySid.filter((p) => p.sid && readySet.has(p.sid)).length
-    : playersByName.filter((p) => readySet.has(p.name)).length;
+    ? mergedPlayers.filter((p) => p.sid && readySet.has(p.sid!)).length
+    : mergedPlayers.filter((p) => readySet.has(p.name)).length;
   const allReady = players.length > 0 && readyCount === players.length;
   const isHost = state.host_sid ? (getSocket().id === state.host_sid) : true;
   const startReason = !isHost ? 'Only host can start' : (!allReady ? 'All players must be ready' : 'Start the game');
 
   return (
-    <div className="lobby-room">
+    <div className="lobby-room" style={{ maxWidth: 960, margin: '0 auto' }}>
       <h2>Lobby: {state.name}</h2>
         <div className="players">
         <h3>Players</h3>

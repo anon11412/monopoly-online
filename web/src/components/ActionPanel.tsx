@@ -20,48 +20,41 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const [showTrades, setShowTrades] = useState(false);
   const [selectedPartner, setSelectedPartner] = useState<string>('');
   // Automation toggles persisted
-  const [autoRoll, setAutoRoll] = useState<boolean>(() => localStorage.getItem('auto.roll') === '1');
-  const [autoBuy, setAutoBuy] = useState<boolean>(() => localStorage.getItem('auto.buy') === '1');
-  const [autoEnd, setAutoEnd] = useState<boolean>(() => localStorage.getItem('auto.end') === '1');
-  const [autoHouses, setAutoHouses] = useState<boolean>(() => localStorage.getItem('auto.houses') === '1');
-  const [autoMortgage, setAutoMortgage] = useState<boolean>(() => localStorage.getItem('auto.mortgage') === '1');
+  const [autoRoll, setAutoRoll] = useState<boolean>(() => localStorage.getItem('auto.roll') === '1' ? true : false);
+  const [autoBuy, setAutoBuy] = useState<boolean>(() => localStorage.getItem('auto.buy') === '1' ? true : false);
+  const [autoEnd, setAutoEnd] = useState<boolean>(() => localStorage.getItem('auto.end') === '1' ? true : false);
+  const [autoHouses, setAutoHouses] = useState<boolean>(() => localStorage.getItem('auto.houses') === '1' ? true : false);
+  const [autoMortgage, setAutoMortgage] = useState<boolean>(() => localStorage.getItem('auto.mortgage') === '1' ? true : false);
   const [minKeep, setMinKeep] = useState<number>(() => parseInt(localStorage.getItem('auto.minKeep') || '0', 10));
   const [costRule, setCostRule] = useState<'any' | 'above' | 'below'>(() => (localStorage.getItem('auto.costRule') as any) || 'any');
   const [costValue, setCostValue] = useState<number>(() => parseInt(localStorage.getItem('auto.costValue') || '0', 10));
   const [autoSpread, setAutoSpread] = useState<boolean>(() => localStorage.getItem('auto.spread') === '1');
   const [tiles, setTiles] = useState<Record<number, BoardTile>>({});
-  const [seenTradeIds, setSeenTradeIds] = useState<Set<string>>(new Set());
-  const [jiggleFlag, setJiggleFlag] = useState(false);
   const logRef = useRef<HTMLDivElement | null>(null);
   const [, setOpenTradeId] = useState<string | null>(null);
-  const [kickVotes, setKickVotes] = useState<Record<string, string[]>>({});
-  const [disconnects, setDisconnects] = useState<Record<string, number>>({});
+  const [kickStatus, setKickStatus] = useState<{ target?: string | null; remaining?: number | null }>({});
 
-  // Subscribe to lobby_state for vote-kick and disconnect timers
+  // Allow GameBoard to open Trades/Log via global events
+  useEffect(() => {
+    const openTrades = () => setShowTrades(true);
+    const openLog = () => setShowLog(true);
+    window.addEventListener('open-trades' as any, openTrades);
+    window.addEventListener('open-log' as any, openLog);
+    return () => {
+      window.removeEventListener('open-trades' as any, openTrades);
+      window.removeEventListener('open-log' as any, openLog);
+    };
+  }, []);
+
+  // Subscribe to lobby_state for vote-kick status
   useEffect(() => {
     const onLobbyState = (l: any) => {
       if (!l || l.id == null) return;
-  if (l.kick_votes) setKickVotes(l.kick_votes as any);
-  if (l.disconnect_remain) setDisconnects(l.disconnect_remain as any);
+      setKickStatus({ target: l.kick_target, remaining: l.kick_remaining });
     };
     s.on('lobby_state', onLobbyState);
     return () => { s.off('lobby_state', onLobbyState); };
   }, [s]);
-
-  // Smooth countdown for disconnect timers
-  useEffect(() => {
-    const t = setInterval(() => {
-      setDisconnects(prev => {
-        const next: Record<string, number> = {};
-        for (const k in prev) {
-          const v = Math.max(0, (prev[k] || 0) - 1);
-          if (v > 0) next[k] = v;
-        }
-        return Object.keys(next).length ? next : prev;
-      });
-    }, 1000);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     const snapTiles: any[] | undefined = (snapshot as any)?.tiles;
@@ -81,9 +74,14 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
   const myTurn = snapshot.players[snapshot.current_turn]?.name === myName;
   const rolledThisTurn = !!snapshot.rolled_this_turn;
-  const rollsLeft = snapshot.rolls_left ?? 0;
-  const canRoll = myTurn && (!rolledThisTurn || rollsLeft > 0);
-  const canEndTurn = myTurn && rolledThisTurn && rollsLeft === 0;
+  // List of other players you can trade with
+  const otherPlayers = useMemo(() => (snapshot.players || []).filter(p => p.name !== myName), [snapshot.players, myName]);
+  // If no partner selected, auto-set to the first other player to avoid button lockout
+  useEffect(() => {
+    if (!selectedPartner && otherPlayers.length > 0) {
+      setSelectedPartner(otherPlayers[0].name);
+    }
+  }, [selectedPartner, otherPlayers]);
   // Compute canBuy before effects use it
   const canBuy = useMemo(() => {
     if (!myTurn) return false;
@@ -114,11 +112,12 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   useEffect(() => {
     if (!myTurn || !autoRoll) return;
     // Continue rolling if allowed, regardless of non-blocking last_action like buy_denied
-    if (canRoll) {
+    const allow = myTurn && (!rolledThisTurn || (snapshot.rolls_left ?? 0) > 0);
+    if (allow) {
       const t = setTimeout(() => act('roll_dice'), 180);
       return () => clearTimeout(t);
     }
-  }, [myTurn, autoRoll, canRoll, snapshot.last_action]);
+  }, [myTurn, autoRoll, rolledThisTurn, snapshot.rolls_left, snapshot.last_action]);
   useEffect(() => {
     if (!myTurn) return;
     const pos = myPlayer?.position ?? -1;
@@ -208,8 +207,8 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       tryAutoMortgage();
       return;
     }
-    if (autoEnd && canEndTurn) act('end_turn');
-  }, [myTurn, autoEnd, canEndTurn, autoHouses, nextHouseActionCandidate]);
+    if (autoEnd && (myTurn && rolledThisTurn && (snapshot.rolls_left ?? 0) === 0)) act('end_turn');
+  }, [myTurn, autoEnd, rolledThisTurn, snapshot.rolls_left, autoHouses, nextHouseActionCandidate]);
 
   function tryAutoMortgage() {
     // Mortgage owned properties without buildings, lowest price first
@@ -223,37 +222,9 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     act('mortgage', { pos: arr[0].pos });
   }
 
-  const lastDice = useMemo(() => {
-    const la: any = snapshot.last_action;
-    if (la?.type === 'rolled') return `${la.d1 ?? ''} + ${la.d2 ?? ''}${la.doubles ? ' (doubles)' : ''}`;
-    return '';
-  }, [snapshot.last_action]);
+  // lastDice removed from UI
 
-  // Track incoming trades to show badge and jiggle on new ones
-  const incomingTrades = useMemo(() => (snapshot.pending_trades || []).filter((t: any) => t.to === myName), [snapshot.pending_trades, myName]);
-  const unreadCount = useMemo(() => incomingTrades.filter((t: any) => !seenTradeIds.has(String(t.id))).length, [incomingTrades, seenTradeIds]);
-  useEffect(() => {
-    // If new trade IDs appear that weren't seen, trigger a short jiggle
-  const ids = new Set(incomingTrades.map((t: any) => String(t.id)));
-    let hasNew = false;
-    for (const id of ids) if (!seenTradeIds.has(id)) { hasNew = true; break; }
-    if (hasNew) {
-      setJiggleFlag(true);
-      const to = setTimeout(() => setJiggleFlag(false), 700);
-      return () => clearTimeout(to);
-    }
-  }, [incomingTrades]);
-
-  // When opening the trades modal, mark current incoming as seen
-  useEffect(() => {
-    if (showTrades) {
-      setSeenTradeIds(prev => {
-        const next = new Set(prev);
-        for (const t of incomingTrades) next.add(String(t.id));
-        return next;
-      });
-    }
-  }, [showTrades, incomingTrades]);
+  // (Incoming/outgoing trades are selected directly in JSX when rendering the modal)
 
   // Auto-scroll log to bottom when opened and when it changes while open
   useEffect(() => {
@@ -285,26 +256,15 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
   return (
     <div className="actions actions-panel" style={{ position: 'relative' }}>
+      {kickStatus?.target ? (
+        <div className="ui-sm" style={{ position: 'absolute', right: 0, top: -20, color: '#c0392b' }}>
+          Vote-kick: {kickStatus.target} — {typeof kickStatus.remaining === 'number' ? `${Math.floor((kickStatus.remaining as number)/60)}:${String((kickStatus.remaining as number)%60).padStart(2,'0')}` : ''}
+        </div>
+      ) : null}
   <div className="ui-labelframe" style={{ marginBottom: 8 }}>
         <div className="ui-title ui-h3">Current Turn</div>
         <div className="ui-h3" style={{ marginTop: 6 }}>Turn: {snapshot.players?.[snapshot.current_turn || 0]?.name ?? '\u2014'}</div>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-          <button className="btn btn-primary" disabled={!canRoll} title={!myTurn ? 'Not your turn' : (rolledThisTurn && rollsLeft === 0 ? 'No rolls left' : undefined)} onClick={() => act('roll_dice')}>🎲 Roll {lastDice ? <span style={{ marginLeft: 6, opacity: 0.8 }}>last: {lastDice}</span> : null}</button>
-          <button className="btn btn-success" disabled={!canBuy} onClick={() => act('buy_property')} title={canBuy && currentTile ? `${currentTile.name} — $${currentTile.price ?? 0}` : undefined}>🏠 Buy</button>
-          {myPlayer?.in_jail && (myPlayer?.jail_cards || 0) > 0 ? (
-            <button className="btn btn-warning" onClick={() => act('use_jail_card')}>🪪 Use Jail Card</button>
-          ) : null}
-          <button className="btn btn-ghost" disabled={!canEndTurn} onClick={() => act('end_turn')}>⏭ End Turn</button>
-          <select value={selectedPartner} onChange={(e) => setSelectedPartner(e.target.value)} style={{ minWidth: 140 }}>
-            <option value="">Select player…</option>
-            {(snapshot.players || []).filter(p => p.name !== myName).map((p,i) => (
-              <option key={i} value={p.name}>{p.name}</option>
-            ))}
-          </select>
-          <button className="btn btn-primary" onClick={() => setShowTrade(true)} disabled={(snapshot?.players?.length || 0) < 2 || !selectedPartner}>🤝 Trade</button>
-          <button className="btn btn-warning" onClick={() => setShowTradeAdvanced(true)} disabled={(snapshot?.players?.length || 0) < 2 || !selectedPartner} title="Coming later">⚡ Advanced Trade</button>
-          <button className="btn btn-danger" onClick={() => act('bankrupt')}>💥 Bankruptcy</button>
-        </div>
+  {/* Roll/Buy/End buttons removed; use in-board controls instead */}
         {canBuy && currentTile ? (
           <div className="ui-sm" style={{ marginTop: 6, color: '#2c3e50' }}>
             You may buy <strong>{currentTile.name}</strong> for <strong>${currentTile.price ?? 0}</strong>.
@@ -327,41 +287,26 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
   {/* Dice moved to GameBoard center */}
 
-      <div className="ui-labelframe" style={{ marginBottom: 8 }}>
-        <div className="ui-title ui-h3">Players Overview</div>
-        <div style={{ fontSize: 12, marginTop: 6 }}>
-          {snapshot.players?.map((p, i) => {
-            const meRow = p.name === myName;
-            const seconds = Math.max(0, Math.floor((disconnects[p.name] || 0)));
-            const mm = Math.floor(seconds / 60), ss = seconds % 60;
-            const left = seconds > 0 ? `${mm}:${ss.toString().padStart(2,'0')}` : '';
-            const votes = (kickVotes[p.name] || []).length;
-            return (
-              <div key={i} className={`list-item${i === snapshot.current_turn ? ' current' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || 'var(--muted)', display: 'inline-block' }} />
-                <button className="btn btn-link" style={{ padding: 0 }} onClick={() => window.dispatchEvent(new CustomEvent('highlight-player', { detail: { name: p.name } }))} title="Highlight rents for this player's properties">
-                  {p.name}
-                </button>
-                {left ? <span className="badge badge-muted" title="Reconnect timer" style={{ marginLeft: 4 }}>{left}</span> : null}
-                <span style={{ marginLeft: 'auto' }}>${p.cash}</span>
-                {!meRow ? (
-                  <button className="btn btn-ghost" onClick={() => s.emit('vote_kick', { id: lobbyId, target: p.name })} title={votes ? `${votes} votes` : 'Vote to kick'}>🚫 {votes || ''}</button>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-        <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'stretch' }}>
-          <button className={`btn btn-ghost btn-with-badge ${jiggleFlag ? 'jiggle' : ''}`} onClick={() => setShowTrades(true)}>
-            📬 View Trades
-            {unreadCount > 0 ? <span className="btn-badge" title={`${unreadCount} new`}>{unreadCount}</span> : null}
-          </button>
-          <button className="btn btn-ghost" onClick={() => setShowLog(true)}>📜 Open Log</button>
-        </div>
-      </div>
+  {/* Players Overview moved into GameBoard overlay; keeping the modal infrastructure here */}
 
-  {showTrade ? <TradePanel lobbyId={lobbyId} snapshot={snapshot} variant="properties" initialPartner={selectedPartner} onClose={() => setShowTrade(false)} /> : null}
-  {showTradeAdvanced ? <TradePanel lobbyId={lobbyId} snapshot={snapshot} variant="advanced" initialPartner={selectedPartner} onClose={() => setShowTradeAdvanced(false)} /> : null}
+  {showTrade ? (
+    <TradePanel
+      lobbyId={lobbyId}
+      snapshot={snapshot}
+      variant="properties"
+      initialPartner={selectedPartner || otherPlayers[0]?.name || ''}
+      onClose={() => setShowTrade(false)}
+    />
+  ) : null}
+  {showTradeAdvanced ? (
+    <TradePanel
+      lobbyId={lobbyId}
+      snapshot={snapshot}
+      variant="advanced"
+      initialPartner={selectedPartner || otherPlayers[0]?.name || ''}
+      onClose={() => setShowTradeAdvanced(false)}
+    />
+  ) : null}
 
   {showTrades ? (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowTrades(false)}>
@@ -377,6 +322,16 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                   <div key={t.id} className="card" style={{ padding: 8 }}>
                     <TradeHeader snapshot={snapshot} from={t.from} to={t.to} id={t.id} />
                     <TradeSummary t={t} tiles={tiles} />
+                    {t.terms?.payments?.length ? (
+                      <div style={{ fontSize: 12, marginTop: 6 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Recurring payments</div>
+                        <ul style={{ margin: 0, paddingLeft: 16 }}>
+                          {t.terms.payments.map((p: any, i: number) => (
+                            <li key={i}>{p.from} pays ${p.amount} to {p.to} for {p.turns} turns</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                     <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                       <button className="btn" onClick={() => act('accept_trade', { trade_id: t.id })} disabled={t.to !== myName}>Accept</button>
                       <button className="btn" onClick={() => act('decline_trade', { trade_id: t.id })}>Decline</button>
@@ -391,6 +346,16 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                   <div key={t.id} className="card" style={{ padding: 8 }}>
           <TradeHeader snapshot={snapshot} from={t.from} to={t.to} id={t.id} />
                     <TradeSummary t={t} tiles={tiles} />
+                    {t.terms?.payments?.length ? (
+                      <div style={{ fontSize: 12, marginTop: 6 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>Recurring payments</div>
+                        <ul style={{ margin: 0, paddingLeft: 16 }}>
+                          {t.terms.payments.map((p: any, i: number) => (
+                            <li key={i}>{p.from} pays ${p.amount} to {p.to} for {p.turns} turns</li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
                     <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                       <button className="btn" onClick={() => act('cancel_trade', { trade_id: t.id })}>Cancel</button>
                     </div>

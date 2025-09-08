@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { BACKEND_URL, BOARD_META_PATH } from '../config';
 import { buildDefaultBoardTiles } from '../lib/boardFallback';
+import TradePanel from './TradePanel';
 import type { BoardTile, GameSnapshot, PropertyState, PropertyStateLike } from '../types';
 import { buildPlayerColorMap } from '../lib/colors';
 import { getSocket, getRemembered } from '../lib/socket';
@@ -14,6 +15,21 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   const [openPropPos, setOpenPropPos] = useState<number | null>(null);
   const s = getSocket();
   const [highlightedPlayer, setHighlightedPlayer] = useState<string | null>(null);
+  const [chatOpen, setChatOpen] = useState<boolean>(false);
+  const [chatLog, setChatLog] = useState<Array<{ from: string; message: string; ts?: number }>>([]);
+  const [chatMsg, setChatMsg] = useState<string>('');
+  const [kickBanner, setKickBanner] = useState<{ target?: string | null; remaining?: number | null }>({});
+  // Trade overlays and picker
+  const [showTrade, setShowTrade] = useState(false);
+  const [showTradeAdvanced, setShowTradeAdvanced] = useState(false);
+  const [showPartnerPicker, setShowPartnerPicker] = useState<null | 'basic' | 'advanced'>(null);
+  const meName = (getRemembered().displayName || '').trim();
+  // For unread badge on View Trades
+  const unreadIncoming = useMemo(() => {
+    const my = meName || (snapshot?.players?.[snapshot?.current_turn ?? -1]?.name || '');
+    const incoming = (snapshot?.pending_trades || []).filter((t: any) => t.to === my);
+    return incoming.length;
+  }, [snapshot?.pending_trades, snapshot?.current_turn, snapshot?.players, meName]);
   useEffect(() => {
     const onHi = (ev: any) => setHighlightedPlayer(ev?.detail?.name || null);
     window.addEventListener('highlight-player' as any, onHi);
@@ -24,10 +40,10 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     let cancelled = false;
     async function load() {
       setErr('');
-  const bases = [BACKEND_URL || '', 'http://127.0.0.1:8000'];
+      const bases = [BACKEND_URL || '', 'http://127.0.0.1:8000'];
       for (const base of bases) {
         try {
-      const url = base ? `${base}${BOARD_META_PATH}` : BOARD_META_PATH;
+          const url = base ? `${base}${BOARD_META_PATH}` : BOARD_META_PATH;
           const res = await fetch(url, { headers: { Accept: 'application/json' } });
           if (!res.ok) continue;
           const data = await res.json();
@@ -48,6 +64,36 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     load();
     return () => { cancelled = true };
   }, []);
+
+  // Subscribe to chat and lobby updates
+  useEffect(() => {
+    const onLobby = (l: any) => {
+      if (!lobbyId || !l || l.id !== lobbyId) return;
+      if (Array.isArray(l.chat)) {
+        setChatLog(l.chat.map((c: any) => ({ from: c.from, message: c.message, ts: c.ts })));
+      }
+      setKickBanner({ target: l.kick_target, remaining: l.kick_remaining });
+    };
+    const onChat = (payload: any) => {
+      if (!lobbyId || payload?.id !== lobbyId) return;
+      setChatLog((prev) => [...prev, { from: payload.from, message: payload.message, ts: payload.ts }]);
+    };
+    s.on('lobby_state', onLobby);
+    s.on('lobby_chat', onChat);
+    return () => {
+      s.off('lobby_state', onLobby);
+      s.off('lobby_chat', onChat);
+    };
+  }, [s, lobbyId]);
+
+  // Local countdown tick for kick banner
+  useEffect(() => {
+    if (!kickBanner.remaining) return;
+    const t = setInterval(() => {
+      setKickBanner((kb) => ({ ...kb, remaining: kb.remaining && kb.remaining > 0 ? kb.remaining - 1 : 0 }));
+    }, 1000);
+    return () => clearInterval(t);
+  }, [kickBanner.remaining]);
 
   // tiles are rendered directly; map by position if needed later
   const tileByPos = useMemo(() => Object.fromEntries(tiles.map((t: BoardTile) => [t.pos, t])), [tiles]);
@@ -82,17 +128,22 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
       {err ? <div style={{ color: '#e74c3c', fontSize: 12, marginBottom: 6 }}>{err}</div> : null}
       <div style={{ padding: '4px 6px', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Turn: {curName || '—'}</div>
       <div className="board-wrap" style={{ position: 'relative' }}>
+        {kickBanner?.target ? (
+          <div style={{ position: 'absolute', left: '50%', top: -36, transform: 'translateX(-50%)', background: 'rgba(231, 76, 60, 0.9)', color: '#fff', padding: '4px 8px', borderRadius: 6, fontSize: 12, zIndex: 5 }}>
+            Vote-kick: {kickBanner.target} — {typeof kickBanner.remaining === 'number' ? `${Math.floor((kickBanner.remaining as number)/60)}:${String((kickBanner.remaining as number)%60).padStart(2,'0')}` : ''}
+          </div>
+        ) : null}
         <div className="grid">
         {tiles.length === 0 ? (
           <div style={{ gridColumn: 6, gridRow: 6, alignSelf: 'center', justifySelf: 'center', fontSize: 12, opacity: 0.8 }}>No board to display</div>
-  ) : tiles.map((t: BoardTile) => {
+        ) : tiles.map((t: BoardTile) => {
           const p = normalize(t.pos, props[t.pos as any]);
           const ownerColor = p?.owner_color;
           const houses = p?.houses || 0;
           const hotel = p?.hotel || false;
           const mortgaged = !!p?.mortgaged;
           const isCurrent = snapshot?.players?.[curIdx]?.position === t.pos;
-          const clickable = (t.type === 'property' || t.type === 'railroad' || t.type === 'utility');
+          const clickable = (t.type === 'property' || t.type === 'railroad' || t.type === 'utility' || t.type === 'jail');
           const edge = (() => {
             // Determine board edge to place owner marker toward center
             if (t.y === 10) return 'top'; // bottom row on grid -> owner above
@@ -136,61 +187,149 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           );
         })}
         </div>
-          {/* Dice overlay centered */}
-          <div style={{ position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}>
+          {/* Dice overlay centered, moved down by 40px */}
+          <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 40px)', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center' }}>
               <span className="badge badge-muted" style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{lastRoll ? lastRoll.d1 : '–'}</span>
               <span className="badge badge-muted" style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{lastRoll ? lastRoll.d2 : '–'}</span>
             </div>
           </div>
-  </div>
-  {/* Core action buttons centered within board; hidden unless actionable */}
-      {(() => {
-        const me = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
-        const myName = (getRemembered().displayName || '').trim() || me?.name || '';
-        const myTurn = me?.name === myName;
-        const rolledThisTurn = !!snapshot?.rolled_this_turn;
-        const rollsLeft = snapshot?.rolls_left ?? 0;
-        const canRollC = myTurn && (!rolledThisTurn || rollsLeft > 0);
-        // compute canBuy similar to ActionPanel
-        let canBuyC = false;
-        if (myTurn) {
-          const la: any = snapshot?.last_action;
-          if (['landed_on_unowned', 'offer_buy', 'can_buy'].includes(String(la?.type || ''))) {
-            canBuyC = true;
-          } else {
-            const pos = me?.position ?? -1;
-            if (pos >= 0) {
-              const tilesArr: any[] = (snapshot as any)?.tiles || [];
-              const tile = tilesArr.find((x) => x?.pos === pos);
-              const propsMap: any = (snapshot as any)?.properties || {};
-              const st = propsMap?.[pos];
-              const buyable = tile && ['property', 'railroad', 'utility'].includes(String(tile.type)) && (tile.price || 0) > 0 && !(st && st.owner);
-              canBuyC = !!buyable;
-            }
-          }
-        }
-        const canEndC = myTurn && rolledThisTurn && rollsLeft === 0;
-        const show = canRollC || canBuyC || canEndC || (myTurn && (me?.in_jail && (me?.jail_cards || 0) > 0));
-        if (!show) return null;
-        return (
-          <div style={{ position: 'absolute', left: '50%', bottom: '-30px', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center' }}>
-            <button className="btn btn-primary" disabled={!canRollC} onClick={() => act('roll_dice')}>🎲 Roll</button>
-            <button className="btn btn-success" disabled={!canBuyC} onClick={() => act('buy_property')}>🏠 Buy</button>
-            {myTurn && (me?.in_jail && (me?.jail_cards || 0) > 0) ? (
-              <button className="btn btn-warning" onClick={() => act('use_jail_card')}>🪪 Use Jail Card</button>
-            ) : null}
-            <button className="btn btn-ghost" disabled={!canEndC} onClick={() => act('end_turn')}>⏭ End Turn</button>
+          {/* Unified controls layer: contains trade controls and core action controls */}
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }}>
+            {/* Players Overview — centered, 250px above Trade row (trade is at 50%+50px => this at 50%-200px) */}
+            <div style={{ position: 'absolute', left: '50%', top: 'calc(50% - 200px)', transform: 'translateX(-50%)', pointerEvents: 'auto' }}>
+              <div className="ui-labelframe" style={{ background: 'rgba(255,255,255,0.96)', border: '1px solid #e1e4e8', borderRadius: 8, padding: 10, minWidth: 320, maxWidth: '80vw' }}>
+                <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Players Overview</div>
+                <div style={{ fontSize: 12, marginTop: 6, display: 'grid', gap: 6 }}>
+                  {(snapshot?.players || []).map((p, i) => (
+                    <div key={i} className={`list-item${i === (snapshot?.current_turn ?? -1) ? ' current' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || 'var(--muted)', display: 'inline-block' }} />
+                      <button className="btn btn-link" style={{ padding: 0 }} onClick={() => window.dispatchEvent(new CustomEvent('highlight-player', { detail: { name: p.name } }))} title="Highlight rents for this player's properties">{p.name}</button>
+                      <span style={{ marginLeft: 'auto' }}>${p.cash}</span>
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'center' }}>
+                  <button className={`btn btn-ghost${unreadIncoming > 0 ? ' btn-with-badge' : ''}`} onClick={() => window.dispatchEvent(new CustomEvent('open-trades'))}>
+                    📬 View Trades
+                    {unreadIncoming > 0 ? <span className="btn-badge" title={`${unreadIncoming} new`}>{unreadIncoming}</span> : null}
+                  </button>
+                  <button className="btn btn-ghost" onClick={() => window.dispatchEvent(new CustomEvent('open-log'))}>📜 Open Log</button>
+                </div>
+              </div>
+            </div>
+            {(() => {
+              // Core roll/action buttons — now at former trade position and moved down by 30px
+              const me = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
+              const myName = (getRemembered().displayName || '').trim() || me?.name || '';
+              const myTurn = me?.name === myName;
+              const rolledThisTurn = !!snapshot?.rolled_this_turn;
+              const rollsLeft = snapshot?.rolls_left ?? 0;
+              const canRollC = myTurn && (!rolledThisTurn || rollsLeft > 0);
+              // compute canBuy similar to ActionPanel
+              let canBuyC = false;
+              {
+                const la: any = snapshot?.last_action;
+                if (['landed_on_unowned', 'offer_buy', 'can_buy'].includes(String(la?.type || ''))) {
+                  canBuyC = true;
+                } else {
+                  const pos = me?.position ?? -1;
+                  if (pos >= 0) {
+                    const tilesArr: any[] = (snapshot as any)?.tiles || [];
+                    const tile = tilesArr.find((x) => x?.pos === pos);
+                    const propsMap: any = (snapshot as any)?.properties || {};
+                    const st = propsMap?.[pos];
+                    const buyable = tile && ['property', 'railroad', 'utility'].includes(String(tile.type)) && (tile.price || 0) > 0 && !(st && st.owner);
+                    canBuyC = !!buyable && myTurn;
+                  }
+                }
+              }
+              const canEndC = myTurn && rolledThisTurn && rollsLeft === 0;
+              return (
+                <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 80px)', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
+                  <button className="btn btn-primary" disabled={!canRollC} onClick={() => act('roll_dice')}>🎲 Roll</button>
+                  <button className="btn btn-success" disabled={!canBuyC} onClick={() => act('buy_property')}>🏠 Buy</button>
+                  <button className="btn btn-ghost" disabled={!canEndC} onClick={() => act('end_turn')}>⏭ End Turn</button>
+                  <button className="btn btn-ghost" onClick={() => setChatOpen((v) => !v)} title="Toggle chat">💬</button>
+                </div>
+              );
+            })()}
+            {(() => {
+              // Trade / Advanced / Bankruptcy row — moved up by 40px (from bottom: 85px to 125px)
+              const cur = snapshot?.players?.[snapshot?.current_turn ?? -1];
+              const myName = meName || cur?.name || '';
+              const players = (snapshot?.players || []).map(p => p.name).filter(n => n !== myName);
+              const enableTrade = players.length >= 1;
+              return (
+                <div style={{ position: 'absolute', left: '50%', bottom: '125px', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', pointerEvents: 'auto' }}>
+                  <button className="btn" disabled={!enableTrade} onClick={() => setShowPartnerPicker('basic')}>🤝 Trade</button>
+                  <button className="btn" disabled={!enableTrade} onClick={() => setShowPartnerPicker('advanced')}>⚡ Advanced Trade</button>
+                  <button className="btn btn-danger" onClick={() => act('bankrupt')}>💥 Bankruptcy</button>
+                </div>
+              );
+            })()}
           </div>
-        );
-      })()}
-      {/* Lightweight in-game chat placeholder (UI only; server wiring can follow) */}
-      <div style={{ position: 'absolute', right: -8, bottom: -8, width: 260, maxHeight: 220, background: 'rgba(255,255,255,0.9)', border: '1px solid #e1e4e8', borderRadius: 8, padding: 8, overflow: 'hidden', display: 'none' }}>
-        <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>💬 Chat</div>
-        <div style={{ fontSize: 12, height: 140, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 6, background: '#fff' }} />
+  </div>
+  {/* Partner pre-menu overlay */}
+  {showPartnerPicker ? (() => {
+    const cur = snapshot?.players?.[snapshot?.current_turn ?? -1];
+    const myName = meName || cur?.name || '';
+    const others = (snapshot?.players || []).map(p => p.name).filter(n => n !== myName);
+    const pick = (partner: string) => {
+      setShowPartnerPicker(null);
+      if (showPartnerPicker === 'basic') setShowTrade(true);
+      if (showPartnerPicker === 'advanced') setShowTradeAdvanced(true);
+      // Stash initial partner globally for TradePanel
+      try { (window as any).__initialPartner = partner; } catch {}
+    };
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowPartnerPicker(null)}>
+        <div style={{ background: '#fff', borderRadius: 8, padding: 12, minWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ fontWeight: 700, marginBottom: 8 }}>{showPartnerPicker === 'advanced' ? 'Choose partner for Advanced Trade' : 'Choose partner for Trade'}</div>
+          <div style={{ display: 'grid', gap: 8 }}>
+            {others.length === 0 ? <div style={{ opacity: 0.7 }}>No other players.</div> : others.map((n, i) => (
+              <button key={i} className="btn" onClick={() => pick(n)}>{n}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  })() : null}
+
+  {/* Trade panels rendered from board */}
+  {showTrade ? (
+    <TradePanel
+      lobbyId={lobbyId!}
+      snapshot={snapshot!}
+      variant="properties"
+      initialPartner={(window as any).__initialPartner || ''}
+      onClose={() => setShowTrade(false)}
+    />
+  ) : null}
+  {showTradeAdvanced ? (
+    <TradePanel
+      lobbyId={lobbyId!}
+      snapshot={snapshot!}
+      variant="advanced"
+      initialPartner={(window as any).__initialPartner || ''}
+      onClose={() => setShowTradeAdvanced(false)}
+    />
+  ) : null}
+  
+      {/* In-game chat box */}
+      <div style={{ position: 'absolute', right: -8, bottom: -8, width: 280, maxHeight: 260, background: 'rgba(255,255,255,0.95)', border: '1px solid #e1e4e8', borderRadius: 8, padding: 8, overflow: 'hidden', display: chatOpen ? 'block' : 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>💬 Chat</div>
+          <button className="btn btn-ghost" onClick={() => setChatOpen(false)} style={{ padding: 2 }}>✖</button>
+        </div>
+        <div style={{ fontSize: 12, height: 160, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 6, background: '#fff' }}>
+          {chatLog.length === 0 ? <div style={{ opacity: 0.7 }}>No messages yet.</div> : chatLog.map((c, i) => (
+            <div key={i}><strong>{c.from}:</strong> {c.message}</div>
+          ))}
+        </div>
         <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-          <input placeholder="Type a message…" style={{ flex: 1 }} />
-          <button className="btn btn-ghost">Send</button>
+          <input placeholder="Type a message…" value={chatMsg} onChange={(e) => setChatMsg(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { if (chatMsg.trim()) { s.emit('chat_send', { id: lobbyId, message: chatMsg.trim() }); setChatMsg(''); } } }} style={{ flex: 1 }} />
+          <button className="btn btn-ghost" onClick={() => { if (chatMsg.trim()) { s.emit('chat_send', { id: lobbyId, message: chatMsg.trim() }); setChatMsg(''); } }}>Send</button>
         </div>
       </div>
       {openPropPos != null ? (() => {
@@ -275,6 +414,22 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>Utility Rent</div>
                       <div>One utility: 4× dice roll</div>
                       <div>Both utilities: 10× dice roll</div>
+                    </div>
+                  );
+                } else if (t.type === 'jail') {
+                  // Jail tile: allow using jail card only when it's my turn, I'm in jail, haven't rolled, and have a card
+                  const me = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
+                  const myName = (getRemembered().displayName || '').trim() || me?.name || '';
+                  const myTurn = me?.name === myName;
+                  const rolledThisTurn = !!snapshot?.rolled_this_turn;
+                  const canUseJailCard = !!(myTurn && me?.in_jail && !rolledThisTurn && (me?.jail_cards || 0) > 0);
+                  return (
+                    <div className="ui-card" style={{ marginTop: 10, fontSize: 12 }}>
+                      <div style={{ fontWeight: 600, marginBottom: 4 }}>Jail</div>
+                      <div>You're just visiting, or serving time if in jail.</div>
+                      <div style={{ marginTop: 8 }}>
+                        <button className="btn btn-warning" disabled={!canUseJailCard} onClick={() => act('use_jail_card')}>🪪 Use Jail Card</button>
+                      </div>
                     </div>
                   );
                 }

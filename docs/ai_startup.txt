@@ -1,0 +1,51 @@
+Monopoly Online - Quick Local Startup for AI (Linux, bash)
+
+Goal
+- Start backend (FastAPI + Socket.IO) on 127.0.0.1:8000
+- Start frontend (Vite/React) on 127.0.0.1:5173 with proxy to backend
+
+Assumptions
+- Working directory: /workspaces/monopoly-online
+- Python 3.11+ and Node.js 18+ available
+- bash shell
+
+Steps
+1) Free ports (optional, avoids conflicts)
+   kill -9 $(lsof -t -i:8000) 2>/dev/null || true
+   kill -9 $(lsof -t -i:5173) 2>/dev/null || true
+
+2) Backend (start uvicorn with reload)
+   python3 -m venv .venv
+   . .venv/bin/activate
+   python -m pip install --upgrade pip
+   python -m pip install -r server/requirements.txt
+   cd server
+   uvicorn main:asgi --host 127.0.0.1 --port 8000 --reload
+
+   Health check:
+   curl -sS http://127.0.0.1:8000/board_meta | head -c 200 && echo
+
+3) Frontend (Vite dev server)
+   cd /workspaces/monopoly-online/web
+   npm install
+   npm run dev -- --strictPort --host 127.0.0.1 --port 5173
+
+   Open: http://127.0.0.1:5173/
+
+Environment overrides (optional)
+- Frontend uses same-origin with Vite proxy by default.
+- To point frontend directly at a different backend, set:
+  echo "VITE_BACKEND_URL=http://127.0.0.1:8000" > web/.env.local
+  (then restart Vite)
+
+Stop/Restart
+- Backend: Ctrl+C in the uvicorn terminal.
+- Frontend: Ctrl+C in the Vite terminal.
+- If ports are stuck, find/kill:
+  ss -ltnp | grep 8000
+  ss -ltnp | grep 5173
+
+Notes
+- Socket.IO path is /socket.io/
+- REST meta endpoint is /board_meta
+- The backend ASGI app is main:asgi
