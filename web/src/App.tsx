@@ -23,12 +23,22 @@ export default function App() {
     s.on('game_state', onGameState);
     s.on('connect', onConn);
     s.on('disconnect', onConn);
+    
+    // Periodic state refresh for active games to combat desync
+    const refreshInterval = setInterval(() => {
+      if (game && lobby && s.connected) {
+        // Request fresh state by re-authing the lobby
+        s.emit('auth_lobby', { id: lobby.id });
+      }
+    }, 10000); // Every 10 seconds
+    
     return () => {
       s.off('game_state', onGameState);
       s.off('connect', onConn);
       s.off('disconnect', onConn);
+      clearInterval(refreshInterval);
     };
-  }, []);
+  }, [game, lobby]);
 
   return (
     <div className="app">

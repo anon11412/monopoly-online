@@ -61,6 +61,8 @@ export type GameSnapshot = {
   // Stats & end state
   turns?: number;
   game_over?: { winner?: string | null; turns?: number; most_landed?: { pos?: number | null; name?: string | null; count?: number } | null } | null;
+  // Stocks (optional)
+  stocks?: Array<{ owner: string; owner_color?: string | null; price: number; total_shares: number; allow_investing?: boolean; enforce_min_buy?: boolean; min_buy: number; enforce_min_pool?: boolean; min_pool_total?: number; min_pool_owner?: number; base?: number; owner_percent?: number; holdings: Array<{ investor: string; shares: number; percent?: number }>; history?: Array<{ turn: number; pool: number }> }>;
 };
 
 // Server may send variants; normalize into PropertyState

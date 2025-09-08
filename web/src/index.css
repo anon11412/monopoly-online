@@ -58,6 +58,12 @@ button { font-family: inherit; cursor: pointer; }
 .btn-danger { background: var(--ui-danger); color: #fff; }
 .btn-warning { background: var(--ui-warning); color: #2c3e50; }
 .btn-ghost { background: transparent; color: var(--ui-text); border-color: var(--ui-border); border: 1px solid var(--ui-border); }
+.btn-trade { background: linear-gradient(135deg, #6a5acd, #483d8b); color: #fff; box-shadow: 0 2px 4px rgba(72,61,139,0.4); }
+.btn-trade:hover { filter: brightness(1.08); }
+.btn-trade:active { transform: translateY(1px); }
+.btn-advanced { background: linear-gradient(135deg, #ff7f50, #ff4500); color: #fff; box-shadow: 0 2px 4px rgba(255,69,0,0.4); }
+.btn-advanced:hover { filter: brightness(1.08); }
+.btn-advanced:active { transform: translateY(1px); }
 
 .badge { display: inline-block; padding: 2px 6px; border-radius: 10px; font-size: 10px; }
 .badge-success { background: var(--ui-success); color: #fff; }

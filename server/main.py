@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import math
-import json
 import os
 import random
 from dataclasses import dataclass, field, asdict
@@ -60,8 +59,16 @@ class Game:
     turns: int = 0
     # Game over summary when finished
     game_over: Optional[Dict[str, Any]] = None
+    # Per-player stocks system (cash-basis pricing)
+    # owner -> { owner, total_shares, holdings: { investor: shares },
+    #            allow_investing, enforce_min_buy, min_buy,
+    #            enforce_min_pool, min_pool_total, min_pool_owner }
+    stocks: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def snapshot(self) -> Dict[str, Any]:
+        # Defensive: ensure pending_trades list exists
+        if not isinstance(self.pending_trades, list):
+            self.pending_trades = []
         return {
             "players": [asdict(p) for p in self.players],
             "current_turn": self.current_turn,
@@ -69,7 +76,7 @@ class Game:
             "properties": {str(k): asdict(v) for k, v in self.properties.items()},
             "last_action": self.last_action,
             "log": self.log[-200:],
-            "pending_trades": self.pending_trades[-50:],
+            "pending_trades": list(self.pending_trades)[-50:],
             "rolls_left": self.rolls_left,
             "rolled_this_turn": self.rolled_this_turn,
             "recurring": self.recurring,
@@ -78,6 +85,8 @@ class Game:
             "game_over": self.game_over,
             # Include tile meta for client UIs (names/types/prices/colors)
             "tiles": build_board_meta(),
+            # Include computed stocks view
+            "stocks": _stocks_snapshot(self),
         }
 
 
@@ -532,6 +541,10 @@ async def lobby_join(sid, data):
     await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
     # If a game is already running, send the current snapshot to allow resume
     if l.game:
+        try:
+            print(f"[REJOIN] {name} rejoining active game in lobby {lobby_id}", flush=True)
+        except Exception:
+            pass
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": l.game.snapshot()}, to=sid)
     return {"ok": True, "lobby": lobby_state(l)}
 
@@ -676,6 +689,20 @@ async def game_action(sid, data):
             g.last_action = {"type": "no_rolls", "by": cur.name}
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
+        
+        # Process recurring payments at start of turn (first roll only)
+        if not g.rolled_this_turn:
+            try:
+                print(f"[RECURRING_START] Processing for {cur.name}", flush=True)
+            except Exception:
+                pass
+            _process_recurring_for(g, cur.name)
+            # If recurring payments caused negative balance, deny the roll
+            if cur.cash < 0:
+                g.last_action = {"type": "roll_denied", "by": cur.name, "reason": "negative_after_recurring"}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return {"ok": False, "action": "roll_dice", "reasons": ["negative_after_recurring"]}
+        
         d1 = random.randint(1, 6)
         d2 = random.randint(1, 6)
         roll = d1 + d2
@@ -816,7 +843,7 @@ async def game_action(sid, data):
                 await sio.emit("lobby_state", lobby_state(l), room=l.id)
                 break
 
-        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+        await _broadcast_state(lobby_id, g)
         return
 
     # Buy current property (if eligible)
@@ -847,25 +874,229 @@ async def game_action(sid, data):
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
         return
 
+    # Stocks: invest/sell/settings (owner-only dilution/redemption, cash-basis)
+    if t in {"stock_invest", "stock_sell", "stock_settings"}:
+        payload = action or {}
+        owner = str(payload.get("owner") or "")
+        if not owner:
+            g.last_action = {"type": f"{t}_denied", "reason": "missing_owner"}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
+        # Ensure stock exists
+        st = _stocks_ensure(g, owner)
+        price = _stock_price(g, owner)
+        
+        if t == "stock_settings":
+            # Only owner can update settings
+            if actor != owner:
+                g.last_action = {"type": "stock_settings_denied", "by": actor, "expected": owner}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            try:
+                min_buy = int(payload.get("min_buy") or 0)
+                if min_buy < 0:
+                    min_buy = 0
+            except Exception:
+                min_buy = int(st.get("min_buy") or 0)
+            allow_investing = bool(payload.get("allow_investing")) if ("allow_investing" in payload) else bool(st.get("allow_investing", True))
+            enforce_min_buy = bool(payload.get("enforce_min_buy")) if ("enforce_min_buy" in payload) else bool(st.get("enforce_min_buy", False))
+            try:
+                min_pool_total = int(payload.get("min_pool_total") or 0)
+                if min_pool_total < 0:
+                    min_pool_total = 0
+            except Exception:
+                min_pool_total = int(st.get("min_pool_total") or 0)
+            try:
+                min_pool_owner = int(payload.get("min_pool_owner") or 0)
+                if min_pool_owner < 0:
+                    min_pool_owner = 0
+            except Exception:
+                min_pool_owner = int(st.get("min_pool_owner") or 0)
+            enforce_min_pool = bool(payload.get("enforce_min_pool")) if ("enforce_min_pool" in payload) else bool(st.get("enforce_min_pool", False))
+            st["allow_investing"] = allow_investing
+            st["enforce_min_buy"] = enforce_min_buy
+            st["min_buy"] = min_buy
+            st["enforce_min_pool"] = enforce_min_pool
+            st["min_pool_total"] = min_pool_total
+            st["min_pool_owner"] = min_pool_owner
+            g.stocks[owner] = st
+            g.last_action = {"type": "stock_settings", "owner": owner, "allow_investing": allow_investing, "enforce_min_buy": enforce_min_buy, "min_buy": min_buy, "enforce_min_pool": enforce_min_pool, "min_pool_total": min_pool_total, "min_pool_owner": min_pool_owner}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
+        
+        # Invest / sell
+        shares = int(payload.get("shares") or 0)
+        amount = payload.get("amount")
+        percent = payload.get("percent")
+        investor = actor
+        inv_p = _find_player(g, investor)
+        own_p = _find_player(g, owner)
+        if not inv_p or not own_p:
+                g.last_action = {"type": f"{t}_denied", "reason": "player_missing"}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+        # Invest: percent-of-pool model (A dollars into pool P)
+        if t == "stock_invest":
+            if investor == owner:
+                g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "owner_cannot_invest"}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            if not bool(st.get("allow_investing", True)):
+                g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "disabled"}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            A = int(float(amount or 0)) if isinstance(amount, (int, float)) else 0
+            if A <= 0:
+                g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "invalid_amount"}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            P = int(own_p.cash)
+            hold = dict(st.get("holdings") or {})
+            # current percent and dollar stake
+            p_cur = float(hold.get(investor) or 0.0)
+            outside_sum = sum(float(v or 0.0) for v in hold.values())
+            owner_percent = max(0.0, 1.0 - outside_sum)
+            E = p_cur * float(P)
+            # Enforce rules
+            min_pool_total = int(st.get("min_pool_total") or 0)
+            min_pool_owner = int(st.get("min_pool_owner") or 0)
+            if bool(st.get("enforce_min_pool", False)) and min_pool_total > 0 and P < min_pool_total:
+                g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "below_min_pool_total", "needed": min_pool_total, "pool_value": P}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            owner_value = owner_percent * float(P)
+            if bool(st.get("enforce_min_pool", False)) and min_pool_owner > 0 and owner_value < float(min_pool_owner):
+                g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "below_min_pool_owner", "needed": min_pool_owner, "owner_value": int(owner_value)}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            min_buy = int(st.get("min_buy") or 0)
+            if bool(st.get("enforce_min_buy", False)) and min_buy > 0 and A < min_buy:
+                g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "below_min", "needed": min_buy, "cost": A}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            if inv_p.cash < A:
+                g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "insufficient_cash", "needed": A}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            # Cash transfer
+            inv_p.cash -= A
+            own_p.cash += A
+            # Recalculate percents based on dollar stakes
+            P_new = float(P + A)
+            # First compute each investor's dollar stake E_k from old percents
+            stakes: Dict[str, float] = {}
+            for k, pv in hold.items():
+                try:
+                    stakes[k] = max(0.0, float(pv)) * float(P)
+                except Exception:
+                    stakes[k] = 0.0
+            stakes[investor] = float(stakes.get(investor) or 0.0) + float(A)
+            # Convert back to percents under new pool
+            new_hold: Dict[str, float] = {}
+            if P_new > 0:
+                for k, Ek in stakes.items():
+                    if Ek <= 0.0:
+                        continue
+                    new_hold[k] = max(0.0, min(1.0, float(Ek) / P_new))
+            st["holdings"] = new_hold
+            g.stocks[owner] = st
+            g.last_action = {"type": "stock_invest", "by": investor, "owner": owner, "amount": A, "pool_before": P, "pool_after": int(P_new)}
+            g.log.append({"type": "stock_invest", "text": f"{investor} invested ${A} into {owner} pool (P: ${P} → ${int(P_new)})"})
+            try:
+                _record_stock_history_for(g, owner, overwrite=True)
+            except Exception:
+                pass
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
+        if t == "stock_sell":
+            hold = dict(st.get("holdings") or {})
+            P = int(own_p.cash)
+            p_cur = float(hold.get(investor) or 0.0)
+            E = p_cur * float(P)
+            if P <= 0 or E <= 0:
+                g.last_action = {"type": "stock_sell_denied", "by": investor, "reason": "no_stake_or_pool"}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            # Determine S (cash to redeem)
+            S = 0
+            if isinstance(percent, (int, float)) and float(percent) > 0:
+                portion = max(0.0, min(1.0, float(percent)))
+                S = int(portion * E)
+            elif isinstance(amount, (int, float)) and float(amount) > 0:
+                S = int(float(amount))
+            elif isinstance(shares, (int, float)) and float(shares) > 0:
+                # legacy path: treat shares as percent-of-base (100), convert to dollar stake
+                S = int((float(shares) / 100.0) * E)
+            # Clamp S by my stake and owner cash
+            S = max(0, min(S, int(E), int(P)))
+            if S <= 0:
+                g.last_action = {"type": "stock_sell_denied", "by": investor, "reason": "invalid_amount"}
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            # Cash transfer
+            own_p.cash -= S
+            inv_p.cash += S
+            P_new = float(P - S)
+            # Recompute percents from old dollar stakes
+            if P_new <= 0:
+                st["holdings"] = {}
+                g.stocks[owner] = st
+                g.last_action = {"type": "stock_sell", "by": investor, "owner": owner, "amount": S, "pool_before": P, "pool_after": 0}
+                g.log.append({"type": "stock_sell", "text": f"{investor} redeemed ${S} from {owner} pool (P: ${P} → $0)"})
+                try:
+                    _record_stock_history_for(g, owner, overwrite=True)
+                except Exception:
+                    pass
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            stakes: Dict[str, float] = {}
+            for k, pv in hold.items():
+                try:
+                    stakes[k] = max(0.0, float(pv)) * float(P)
+                except Exception:
+                    stakes[k] = 0.0
+            stakes[investor] = max(0.0, float(stakes.get(investor) or 0.0) - float(S))
+            new_hold: Dict[str, float] = {}
+            for k, Ek in stakes.items():
+                if Ek <= 0.0:
+                    continue
+                new_hold[k] = max(0.0, min(1.0, float(Ek) / float(P_new)))
+            st["holdings"] = new_hold
+            g.stocks[owner] = st
+            g.last_action = {"type": "stock_sell", "by": investor, "owner": owner, "amount": S, "pool_before": P, "pool_after": int(P_new)}
+            g.log.append({"type": "stock_sell", "text": f"{investor} redeemed ${S} from {owner} pool (P: ${P} → ${int(P_new)})"})
+            try:
+                _record_stock_history_for(g, owner, overwrite=True)
+            except Exception:
+                pass
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
+
     # End turn (advance player, reset roll state)
     if t == "end_turn":
         # Only allow ending turn after at least one roll and no remaining rolls
-        if not g.rolled_this_turn or g.rolls_left > 0:
-            g.last_action = {"type": "end_turn_denied", "by": cur.name, "reason": "roll_required_or_pending"}
+        deny_reasons = []
+        if not g.rolled_this_turn:
+            deny_reasons.append("no_roll_yet")
+        if g.rolls_left > 0:
+            deny_reasons.append(f"rolls_left_{g.rolls_left}")
+        if cur.cash < 0:
+            # Will also be caught by later negative balance check, but log early.
+            pass
+        if deny_reasons:
+            g.last_action = {"type": "end_turn_denied", "by": cur.name, "reasons": deny_reasons}
+            try:
+                print(f"[ENDTURN][DENY] {cur.name} -> {deny_reasons}", flush=True)
+            except Exception:
+                pass
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-            return
+            return {"ok": False, "action": "end_turn", "reasons": deny_reasons}
         # Disallow ending turn with negative balance
         if cur.cash < 0:
             g.last_action = {"type": "end_turn_denied", "by": cur.name, "reason": "negative_balance"}
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-            return
-        # Process recurring obligations for the player ending their turn (payer-side)
-        _process_recurring_for(g, cur.name)
-        # If payments caused negative balance, require resolution before ending turn
-        if cur.cash < 0:
-            g.last_action = {"type": "end_turn_denied", "by": cur.name, "reason": "negative_after_recurring"}
-            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-            return
+            return {"ok": False, "action": "end_turn", "reasons": ["negative_balance"]}
+        # Recurring payments now handled at start of turn (in roll_dice), not here
         prev = g.current_turn
         g.current_turn = (g.current_turn + 1) % len(g.players)
         if g.current_turn == 0 and prev != 0:
@@ -876,13 +1107,22 @@ async def game_action(sid, data):
         g.last_action = {"type": "end_turn", "by": cur.name}
         g.log.append({"type": "end_turn", "text": f"{cur.name} ended their turn"})
         g.turns += 1
-        # Note: recurring processed on payer end-turn above to match trade terms semantics
+        try:
+            _record_stock_history(g)
+        except Exception:
+            pass
+        # Note: recurring processed at start of turn (in roll_dice), not here
         # If game already over, broadcast and return
         if _check_and_finalize_game(g):
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-            return
-        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-        return
+            return {"ok": True, "action": "end_turn", "game_over": True}
+        # Force broadcast to ensure all clients get the turn change
+        try:
+            print(f"[TURN_CHANGE] {cur.name} -> {g.players[g.current_turn].name}", flush=True)
+        except Exception:
+            pass
+        await _force_sync_all_clients(lobby_id, g)
+        return {"ok": True, "action": "end_turn"}
 
     if t == "bankrupt":
         _handle_bankruptcy(g, cur.name)
@@ -1029,40 +1269,35 @@ async def game_action(sid, data):
 
     # Trade flow (minimal protocol)
     if t == "offer_trade":
-        give = action.get("give")
-        receive = action.get("receive")
-        # Back-compat: allow simple quick cash offer with { to, cash }
-        if not give and not receive and (action.get("cash") is not None):
-            give = {"cash": int(action.get("cash") or 0)}
-            receive = {}
-        # Advanced terms (e.g., recurring payments)
+        trades = _ensure_trades(g)
+        target = action.get("to")
+        if not target or target == actor:
+            return {"ok": False, "error": "invalid_target"}
+        give = action.get("give") or {}
+        receive = action.get("receive") or {}
+        if not (give or receive):
+            return {"ok": False, "error": "empty_offer"}
         terms = action.get("terms") or {}
-        offer = {
-            "id": f"tr{random.randint(1000,9999)}",
-            "type": "trade_offer",
-            "from": actor,
-            "to": action.get("to"),
-            "give": give or {},
-            "receive": receive or {},
-            "terms": terms,  # persist advanced terms so accept can process them
-        }
-        g.pending_trades.append(offer)
+        offer = {"id": _new_trade_id(g), "type": "trade_offer", "from": actor, "to": target, "give": give, "receive": receive, "terms": terms, "created": asyncio.get_event_loop().time()}
+        trades.append(offer)
         g.last_action = offer
-        g.log.append({"type": "trade_created", "id": offer["id"], "text": f"{actor} offered a trade to {offer['to']} (#{offer['id']})"})
-        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-        return
+        g.log.append({"type": "trade_created", "id": offer["id"], "text": f"{actor} offered a trade to {target} (#{offer['id']})"})
+        try: print(f"[TRADE][OFFER] {offer}", flush=True)
+        except Exception: pass
+        await _broadcast_state(lobby_id, g)
+        return {"ok": True, "trade": offer}
     if t == "accept_trade":
         trade_id = action.get("trade_id")
-        offer = action.get("offer") or next((o for o in g.pending_trades if o.get("id") == trade_id), None)
+        trades = _ensure_trades(g)
+        offer = next((o for o in trades if o.get("id") == trade_id), None)
         if not offer:
             g.last_action = {"type": "trade_missing", "id": trade_id}
-            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-            return
-        # Only the intended recipient may accept
+            await _broadcast_state(lobby_id, g)
+            return {"ok": False, "error": "missing"}
         if actor != offer.get("to"):
             g.last_action = {"type": "trade_accept_denied", "by": actor, "expected": offer.get("to"), "id": trade_id}
-            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-            return
+            await _broadcast_state(lobby_id, g)
+            return {"ok": False, "error": "not_recipient"}
         # Transfer cash
         cash_a = int(offer.get("give", {}).get("cash") or 0)
         cash_b = int(offer.get("receive", {}).get("cash") or 0)
@@ -1113,36 +1348,37 @@ async def game_action(sid, data):
             st.owner = offer.get("from")
             g.properties[pos] = st
         # Remove from pending
-        g.pending_trades = [o for o in g.pending_trades if o.get("id") != trade_id]
+        g.pending_trades = [o for o in trades if o.get("id") != trade_id]
         g.last_action = {"type": "trade_accepted", "id": trade_id}
         g.log.append({"type": "trade_accepted", "id": trade_id, "text": f"Trade {trade_id} accepted by {actor}"})
-        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-        return
+        await _broadcast_state(lobby_id, g)
+        return {"ok": True, "trade_id": trade_id, "accepted": True}
     if t == "decline_trade":
         trade_id = action.get("trade_id")
-        offer = next((o for o in g.pending_trades if o.get("id") == trade_id), None)
+        trades = _ensure_trades(g)
+        offer = next((o for o in trades if o.get("id") == trade_id), None)
         if not offer:
             g.last_action = {"type": "trade_missing", "id": trade_id}
         elif actor != offer.get("to"):
             g.last_action = {"type": "trade_decline_denied", "by": actor, "expected": offer.get("to"), "id": trade_id}
         else:
-            g.pending_trades = [o for o in g.pending_trades if o.get("id") != trade_id]
+            g.pending_trades = [o for o in trades if o.get("id") != trade_id]
             g.last_action = {"type": "trade_declined", "id": trade_id}
             g.log.append({"type": "trade_declined", "id": trade_id, "text": f"Trade {trade_id} declined by {actor}"})
-        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-        return
+        await _broadcast_state(lobby_id, g)
+        return {"ok": True, "trade_id": trade_id, "declined": g.last_action.get("type") == "trade_declined"}
     if t == "cancel_trade":
         trade_id = action.get("trade_id")
-        # Only cancel trades created by the same actor
-        before = len(g.pending_trades)
-        g.pending_trades = [o for o in g.pending_trades if not (o.get("id") == trade_id and o.get("from") == actor)]
+        trades = _ensure_trades(g)
+        before = len(trades)
+        g.pending_trades = [o for o in trades if not (o.get("id") == trade_id and o.get("from") == actor)]
         if len(g.pending_trades) < before:
             g.last_action = {"type": "trade_canceled", "id": trade_id}
             g.log.append({"type": "trade_canceled", "id": trade_id, "text": f"Trade {trade_id} canceled by {actor}"})
         else:
             g.last_action = {"type": "trade_cancel_denied", "id": trade_id}
-        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-        return
+        await _broadcast_state(lobby_id, g)
+        return {"ok": True, "trade_id": trade_id, "canceled": g.last_action.get("type") == "trade_canceled"}
 
 
 # ---------------------------
@@ -1156,6 +1392,44 @@ def _find_player(g: Game, name: Optional[str]) -> Optional[Player]:
         if p.name == name:
             return p
     return None
+
+# ---- Trade helpers (robust) ----
+def _ensure_trades(g: Game) -> List[Dict[str, Any]]:
+    if not hasattr(g, 'pending_trades') or not isinstance(g.pending_trades, list):
+        g.pending_trades = []
+    return g.pending_trades
+
+async def _force_sync_all_clients(lobby_id: str, g: Game):
+    """Force synchronization for all clients in lobby - use for critical state changes"""
+    try:
+        if lobby_id not in LOBBIES:
+            return
+        l = LOBBIES[lobby_id]
+        snapshot = g.snapshot()
+        # Send to room first
+        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": snapshot}, room=lobby_id)
+        # Also send individually to each known session to ensure delivery
+        for sid in l.sid_to_name.keys():
+            try:
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": snapshot}, to=sid)
+            except Exception:
+                pass
+        print(f"[FORCE_SYNC] Lobby {lobby_id}, sent to {len(l.sid_to_name)} clients", flush=True)
+    except Exception as e:
+        print(f"[FORCE_SYNC_ERROR] {e}", flush=True)
+
+async def _broadcast_state(lobby_id: str, g: Game):
+    """Enhanced state broadcasting with debugging"""
+    try:
+        snapshot = g.snapshot()
+        current_player = g.players[g.current_turn].name if g.players else "Unknown"
+        print(f"[BROADCAST] Lobby {lobby_id}, turn: {current_player}, rolled: {g.rolled_this_turn}, rolls_left: {g.rolls_left}", flush=True)
+        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": snapshot}, room=lobby_id)
+    except Exception as e:
+        print(f"[BROADCAST_ERROR] {e}", flush=True)
+
+def _new_trade_id(g: Game) -> str:
+    return f"tr{len(_ensure_trades(g))}_{random.randint(1000,9999)}"
 
 
 def _handle_rent(g: Game, cur: Player, pos: int, last_roll: int) -> None:
@@ -1250,6 +1524,133 @@ def _total_worth(g: Game, player: Player) -> int:
                 if st.hotel:
                     total += house_cost  # treat hotel as one house cost for valuation
     return total
+
+
+# ---------------------------
+# Stocks helpers
+# ---------------------------
+
+def _player_cash(g: Game, name: str) -> int:
+    p = _find_player(g, name)
+    return int(p.cash) if p else 0
+
+
+def _stock_price(g: Game, owner: str) -> int:
+    # In the percent-based model, "price" reported in the snapshot is the owner's current cash (the pool P)
+    return int(_player_cash(g, owner))
+
+
+def _stocks_ensure(g: Game, owner: str) -> Dict[str, Any]:
+    st = g.stocks.get(owner)
+    if not st:
+        st = {
+            "owner": owner,
+            # holdings will store percents per investor (0..1). Keep total_shares only for backward-compat snapshot base.
+            "total_shares": 0.0,
+            "holdings": {},
+            "allow_investing": True,
+            "enforce_min_buy": False,
+            "min_buy": 0,
+            "enforce_min_pool": False,
+            "min_pool_total": 0,
+            "min_pool_owner": 0,
+            "history": [],
+            "last_history_turn": None,
+        }
+        g.stocks[owner] = st
+    # Ensure schema fields
+    st.setdefault("owner", owner)
+    st.setdefault("total_shares", 0.0)
+    st.setdefault("holdings", {})
+    # Migrate any share-based holdings (values > 1.0 while base might be embedded) to percents if we detect legacy form.
+    try:
+        vals = list((st.get("holdings") or {}).values())
+        if any(isinstance(v, (int, float)) and float(v) > 1.0 for v in vals):
+            # If legacy, infer base from total_shares or sum and normalize to percents conservatively
+            base = float(st.get("total_shares") or 0.0) or max(1.0, sum(float(v or 0.0) for v in vals))
+            new_hold = {}
+            for k, v in (st.get("holdings") or {}).items():
+                try:
+                    new_hold[k] = max(0.0, min(1.0, float(v) / base))
+                except Exception:
+                    continue
+            st["holdings"] = new_hold
+    except Exception:
+        pass
+    st.setdefault("allow_investing", True)
+    st.setdefault("enforce_min_buy", False)
+    st.setdefault("min_buy", 0)
+    st.setdefault("enforce_min_pool", False)
+    st.setdefault("min_pool_total", 0)
+    st.setdefault("min_pool_owner", 0)
+    st.setdefault("history", [])
+    st.setdefault("last_history_turn", None)
+    return st
+
+
+def _stocks_snapshot(g: Game) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for p in g.players:
+        rec = _stocks_ensure(g, p.name)
+        price = _stock_price(g, p.name)  # equals owner's cash P
+        base = 100  # expose a constant base so UI can display pseudo-shares if desired
+        # holdings are stored as percents (0..1). Build list and compute owner implicit percent.
+        holdings = []
+        for investor, perc in (rec.get("holdings") or {}).items():
+            try:
+                pr = max(0.0, min(1.0, float(perc)))
+                holdings.append({"investor": investor, "shares": pr * base, "percent": pr})
+            except Exception:
+                continue
+        # Keep order stable: sort by percent desc
+        holdings.sort(key=lambda x: -float(x.get("percent") or 0.0))
+        outside_percent = sum(float(h.get("percent") or 0.0) for h in holdings)
+        owner_percent = max(0.0, 1.0 - outside_percent)
+        out.append({
+            "owner": p.name,
+            "owner_color": p.color,
+            "price": price,
+            "total_shares": float(base),
+            "allow_investing": bool(rec.get("allow_investing", True)),
+            "enforce_min_buy": bool(rec.get("enforce_min_buy", False)),
+            "min_buy": int(rec.get("min_buy") or 0),
+            "enforce_min_pool": bool(rec.get("enforce_min_pool", False)),
+            "min_pool_total": int(rec.get("min_pool_total") or 0),
+            "min_pool_owner": int(rec.get("min_pool_owner") or 0),
+            "base": base,
+            "owner_percent": owner_percent,
+            "holdings": holdings,
+            "history": [
+                {"turn": int(pt.get("turn") or 0), "pool": float(pt.get("pool") or 0.0)}
+                for pt in (rec.get("history") or [])
+            ][-200:],
+        })
+    return out
+
+
+def _stock_pool_value(g: Game, owner: str) -> float:
+    # Pool value is simply the owner's current cash
+    return float(_player_cash(g, owner))
+
+
+def _record_stock_history_for(g: Game, owner: str, overwrite: bool = True) -> None:
+    st = _stocks_ensure(g, owner)
+    turn = int(g.turns or 0)
+    val = _stock_pool_value(g, owner)
+    hist = list(st.get("history") or [])
+    last_turn = st.get("last_history_turn")
+    if overwrite and hist and (last_turn == turn or (hist[-1].get("turn") == turn)):
+        hist[-1] = {"turn": turn, "pool": val}
+    else:
+        hist.append({"turn": turn, "pool": val})
+    st["history"] = hist[-500:]
+    st["last_history_turn"] = turn
+    g.stocks[owner] = st
+
+
+def _record_stock_history(g: Game) -> None:
+    for p in g.players:
+        _record_stock_history_for(g, p.name, overwrite=False)
 
 
 def _process_recurring_for(g: Game, payer: str) -> None:
@@ -1569,6 +1970,24 @@ async def _bot_take_simple_turn(l: Lobby):
     if not g:
         return
     cur = g.players[g.current_turn]
+    
+    # Process recurring payments at start of bot turn
+    _process_recurring_for(g, cur.name)
+    if cur.cash < 0:
+        # Bot cannot manage liquidation; trigger bankruptcy
+        _handle_bankruptcy(g, cur.name)
+        if _check_and_finalize_game(g):
+            await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
+            return
+        # Adjust current_turn if player list changed
+        if len(g.players) > 0:
+            g.current_turn = g.current_turn % len(g.players)
+        g.turns += 1
+        g.rolls_left = 1
+        g.rolled_this_turn = False
+        await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
+        return
+    
     # Roll dice (reuse logic similar to game_action but simplified)
     d1 = random.randint(1, 6)
     d2 = random.randint(1, 6)
@@ -1682,8 +2101,7 @@ async def _bot_take_simple_turn(l: Lobby):
         g.last_action = {"type": "buy", "by": cur.name, "pos": p, "price": price, "name": tile.get("name")}
         g.log.append({"type": "buy", "text": f"{cur.name} bought {tile.get('name')} for ${price}"})
 
-    # Process recurring obligations for bot at end-turn
-    _process_recurring_for(g, cur.name)
+    # Process recurring obligations moved to start of turn (roll_dice)
     if cur.cash < 0:
         # Bots cannot manage liquidation; trigger bankruptcy to avoid stalling
         _handle_bankruptcy(g, cur.name)

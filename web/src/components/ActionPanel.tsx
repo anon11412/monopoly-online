@@ -5,6 +5,8 @@ import type { GameSnapshot } from '../types';
 import { buildDefaultBoardTiles } from '../lib/boardFallback';
 import { houseCostForGroup } from '../lib/rentData';
 import type { BoardTile } from '../types';
+import StockModal from './StockModal';
+import StockChartsModal from './StockChartsModal';
 
 type Props = { lobbyId: string; snapshot: GameSnapshot };
 
@@ -33,6 +35,10 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const logRef = useRef<HTMLDivElement | null>(null);
   const [, setOpenTradeId] = useState<string | null>(null);
   const [kickStatus, setKickStatus] = useState<{ target?: string | null; remaining?: number | null }>({});
+  const [openStock, setOpenStock] = useState<any | null>(null);
+  const [showStockCharts, setShowStockCharts] = useState(false);
+  const [collapseAuto, setCollapseAuto] = useState(false);
+  const [collapseRecurring, setCollapseRecurring] = useState(false);
 
   // Allow GameBoard to open Trades/Log via global events
   useEffect(() => {
@@ -424,15 +430,18 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
       {/* Automation toggles */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
-        <div className="ui-title ui-h3">⚙️ Auto Actions</div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="ui-title ui-h3">⚙️ Auto Actions</div>
+          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseAuto(c => !c)}>{collapseAuto ? '➕' : '➖'}</button>
+        </div>
+        {!collapseAuto && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           <label style={{ fontSize: 12 }}><input type="checkbox" checked={autoRoll} onChange={(e) => setAutoRoll(e.target.checked)} /> Auto Roll</label>
           <label style={{ fontSize: 12 }}><input type="checkbox" checked={autoBuy} onChange={(e) => setAutoBuy(e.target.checked)} /> Auto Buy properties</label>
           <label style={{ fontSize: 12 }}><input type="checkbox" checked={autoEnd} onChange={(e) => setAutoEnd(e.target.checked)} /> Auto End Turn</label>
           <label style={{ fontSize: 12 }} title="Buys houses/hotels automatically when eligible"><input type="checkbox" checked={autoHouses} onChange={(e) => setAutoHouses(e.target.checked)} /> Auto Buy Houses/Hotels</label>
           <label style={{ fontSize: 12 }} title="Automatically mortgage properties when below $0"><input type="checkbox" checked={autoMortgage} onChange={(e) => setAutoMortgage(e.target.checked)} /> Auto Mortgage when negative</label>
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
+        </div>}
+        {!collapseAuto && <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
           <label style={{ fontSize: 12 }}>Keep at least $<input type="number" min={0} value={minKeep} onChange={(e) => setMinKeep(parseInt(e.target.value || '0', 10))} style={{ width: 90, marginLeft: 4 }} /></label>
           <label style={{ fontSize: 12 }}>Only buy cost <select value={costRule} onChange={(e) => setCostRule(e.target.value as any)} style={{ marginLeft: 4 }}>
             <option value="any">any</option>
@@ -441,13 +450,16 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
           </select>
           $<input type="number" min={0} value={costValue} onChange={(e) => setCostValue(parseInt(e.target.value || '0', 10))} style={{ width: 100, marginLeft: 4 }} /></label>
           <label style={{ fontSize: 12 }} title="Evenly distribute houses across the color set when buying"><input type="checkbox" checked={autoSpread} onChange={(e) => setAutoSpread(e.target.checked)} /> Auto-Spread Houses</label>
-        </div>
+        </div>}
       </div>
 
       {/* Recurring obligations summary */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
-        <div className="ui-title ui-h3">📆 Recurring Payments</div>
-        <div className="ui-sm" style={{ display: 'grid', gap: 4 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="ui-title ui-h3">📆 Recurring Payments</div>
+          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseRecurring(c => !c)}>{collapseRecurring ? '➕' : '➖'}</button>
+        </div>
+        {!collapseRecurring && <div className="ui-sm" style={{ display: 'grid', gap: 4 }}>
           {((snapshot as any).recurring || []).length === 0 ? (
             <div style={{ opacity: 0.7 }}>None</div>
           ) : ((snapshot as any).recurring || []).map((r: any, idx: number) => (
@@ -455,8 +467,19 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
               {r.from} → {r.to}: ${r.amount} ({r.turns_left} turns left)
             </div>
           ))}
-        </div>
+        </div>}
       </div>
+
+      {/* Stocks (per-player) */}
+      <div className="ui-labelframe" style={{ marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="ui-title ui-h3">📈 Stocks</div>
+          <button className="btn btn-ghost" onClick={() => setShowStockCharts(true)}>Charts</button>
+        </div>
+        <StocksList lobbyId={lobbyId} snapshot={snapshot} myName={myName} onOpen={(row) => setOpenStock(row)} />
+      </div>
+      <StockModal open={!!openStock} lobbyId={lobbyId} snapshot={snapshot} stock={openStock} onClose={() => setOpenStock(null)} />
+      <StockChartsModal open={showStockCharts} snapshot={snapshot} lobbyId={lobbyId} onOpenStock={(row) => { setShowStockCharts(false); setOpenStock(row); }} onClose={() => setShowStockCharts(false)} />
     </div>
   );
 }
@@ -528,6 +551,39 @@ function LogFilters({ value, onChange }: { value: Set<string>, onChange: (s: Set
           <input type="checkbox" style={{ marginRight: 6 }} checked={value.has(it.key)} onChange={() => toggle(it.key)} />
           {it.label}
         </label>
+      ))}
+    </div>
+  );
+}
+
+function StocksList({ lobbyId: _lobbyId, snapshot, myName, onOpen }: { lobbyId: string, snapshot: any, myName: string, onOpen: (row: any) => void }) {
+  const stocks = (snapshot as any)?.stocks as Array<any> | undefined;
+  if (!stocks || stocks.length === 0) return <div className="ui-sm" style={{ opacity: 0.7 }}>None</div>;
+  return (
+    <div style={{ display: 'grid', gap: 6 }}>
+      {stocks.map((o: any) => (
+        <div key={o.owner} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 8, border: '1px solid #eee', borderRadius: 6, padding: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span title={o.owner} style={{ width: 10, height: 10, borderRadius: '50%', background: o.owner_color || '#999', display: 'inline-block' }} />
+            <strong>{o.owner}</strong>
+          </div>
+          <div className="ui-sm" style={{ opacity: 0.9 }} title="Price is owner's current cash">
+            {(() => {
+              const ownerCash = (snapshot.players || []).find((p: any) => p.name === o.owner)?.cash ?? 0;
+              const mine = (o.holdings || []).find((h: any) => h.investor === myName);
+              const myPct = ((mine?.percent ?? 0) * 100).toFixed(2);
+              return <>Price: ${ownerCash} • Mine: {myPct}%</>;
+            })()}
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn" onClick={() => onOpen(o)}>Open</button>
+          </div>
+      {o.holdings && o.holdings.length > 0 ? (
+            <div style={{ gridColumn: '1 / -1', fontSize: 12, marginTop: 4 }}>
+        Holders: {o.holdings.map((h: any) => `${h.investor}(${Number(h.shares || 0).toFixed(3)})`).join(', ')}
+            </div>
+          ) : null}
+        </div>
       ))}
     </div>
   );

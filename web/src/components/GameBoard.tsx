@@ -249,7 +249,19 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 80px)', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
                   <button className="btn btn-primary" disabled={!canRollC} onClick={() => act('roll_dice')}>🎲 Roll</button>
                   <button className="btn btn-success" disabled={!canBuyC} onClick={() => act('buy_property')}>🏠 Buy</button>
-                  <button className="btn btn-ghost" disabled={!canEndC} onClick={() => act('end_turn')}>⏭ End Turn</button>
+                  <button className="btn btn-ghost" disabled={!canEndC} onClick={() => {
+                    const socket = s;
+                    socket.emit('game_action', { id: lobbyId, action: { type: 'end_turn' } }, (ack: any) => {
+                      try { console.debug('[END_TURN][ACK]', ack); } catch {}
+                      if (ack && ack.ok === false) {
+                        const reasons: string[] = ack.reasons || [];
+                        if (reasons.length) {
+                          // Simple surfacing; replace with nicer toast later
+                          alert('Cannot end turn: ' + reasons.join(', '));
+                        }
+                      }
+                    });
+                  }} title={(!canEndC ? 'Need roll or extra rolls left' : 'End your turn')}>⏭ End Turn</button>
                   <button className="btn btn-ghost" onClick={() => setChatOpen((v) => !v)} title="Toggle chat">💬</button>
                 </div>
               );
@@ -261,10 +273,11 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               const players = (snapshot?.players || []).map(p => p.name).filter(n => n !== myName);
               const enableTrade = players.length >= 1;
               return (
-                <div style={{ position: 'absolute', left: '50%', bottom: '125px', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', pointerEvents: 'auto' }}>
-                  <button className="btn" disabled={!enableTrade} onClick={() => setShowPartnerPicker('basic')}>🤝 Trade</button>
-                  <button className="btn" disabled={!enableTrade} onClick={() => setShowPartnerPicker('advanced')}>⚡ Advanced Trade</button>
-                  <button className="btn btn-danger" onClick={() => act('bankrupt')}>💥 Bankruptcy</button>
+                <div style={{ position: 'absolute', left: '50%', bottom: '125px', transform: 'translateX(-50%)', display: 'flex', gap: 10, alignItems: 'stretch', pointerEvents: 'auto', background: 'rgba(255,255,255,0.9)', padding: '6px 10px', borderRadius: 10, boxShadow: '0 4px 14px rgba(0,0,0,0.15)', border: '1px solid #d0d7de' }}>
+                  <button className="btn btn-trade" style={{ minWidth: 110 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('basic')} title="Create a standard property/cash trade">🤝 Trade</button>
+                  <button className="btn btn-advanced" style={{ minWidth: 140 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('advanced')} title="Open advanced combined trade (recurring terms)">⚡ Advanced</button>
+                  <div style={{ width: 1, background: 'rgba(0,0,0,0.15)', margin: '0 2px' }} />
+                  <button className="btn btn-danger" style={{ minWidth: 120 }} onClick={() => act('bankrupt')} title="Declare bankruptcy">💥 Bankruptcy</button>
                 </div>
               );
             })()}
@@ -316,22 +329,152 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     />
   ) : null}
   
-      {/* In-game chat box */}
-      <div style={{ position: 'absolute', right: -8, bottom: -8, width: 280, maxHeight: 260, background: 'rgba(255,255,255,0.95)', border: '1px solid #e1e4e8', borderRadius: 8, padding: 8, overflow: 'hidden', display: chatOpen ? 'block' : 'none' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>💬 Chat</div>
-          <button className="btn btn-ghost" onClick={() => setChatOpen(false)} style={{ padding: 2 }}>✖</button>
+      {/* Modern chat overlay */}
+      {chatOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }} onClick={() => setChatOpen(false)}>
+          <div style={{ 
+            background: '#fff', 
+            width: 'min(480px, 90vw)', 
+            height: 'min(600px, 80vh)', 
+            borderRadius: 12, 
+            boxShadow: '0 20px 40px rgba(0,0,0,0.15)', 
+            display: 'flex', 
+            flexDirection: 'column',
+            overflow: 'hidden'
+          }} onClick={(e) => e.stopPropagation()}>
+            {/* Header */}
+            <div style={{ 
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
+              color: 'white', 
+              padding: '16px 20px', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between'
+            }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>💬 Game Chat</h3>
+              <button 
+                onClick={() => setChatOpen(false)} 
+                style={{ 
+                  background: 'rgba(255,255,255,0.2)', 
+                  border: 'none', 
+                  color: 'white', 
+                  borderRadius: 6, 
+                  padding: '6px 8px', 
+                  cursor: 'pointer',
+                  fontSize: 14
+                }}
+              >
+                ✕
+              </button>
+            </div>
+            
+            {/* Messages area */}
+            <div style={{ 
+              flex: 1, 
+              padding: '16px 20px', 
+              overflowY: 'auto', 
+              background: '#f8f9fa',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8
+            }}>
+              {chatLog.length === 0 ? (
+                <div style={{ 
+                  textAlign: 'center', 
+                  color: '#666', 
+                  fontStyle: 'italic', 
+                  marginTop: 40 
+                }}>
+                  No messages yet. Start the conversation!
+                </div>
+              ) : chatLog.map((c, i) => {
+                const myName = (getRemembered().displayName || '').trim();
+                const isMe = c.from === myName;
+                return (
+                  <div key={i} style={{ 
+                    display: 'flex', 
+                    justifyContent: isMe ? 'flex-end' : 'flex-start',
+                    marginBottom: 4
+                  }}>
+                    <div style={{
+                      maxWidth: '75%',
+                      padding: '8px 12px',
+                      borderRadius: '16px',
+                      background: isMe ? '#007bff' : '#e9ecef',
+                      color: isMe ? 'white' : '#333',
+                      fontSize: 14,
+                      wordBreak: 'break-word'
+                    }}>
+                      {!isMe && (
+                        <div style={{ 
+                          fontSize: 11, 
+                          opacity: 0.8, 
+                          marginBottom: 2,
+                          fontWeight: 600
+                        }}>
+                          {c.from}
+                        </div>
+                      )}
+                      <div>{c.message}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            
+            {/* Input area */}
+            <div style={{ 
+              padding: '16px 20px', 
+              borderTop: '1px solid #e9ecef',
+              background: 'white'
+            }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <input 
+                  placeholder="Type a message…" 
+                  value={chatMsg} 
+                  onChange={(e) => setChatMsg(e.target.value)} 
+                  onKeyDown={(e) => { 
+                    if (e.key === 'Enter') { 
+                      if (chatMsg.trim()) { 
+                        s.emit('chat_send', { id: lobbyId, message: chatMsg.trim() }); 
+                        setChatMsg(''); 
+                      } 
+                    } 
+                  }} 
+                  style={{ 
+                    flex: 1, 
+                    padding: '10px 12px', 
+                    border: '1px solid #ddd', 
+                    borderRadius: 20, 
+                    fontSize: 14,
+                    outline: 'none'
+                  }} 
+                />
+                <button 
+                  onClick={() => { 
+                    if (chatMsg.trim()) { 
+                      s.emit('chat_send', { id: lobbyId, message: chatMsg.trim() }); 
+                      setChatMsg(''); 
+                    } 
+                  }}
+                  style={{
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: 20,
+                    padding: '10px 16px',
+                    cursor: 'pointer',
+                    fontSize: 14,
+                    fontWeight: 600
+                  }}
+                >
+                  Send
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
-        <div style={{ fontSize: 12, height: 160, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 6, background: '#fff' }}>
-          {chatLog.length === 0 ? <div style={{ opacity: 0.7 }}>No messages yet.</div> : chatLog.map((c, i) => (
-            <div key={i}><strong>{c.from}:</strong> {c.message}</div>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-          <input placeholder="Type a message…" value={chatMsg} onChange={(e) => setChatMsg(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') { if (chatMsg.trim()) { s.emit('chat_send', { id: lobbyId, message: chatMsg.trim() }); setChatMsg(''); } } }} style={{ flex: 1 }} />
-          <button className="btn btn-ghost" onClick={() => { if (chatMsg.trim()) { s.emit('chat_send', { id: lobbyId, message: chatMsg.trim() }); setChatMsg(''); } }}>Send</button>
-        </div>
-      </div>
+      )}
       {openPropPos != null ? (() => {
         const t = tileByPos[openPropPos!];
   const p = normalize(openPropPos!, props[openPropPos as any]);

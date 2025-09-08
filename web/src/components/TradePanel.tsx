@@ -102,12 +102,29 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
         receive: { cash: receiveCash, properties: Array.from(receiveProps), jail_card: receiveJailCard },
         terms,
       }
+    }, (ack: any) => {
+      try { console.debug('[TRADE][OFFER][ACK]', ack); } catch {}
     });
-    onClose();
+    if (variant === 'advanced') {
+      onClose();
+    } else {
+      // Reset form for rapid consecutive offers while keeping panel open (live updates)
+      setGiveCash(0); setReceiveCash(0); setGiveProps(new Set()); setReceiveProps(new Set()); setGiveJailCard(false); setReceiveJailCard(false); setAdvPayments([]);
+    }
   }
 
-  const last = snapshot.last_action as any;
-  const incomingOffer = last && last.type === 'trade_offer' && last.to === myName ? last : null;
+  // Determine the most relevant incoming offer for the quick accept/decline header.
+  // Previously this only looked at last_action; if any other action happened after a trade
+  // offer (e.g. rent payment, dice roll) the buttons disappeared even though the trade
+  // remained pending. We now fallback to the newest pending trade directed at me.
+  const incomingOffer = useMemo(() => {
+    const last = snapshot.last_action as any;
+    if (last && last.type === 'trade_offer' && last.to === myName) return last;
+    const list: any[] = (snapshot as any)?.pending_trades || [];
+    const mine = list.filter(o => o && o.to === myName);
+    if (mine.length === 0) return null;
+    return mine[mine.length - 1]; // most recent
+  }, [snapshot, myName]);
 
   function acceptOffer() {
     if (!incomingOffer) return;
@@ -149,6 +166,11 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
               <label style={{ fontSize: 12 }}>Cash
                 <input type="number" min={0} value={giveCash} onChange={(e) => setGiveCash(parseInt(e.target.value || '0', 10))} style={{ width: 100, marginLeft: 6 }} />
               </label>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => setGiveCash(prev => prev + 25)} disabled={giveCash + 25 > 5000}>+25</button>
+                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => setGiveCash(prev => prev + 50)} disabled={giveCash + 50 > 5000}>+50</button>
+                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => setGiveCash(prev => prev + 100)} disabled={giveCash + 100 > 5000}>+100</button>
+              </div>
               {allowJail ? (
                 <label style={{ fontSize: 12 }}>
                   <input type="checkbox" checked={giveJailCard} onChange={(e) => setGiveJailCard(e.target.checked)} /> Get Out of Jail Free
@@ -171,6 +193,11 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
               <label style={{ fontSize: 12 }}>Cash
                 <input type="number" min={0} value={receiveCash} onChange={(e) => setReceiveCash(parseInt(e.target.value || '0', 10))} style={{ width: 100, marginLeft: 6 }} />
               </label>
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => setReceiveCash(prev => prev + 25)} disabled={receiveCash + 25 > 5000}>+25</button>
+                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => setReceiveCash(prev => prev + 50)} disabled={receiveCash + 50 > 5000}>+50</button>
+                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 10 }} onClick={() => setReceiveCash(prev => prev + 100)} disabled={receiveCash + 100 > 5000}>+100</button>
+              </div>
               {allowJail ? (
                 <label style={{ fontSize: 12 }}>
                   <input type="checkbox" checked={receiveJailCard} onChange={(e) => setReceiveJailCard(e.target.checked)} /> Get Out of Jail Free
@@ -227,6 +254,36 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
             </div>
           </div>
         ) : null}
+
+        {/* Live Pending Trades (all) */}
+        <div className="ui-labelframe" style={{ marginTop: 20 }}>
+          <div className="ui-title ui-h3">🛰️ Live Pending Trades</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6, maxHeight: 200, overflowY: 'auto' }}>
+            {(snapshot.pending_trades || []).length === 0 && <div className="ui-sm" style={{ opacity: 0.7 }}>None</div>}
+            {(snapshot.pending_trades || []).map((tr: any) => {
+              const mineFrom = tr.from === myName;
+              const mineTo = tr.to === myName;
+              return (
+                <div key={tr.id} style={{ border: '1px solid #ddd', borderRadius: 6, padding: 6, background: mineTo ? 'rgba(46, 204, 113,0.10)' : (mineFrom ? 'rgba(52,152,219,0.10)' : 'rgba(0,0,0,0.04)') }}>
+                  <div style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', gap: 6 }}>
+                    <span><strong>{tr.from}</strong> → <strong>{tr.to}</strong> #{tr.id}</span>
+                    <span style={{ opacity: 0.75 }}>Cash: {tr.give?.cash || 0}↔{tr.receive?.cash || 0}</span>
+                  </div>
+                  {(tr.terms?.payments?.length || 0) > 0 ? (
+                    <div style={{ fontSize: 11, marginTop: 4 }}>
+                      Payments: {tr.terms.payments.map((p: any) => `${p.from}→${p.to} $${p.amount}x${p.turns}`).join('; ')}
+                    </div>
+                  ) : null}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                    {mineTo && <button className="btn btn-success" style={{ padding: '2px 8px' }} onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'accept_trade', trade_id: tr.id } })}>Accept</button>}
+                    {mineTo && <button className="btn btn-danger" style={{ padding: '2px 8px' }} onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'decline_trade', trade_id: tr.id } })}>Decline</button>}
+                    {mineFrom && <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'cancel_trade', trade_id: tr.id } })}>Cancel</button>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
