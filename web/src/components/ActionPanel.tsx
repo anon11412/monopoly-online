@@ -113,8 +113,12 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   // Basic automation behaviors
   useEffect(() => {
     if (!myTurn || !autoRoll) return;
-    if (canRoll) act('roll_dice');
-  }, [myTurn, autoRoll, canRoll]);
+    // Continue rolling if allowed, regardless of non-blocking last_action like buy_denied
+    if (canRoll) {
+      const t = setTimeout(() => act('roll_dice'), 180);
+      return () => clearTimeout(t);
+    }
+  }, [myTurn, autoRoll, canRoll, snapshot.last_action]);
   useEffect(() => {
     if (!myTurn) return;
     const pos = myPlayer?.position ?? -1;

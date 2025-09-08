@@ -96,6 +96,9 @@ class Lobby:
     disconnect_deadlines: Dict[str, float] = field(default_factory=dict)
     # Vote-kick: target -> set of voter names
     kick_votes: Dict[str, List[str]] = field(default_factory=dict)
+    # Vote-kick timer state
+    kick_target: Optional[str] = None
+    kick_deadline: Optional[float] = None  # monotonic deadline seconds
 
 
 # ---------------------------
@@ -123,6 +126,8 @@ asgi = socketio.ASGIApp(sio, other_asgi_app=app)
 
 # Track background bot tasks per lobby
 BOT_TASKS: Dict[str, asyncio.Task] = {}
+# Track kick timer tasks per lobby
+KICK_TASKS: Dict[str, asyncio.Task] = {}
 
 
 # ---------------------------
@@ -286,6 +291,11 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
     loop = asyncio.get_event_loop()
     now = loop.time() if loop else 0.0
     remain = {name: max(0, int(deadline - now)) for name, deadline in l.disconnect_deadlines.items()}
+    # Remaining seconds for kick deadline
+    kick_remaining = None
+    if l.kick_deadline:
+        remain = int(max(0, (l.kick_deadline - now)))
+        kick_remaining = remain
     return {
         "id": l.id,
         "name": l.name,
@@ -295,6 +305,8 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
         "ready": l.ready,
     "bots": l.bots,
     "kick_votes": {k: list(set(v)) for k, v in l.kick_votes.items()},
+        "kick_target": l.kick_target,
+        "kick_remaining": kick_remaining,
         "disconnect_remain": remain,
     }
 
@@ -377,9 +389,18 @@ async def vote_kick(sid, data):
     voter = l.sid_to_name.get(sid)
     if not voter or not target or target not in l.players:
         return
+    # Only allow targeting current turn player if a game is active
+    if not l.game or target != (l.game.players[l.game.current_turn].name if (0 <= l.game.current_turn < len(l.game.players)) else None):
+        return
     votes = set(l.kick_votes.get(target, []))
     votes.add(voter)
     l.kick_votes[target] = list(votes)
+    # Start timer on first vote
+    if l.kick_target != target:
+        l.kick_target = target
+        loop = asyncio.get_event_loop()
+        l.kick_deadline = (loop.time() if loop else 0.0) + 300
+        await _ensure_kick_timer(l)
     # Majority of active players (excluding bots)
     total = len([p for p in l.players if p not in l.bots])
     if len(votes) > total // 2:
@@ -402,7 +423,57 @@ async def vote_kick(sid, data):
         if target in l.players:
             l.players.remove(target)
         l.kick_votes.pop(target, None)
+        l.kick_target = None
+        l.kick_deadline = None
+        # Cancel any existing timer
+        t = KICK_TASKS.pop(lobby_id, None)
+        if t:
+            t.cancel()
     await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
+
+
+async def _ensure_kick_timer(l: Lobby):
+    lid = l.id
+    if KICK_TASKS.get(lid):
+        return
+    async def loop():
+        try:
+            while True:
+                await asyncio.sleep(1)
+                lref = LOBBIES.get(lid)
+                if not lref or not lref.kick_target or not lref.kick_deadline:
+                    break
+                loop = asyncio.get_event_loop()
+                now = loop.time() if loop else 0.0
+                if now >= (lref.kick_deadline or 0):
+                    target = lref.kick_target
+                    if target and lref.game:
+                        g = lref.game
+                        # Kick only if target is still current and hasn't rolled
+                        if 0 <= g.current_turn < len(g.players) and g.players[g.current_turn].name == target and not g.rolled_this_turn:
+                            for p in list(g.players):
+                                if p.name == target:
+                                    for pos, st in list(g.properties.items()):
+                                        if st.owner == target:
+                                            st.owner = None
+                                            st.houses = 0
+                                            st.hotel = False
+                                            st.mortgaged = False
+                                            g.properties[pos] = st
+                                    g.players = [pl for pl in g.players if pl.name != target]
+                                    g.current_turn = g.current_turn % max(1, len(g.players))
+                                    break
+                            if target in lref.players:
+                                lref.players.remove(target)
+                            lref.kick_votes.pop(target, None)
+                            lref.kick_target = None
+                            lref.kick_deadline = None
+                            await sio.emit("lobby_state", lobby_state(lref), room=lid)
+                            await sio.emit("game_state", {"lobby_id": lid, "snapshot": g.snapshot()}, room=lid)
+                    break
+        finally:
+            KICK_TASKS.pop(lid, None)
+    KICK_TASKS[lid] = asyncio.create_task(loop())
 
 
 @sio.event

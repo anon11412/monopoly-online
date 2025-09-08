@@ -144,7 +144,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             </div>
           </div>
   </div>
-      {/* Core action buttons centered under board; hidden unless actionable */}
+  {/* Core action buttons centered within board; hidden unless actionable */}
       {(() => {
         const me = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
         const myName = (getRemembered().displayName || '').trim() || me?.name || '';
@@ -174,7 +174,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
         const show = canRollC || canBuyC || canEndC || (myTurn && (me?.in_jail && (me?.jail_cards || 0) > 0));
         if (!show) return null;
         return (
-          <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', left: '50%', bottom: '-30px', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center' }}>
             <button className="btn btn-primary" disabled={!canRollC} onClick={() => act('roll_dice')}>🎲 Roll</button>
             <button className="btn btn-success" disabled={!canBuyC} onClick={() => act('buy_property')}>🏠 Buy</button>
             {myTurn && (me?.in_jail && (me?.jail_cards || 0) > 0) ? (
@@ -184,6 +184,15 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           </div>
         );
       })()}
+      {/* Lightweight in-game chat placeholder (UI only; server wiring can follow) */}
+      <div style={{ position: 'absolute', right: -8, bottom: -8, width: 260, maxHeight: 220, background: 'rgba(255,255,255,0.9)', border: '1px solid #e1e4e8', borderRadius: 8, padding: 8, overflow: 'hidden', display: 'none' }}>
+        <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 4 }}>💬 Chat</div>
+        <div style={{ fontSize: 12, height: 140, overflowY: 'auto', border: '1px solid #f0f0f0', borderRadius: 6, padding: 6, background: '#fff' }} />
+        <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+          <input placeholder="Type a message…" style={{ flex: 1 }} />
+          <button className="btn btn-ghost">Send</button>
+        </div>
+      </div>
       {openPropPos != null ? (() => {
         const t = tileByPos[openPropPos!];
   const p = normalize(openPropPos!, props[openPropPos as any]);
