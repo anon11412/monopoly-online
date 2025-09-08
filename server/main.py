@@ -112,7 +112,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
+sio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins="*",
+    ping_timeout=25,
+    ping_interval=20,
+    engineio_logger=False,
+)
 asgi = socketio.ASGIApp(sio, other_asgi_app=app)
 
 # Track background bot tasks per lobby
@@ -512,8 +518,8 @@ async def game_action(sid, data):
         roll = d1 + d2
 
         # Mark that we've rolled this turn; set last_action first so UI can show dice consistently
-    g.rolled_this_turn = True
-    g.last_action = {"type": "rolled", "by": cur.name, "roll": roll, "d1": d1, "d2": d2, "doubles": bool(d1 == d2)}
+        g.rolled_this_turn = True
+        g.last_action = {"type": "rolled", "by": cur.name, "roll": roll, "d1": d1, "d2": d2, "doubles": bool(d1 == d2)}
         g.log.append({"type": "rolled", "text": f"{cur.name} rolled {d1} + {d2} = {roll}"})
 
         was_in_jail = cur.in_jail
@@ -554,13 +560,13 @@ async def game_action(sid, data):
             cur.doubles_count = 0
 
         # Move token and handle GO collection
-    old_pos = cur.position
-    new_pos = (cur.position + roll) % 40
+        old_pos = cur.position
+        new_pos = (cur.position + roll) % 40
         if old_pos + roll >= 40:
             cur.cash += 200
             g.log.append({"type": "pass_go", "text": f"{cur.name} collected $200 for passing GO"})
         cur.position = new_pos
-    _record_land(g, new_pos)
+        _record_land(g, new_pos)
 
         tiles = monopoly_tiles()
         tile = tiles[new_pos]
@@ -626,8 +632,8 @@ async def game_action(sid, data):
 
         # Rolls remaining logic
         if d1 == d2 and not was_in_jail:
-            # Grant an extra roll for doubles (not when leaving jail by doubles)
-            g.rolls_left += 1
+            # Grant exactly one extra roll for doubles (not when leaving jail by doubles)
+            g.rolls_left = 1
         else:
             g.rolls_left = 0
         # Any activity cancels kick votes against current player
@@ -679,6 +685,13 @@ async def game_action(sid, data):
             g.last_action = {"type": "end_turn_denied", "by": cur.name, "reason": "negative_balance"}
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
+        # Process recurring obligations for the player ending their turn (payer-side)
+        _process_recurring_for(g, cur.name)
+        # If payments caused negative balance, require resolution before ending turn
+        if cur.cash < 0:
+            g.last_action = {"type": "end_turn_denied", "by": cur.name, "reason": "negative_after_recurring"}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
         prev = g.current_turn
         g.current_turn = (g.current_turn + 1) % len(g.players)
         if g.current_turn == 0 and prev != 0:
@@ -689,9 +702,7 @@ async def game_action(sid, data):
         g.last_action = {"type": "end_turn", "by": cur.name}
         g.log.append({"type": "end_turn", "text": f"{cur.name} ended their turn"})
         g.turns += 1
-        # Process recurring for the new current player at start-of-turn
-        nxt = g.players[g.current_turn]
-        _process_recurring_for(g, nxt.name)
+        # Note: recurring processed on payer end-turn above to match trade terms semantics
         # If game already over, broadcast and return
         if _check_and_finalize_game(g):
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
@@ -1126,6 +1137,12 @@ def _handle_bankruptcy(g: Game, player_name: str) -> None:
                 g.properties[pos] = st
     # 3) Apply raised funds to debts (simplified: add to cash, then zero)
     debtor.cash += total_raised
+    # Apply to outstanding deficit if any, and do not let player retain cash on exit
+    if debtor.cash < 0:
+        # Still in deficit after liquidation; log remaining debt
+        g.log.append({"type": "debt_unpaid", "text": f"{player_name} remains ${-debtor.cash} in debt after liquidation"})
+    # Zero out cash to avoid leaving money with removed player
+    debtor.cash = 0
     # 4) Return remaining properties to bank (clear ownership and mortgages)
     for pos, st in list(g.properties.items()):
         if st.owner == player_name:
@@ -1136,6 +1153,8 @@ def _handle_bankruptcy(g: Game, player_name: str) -> None:
             g.properties[pos] = st
     # 5) Remove player from game
     g.players = [p for p in g.players if p.name != player_name]
+    # Remove any recurring obligations involving this player
+    g.recurring = [r for r in g.recurring if r.get("from") != player_name and r.get("to") != player_name]
     # Adjust current_turn to next valid index
     if len(g.players) == 0:
         g.current_turn = 0
@@ -1289,7 +1308,7 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
             g.log.append({"type": "pass_go", "text": f"{cur.name} collected $200 for passing GO (card)"})
         cur.position = np
         g.log.append({"type": "card", "text": f"{cur.name} advanced to nearest {target}"})
-    _record_land(g, np)
+        _record_land(g, np)
         # pay special rent next resolution; we can apply immediate rent here
         special = card.get("special_rent")
         if special == "double" and target == "railroad":
@@ -1418,6 +1437,7 @@ async def _bot_take_simple_turn(l: Lobby):
         cur.cash += 200
         g.log.append({"type": "pass_go", "text": f"{cur.name} collected $200 for passing GO"})
     cur.position = new_pos
+    _record_land(g, new_pos)
 
     tiles = monopoly_tiles()
     tile = tiles[new_pos]
@@ -1449,6 +1469,7 @@ async def _bot_take_simple_turn(l: Lobby):
         _apply_card(g, cur, card, last_roll=roll)
         new_pos = cur.position
         tile = tiles[new_pos]
+        _record_land(g, new_pos)
         if cur.in_jail:
             g.rolls_left = 0
             await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
@@ -1484,12 +1505,26 @@ async def _bot_take_simple_turn(l: Lobby):
         g.last_action = {"type": "buy", "by": cur.name, "pos": p, "price": price, "name": tile.get("name")}
         g.log.append({"type": "buy", "text": f"{cur.name} bought {tile.get('name')} for ${price}"})
 
-    # End turn (bots do not chain doubles in this simple AI)
-    g.current_turn = (g.current_turn + 1) % len(g.players)
+    # Process recurring obligations for bot at end-turn
+    _process_recurring_for(g, cur.name)
+    if cur.cash < 0:
+        # Bots cannot manage liquidation; trigger bankruptcy to avoid stalling
+        _handle_bankruptcy(g, cur.name)
+        if _check_and_finalize_game(g):
+            await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
+            return
+        # Adjust current_turn if player list changed
+        if len(g.players) > 0:
+            g.current_turn = g.current_turn % len(g.players)
+        g.turns += 1
+    else:
+        # End turn (bots do not chain doubles in this simple AI)
+        g.current_turn = (g.current_turn + 1) % len(g.players)
+        g.last_action = {"type": "end_turn", "by": cur.name}
+        g.turns += 1
     g.rolls_left = 1
     g.rolled_this_turn = False
     cur.doubles_count = 0
-    g.last_action = {"type": "end_turn", "by": cur.name}
     await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
 
 

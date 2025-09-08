@@ -46,3 +46,24 @@ Proxy (Nginx):
 - If sockets don’t connect, verify the reverse proxy `/socket.io/` block has Upgrade/Connection headers and the browser uses the same origin (no CORS).
 - For mixed content issues, ensure everything is served over HTTPS.
 - On blank screen, check `docker compose logs -f proxy` and `server` for errors.
+
+## Render deployment
+
+Render can build this repo using the Dockerfile at `server/Dockerfile` and serve both API and the built web on a single service.
+
+- Service type: Web Service (env: docker)
+- Health check path: `/board_meta`
+- Dockerfile path: `server/Dockerfile`
+- Important env vars:
+  - `ALLOWED_ORIGINS`: `*` (or your domain)
+  - `WORKERS`: `1` (ensures Socket.IO works reliably without a message broker)
+
+Notes:
+- The Dockerfile builds the frontend in a first stage and copies `web/dist` into `/app/static`; `server/main.py` mounts that dir as static if present.
+- Socket.IO is configured with permissive CORS and reasonable ping timeouts; Render supports WebSockets, and Socket.IO will fall back to polling when needed.
+- If you need multiple instances/workers on Render, add a Socket.IO message queue (e.g., Redis) and persist game state externally.
+
+Local validation before push:
+- `docker build -f server/Dockerfile -t monopoly-server .`
+- `docker run -p 8000:8000 -e WORKERS=1 monopoly-server`
+- Visit `http://localhost:8000/` and `http://localhost:8000/board_meta`

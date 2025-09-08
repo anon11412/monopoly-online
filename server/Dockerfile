@@ -31,7 +31,7 @@ COPY --from=webbuild /web/dist /app/static
 EXPOSE 8000
 
 # Default envs (can be overridden)
-ENV WORKERS=2 \
+ENV WORKERS=1 \
     HOST=0.0.0.0 \
     PORT=8000 \
     ALLOWED_ORIGINS=* \

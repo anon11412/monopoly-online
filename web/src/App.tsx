@@ -43,6 +43,21 @@ export default function App() {
           <div className="game-view">
             <GameBoard snapshot={game} lobbyId={lobby.id} />
             <ActionPanel lobbyId={lobby.id} snapshot={game} />
+            {game?.game_over ? (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }}>
+                <div style={{ background: '#fff', borderRadius: 10, padding: 16, minWidth: 360, maxWidth: '85vw', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
+                  <h2 style={{ marginTop: 0, marginBottom: 8 }}>🏆 Game Over</h2>
+                  <div style={{ fontSize: 14, display: 'grid', gap: 6 }}>
+                    <div><strong>Winner:</strong> {game.game_over?.winner || '—'}</div>
+                    <div><strong>Total turns:</strong> {game.game_over?.turns ?? 0}</div>
+                    <div><strong>Most-landed:</strong> {game.game_over?.most_landed?.name || '—'} {typeof game.game_over?.most_landed?.count === 'number' ? `(x${game.game_over?.most_landed?.count})` : ''}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'flex-end' }}>
+                    <button className="btn" onClick={() => window.location.reload()}>🔄 New Game</button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
           </div>
         )}
       </ErrorBoundary>

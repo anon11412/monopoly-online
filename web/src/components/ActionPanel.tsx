@@ -16,6 +16,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const [showTrade, setShowTrade] = useState(false);
   const [showTradeAdvanced, setShowTradeAdvanced] = useState(false);
   const [showLog, setShowLog] = useState(false);
+  const [logFilters, setLogFilters] = useState<Set<string>>(new Set());
   const [showTrades, setShowTrades] = useState(false);
   const [selectedPartner, setSelectedPartner] = useState<string>('');
   // Automation toggles persisted
@@ -111,15 +112,9 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
   // Basic automation behaviors
   useEffect(() => {
-    if (!myTurn) return;
-    const la: any = snapshot.last_action;
-    const rolled = la?.type === 'rolled';
-    const isDoubles = !!la?.doubles;
-    if (autoRoll && canRoll) {
-      // If just rolled doubles, roll again automatically
-      if (!rolled || (rolled && isDoubles)) act('roll_dice');
-    }
-  }, [myTurn, canRoll, autoRoll, snapshot.last_action]);
+    if (!myTurn || !autoRoll) return;
+    if (canRoll) act('roll_dice');
+  }, [myTurn, autoRoll, canRoll]);
   useEffect(() => {
     if (!myTurn) return;
     const pos = myPlayer?.position ?? -1;
@@ -138,7 +133,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const nextHouseActionCandidate = useMemo(() => {
     if (!autoHouses || !myTurn) return null as null | { type: 'buy_house' | 'buy_hotel', pos: number };
     // Build groups -> property positions I own (and group completeness)
-    const allTiles = Object.values(tiles);
+    const allTiles: BoardTile[] = Object.values(tiles) as BoardTile[];
     const byGroup: Record<string, { positions: number[], allOwned: boolean, anyMortgaged: boolean, cost: number }> = {};
     for (const t of allTiles) {
       if (!t || t.type !== 'property' || !t.group) continue;
@@ -231,11 +226,11 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   }, [snapshot.last_action]);
 
   // Track incoming trades to show badge and jiggle on new ones
-  const incomingTrades = useMemo(() => (snapshot.pending_trades || []).filter(t => t.to === myName), [snapshot.pending_trades, myName]);
-  const unreadCount = useMemo(() => incomingTrades.filter(t => !seenTradeIds.has(String(t.id))).length, [incomingTrades, seenTradeIds]);
+  const incomingTrades = useMemo(() => (snapshot.pending_trades || []).filter((t: any) => t.to === myName), [snapshot.pending_trades, myName]);
+  const unreadCount = useMemo(() => incomingTrades.filter((t: any) => !seenTradeIds.has(String(t.id))).length, [incomingTrades, seenTradeIds]);
   useEffect(() => {
     // If new trade IDs appear that weren't seen, trigger a short jiggle
-  const ids = new Set(incomingTrades.map(t => String(t.id)));
+  const ids = new Set(incomingTrades.map((t: any) => String(t.id)));
     let hasNew = false;
     for (const id of ids) if (!seenTradeIds.has(id)) { hasNew = true; break; }
     if (hasNew) {
@@ -411,16 +406,19 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
               <h3 style={{ margin: 0 }}>📜 Game Log</h3>
               <button className="btn btn-ghost" onClick={() => setShowLog(false)}>❌ Close</button>
             </div>
+            <div style={{ marginTop: 8 }}>
+              <LogFilters value={logFilters} onChange={setLogFilters} />
+            </div>
             <div ref={logRef} style={{ fontSize: 12, marginTop: 8, maxHeight: '60vh', overflow: 'auto' }}>
               {snapshot.log && snapshot.log.length > 0 ? (
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  {snapshot.log.map((e: any, i: number) => (
+                  {(snapshot.log as any[]).filter((e) => filterLogEntry(e, logFilters)).map((e: any, i: number) => (
                     <li key={i} style={{ padding: '4px 0', borderBottom: '1px dashed #eee' }}>
                       <span style={{ marginRight: 6 }}>
                         {e.type === 'rolled' ? '🎲' : e.type === 'buy' ? '🏠' : e.type === 'end_turn' ? '⏭' : e.type === 'bankrupt' ? '💥' : '•'}
                       </span>
                       {e.id && /^trade_/.test(String(e.type)) ? (
-                        <button className="btn btn-link" style={{ padding: 0 }} onClick={() => { setOpenTradeId(String(e.id)); setShowTrades(true); }} title={`Open trade ${e.id}`}>{e.text || JSON.stringify(e)}</button>
+                        <button className="btn btn-link" style={{ padding: 0 }} onClick={() => { setOpenTradeId(String(e.id)); setShowTrades(true); setShowLog(false); }} title={`Open trade ${e.id}`}>{e.text || JSON.stringify(e)}</button>
                       ) : (
                         <span>{e.text || JSON.stringify(e)}</span>
                       )}
@@ -523,6 +521,45 @@ function TradeHeader({ snapshot, from, to, id }: { snapshot: GameSnapshot, from:
         <span style={{ fontWeight: 600 }}>{to}</span>
       </div>
       <span style={{ opacity: 0.7 }}>#{id}</span>
+    </div>
+  );
+}
+
+function filterLogEntry(e: any, filters: Set<string>): boolean {
+  if (!filters || filters.size === 0) return true;
+  const t = String(e?.type || '');
+  if (filters.has(t)) return true;
+  // Grouped shortcuts
+  if (filters.has('trade') && /^trade_/.test(t)) return true;
+  if (filters.has('recurring') && /^recurring_/.test(t)) return true;
+  return false;
+}
+
+function LogFilters({ value, onChange }: { value: Set<string>, onChange: (s: Set<string>) => void }) {
+  const items = [
+    { key: 'rolled', label: 'Rolls' },
+    { key: 'buy', label: 'Buys' },
+    { key: 'rent', label: 'Rent' },
+    { key: 'tax', label: 'Tax' },
+    { key: 'jail', label: 'Jail' },
+    { key: 'trade', label: 'Trades' },
+    { key: 'recurring', label: 'Recurring' },
+    { key: 'end_turn', label: 'End Turns' },
+    { key: 'bankrupt', label: 'Bankruptcy' },
+  ];
+  const toggle = (k: string) => {
+    const next = new Set(value);
+    if (next.has(k)) next.delete(k); else next.add(k);
+    onChange(next);
+  };
+  return (
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {items.map((it) => (
+        <label key={it.key} className="badge badge-muted" style={{ cursor: 'pointer' }}>
+          <input type="checkbox" style={{ marginRight: 6 }} checked={value.has(it.key)} onChange={() => toggle(it.key)} />
+          {it.label}
+        </label>
+      ))}
     </div>
   );
 }

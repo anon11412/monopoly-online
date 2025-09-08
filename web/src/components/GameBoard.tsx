@@ -50,10 +50,11 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   }, []);
 
   // tiles are rendered directly; map by position if needed later
-  const tileByPos = useMemo(() => Object.fromEntries(tiles.map(t => [t.pos, t])), [tiles]);
+  const tileByPos = useMemo(() => Object.fromEntries(tiles.map((t: BoardTile) => [t.pos, t])), [tiles]);
 
   const curIdx = snapshot?.current_turn ?? -1;
   const curName = curIdx >= 0 ? snapshot?.players?.[curIdx]?.name : undefined;
+  const defaultHiOwner = highlightedPlayer || curName || null;
   const playerColors = buildPlayerColorMap(snapshot?.players ?? []);
   const normalize = (pos: number, raw: PropertyStateLike | undefined): PropertyState | undefined => {
     if (!raw) return undefined;
@@ -84,7 +85,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
         <div className="grid">
         {tiles.length === 0 ? (
           <div style={{ gridColumn: 6, gridRow: 6, alignSelf: 'center', justifySelf: 'center', fontSize: 12, opacity: 0.8 }}>No board to display</div>
-        ) : tiles.map((t) => {
+  ) : tiles.map((t: BoardTile) => {
           const p = normalize(t.pos, props[t.pos as any]);
           const ownerColor = p?.owner_color;
           const houses = p?.houses || 0;
@@ -207,21 +208,42 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 if (t.type === 'property') {
                   const r = getStreetRent(t.name);
                   const hc = houseCostForGroup(t.group);
+                  // Determine which rent bracket is currently active for this property
+                  const owner = p?.owner;
+                  const houses = Math.max(0, Number(p?.houses || 0));
+                  const hasHotel = !!p?.hotel;
+                  const group = t.group;
+                  const isSet = (() => {
+                    if (!owner || !group) return false;
+                    // All properties in group owned by same owner and not mortgaged
+                    const groupPositions = Object.values(tileByPos)
+                      .filter(tt => tt.type === 'property' && tt.group === group)
+                      .map(tt => tt.pos);
+                    return groupPositions.length > 0 && groupPositions.every(pos => {
+                      const st: any = (props as any)?.[pos] || {};
+                      return st.owner === owner && !st.mortgaged;
+                    });
+                  })();
+                  const currentKey: 'base' | 'withSet' | 'house1' | 'house2' | 'house3' | 'house4' | 'hotel' | null = (() => {
+                    if (!owner) return null;
+                    if (hasHotel) return 'hotel';
+                    if (houses > 0) return (`house${Math.min(4, houses)}` as any);
+                    return isSet ? 'withSet' : 'base';
+                  })();
                   return r ? (
                     <div className="ui-card" style={{ marginTop: 10, fontSize: 12 }}>
                       <div style={{ fontWeight: 600, marginBottom: 4 }}>Rent Details</div>
                       {(() => {
-            const owner = p?.owner;
-            const shouldHi = owner && highlightedPlayer && owner === highlightedPlayer;
-            const cls = shouldHi ? 'rent-highlight' : '';
+                        const ownerIsHi = !!(owner && defaultHiOwner && owner === defaultHiOwner);
+                        const cls = (k: string) => (ownerIsHi && currentKey && k === currentKey) ? 'rent-highlight' : '';
                         return (
                           <>
-              <div className={cls}>Base: ${r.base} {t.group ? <span style={{ opacity: 0.7 }}>(double with full set: ${r.withSet})</span> : null}</div>
-              <div className={cls}>With 1 House: ${r.house1}</div>
-              <div className={cls}>With 2 Houses: ${r.house2}</div>
-              <div className={cls}>With 3 Houses: ${r.house3}</div>
-              <div className={cls}>With 4 Houses: ${r.house4}</div>
-              <div className={cls}>With Hotel: ${r.hotel}</div>
+                            <div className={cls(isSet ? 'withSet' : 'base')}>Base: ${isSet ? r.withSet : r.base} {t.group ? <span style={{ opacity: 0.7 }}>(double with full set: ${r.withSet})</span> : null}</div>
+                            <div className={cls('house1')}>With 1 House: ${r.house1}</div>
+                            <div className={cls('house2')}>With 2 Houses: ${r.house2}</div>
+                            <div className={cls('house3')}>With 3 Houses: ${r.house3}</div>
+                            <div className={cls('house4')}>With 4 Houses: ${r.house4}</div>
+                            <div className={cls('hotel')}>With Hotel: ${r.hotel}</div>
                           </>
                         );
                       })()}
