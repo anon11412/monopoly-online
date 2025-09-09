@@ -3,7 +3,12 @@ FROM node:20-alpine AS webbuild
 WORKDIR /web
 COPY web/package.json web/package-lock.json* web/pnpm-lock.yaml* web/yarn.lock* ./
 RUN npm ci || npm i
-COPY web /web
+COPY web/tsconfig*.json ./
+COPY web/vite.config.ts ./
+COPY web/eslint.config.js ./
+COPY web/index.html ./
+COPY web/public ./public
+COPY web/src ./src
 RUN npm run build
 
 FROM python:3.11-slim AS base

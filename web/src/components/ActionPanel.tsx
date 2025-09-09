@@ -7,6 +7,7 @@ import { houseCostForGroup } from '../lib/rentData';
 import type { BoardTile } from '../types';
 import StockModal from './StockModal';
 import StockChartsModal from './StockChartsModal';
+import { playGameSound, initializeAudio } from '../lib/audio';
 
 type Props = { lobbyId: string; snapshot: GameSnapshot };
 
@@ -33,13 +34,42 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const [autoSpread, setAutoSpread] = useState<boolean>(() => localStorage.getItem('auto.spread') === '1');
   const [tiles, setTiles] = useState<Record<number, BoardTile>>({});
   const logRef = useRef<HTMLDivElement | null>(null);
-  const [, setOpenTradeId] = useState<string | null>(null);
+  // Trade detail cache + navigation
+  const [openTradeDetailId, setOpenTradeDetailId] = useState<string | null>(() => localStorage.getItem('ui.openTradeDetail') || null);
+  const tradeCacheRef = useRef<Map<string, any>>(new Map());
+  const tradeOrderRef = useRef<string[]>([]); // insertion order for navigation
+
+  function cacheTrade(t: any) {
+    if (!t) return;
+    const id = String(t.id);
+    const cache = tradeCacheRef.current;
+    if (!cache.has(id)) {
+      tradeOrderRef.current.push(id);
+    }
+    cache.set(id, { ...cache.get(id), ...t }); // merge/update
+  }
+
+  function openTradeDetail(id: string) {
+    if (!id) return;
+    setOpenTradeDetailId(id);
+    localStorage.setItem('ui.openTradeDetail', id);
+    // Ensure trade is cached if currently pending
+    const pending = (snapshot.pending_trades || []).find((p: any) => String(p.id) === id);
+    if (pending) cacheTrade(pending);
+  }
+
+  function closeTradeDetail() {
+    setOpenTradeDetailId(null);
+    localStorage.removeItem('ui.openTradeDetail');
+  }
   const [kickStatus, setKickStatus] = useState<{ target?: string | null; remaining?: number | null }>({});
   const [openStock, setOpenStock] = useState<any | null>(null);
   const [showStockCharts, setShowStockCharts] = useState(false);
   const [collapseAuto, setCollapseAuto] = useState(false);
   const [collapseRecurring, setCollapseRecurring] = useState(false);
   const [collapseRentals, setCollapseRentals] = useState(false);
+  // Inline expanded pending trades
+  const [openInline, setOpenInline] = useState<Set<number | string>>(new Set());
 
   // Allow GameBoard to open Trades/Log via global events
   useEffect(() => {
@@ -75,11 +105,12 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     }
   }, [(snapshot as any)?.tiles]);
 
-  // Reset automation settings to defaults when a new game starts
+  // Reset automation settings to defaults when a new game starts or game ends
   useEffect(() => {
     const currentTurns = snapshot?.turns || 0;
-    if (currentTurns <= 1) {
-      // New game detected - reset all automation settings to defaults
+    const gameOver = snapshot?.game_over;
+    if (currentTurns <= 1 || gameOver) {
+      // New game detected or game ended - reset all automation settings to defaults
       setAutoRoll(false);
       setAutoBuy(false);
       setAutoEnd(false);
@@ -90,7 +121,45 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       setCostValue(0);
       setAutoSpread(false);
     }
-  }, [snapshot?.turns]);
+  }, [snapshot?.turns, snapshot?.game_over]);
+
+  // Initialize audio system
+  useEffect(() => {
+    initializeAudio();
+  }, []);
+
+  // Ingest pending trades into cache each snapshot update
+  useEffect(() => {
+    (snapshot.pending_trades || []).forEach(cacheTrade);
+  }, [snapshot.pending_trades]);
+
+  // If we have an open trade id but it's never been cached (e.g., deep link from historical log), attempt to hydrate minimal info from log
+  useEffect(() => {
+    if (!openTradeDetailId) return;
+    const cache = tradeCacheRef.current;
+    if (cache.has(openTradeDetailId)) return;
+    // Find any log entries referencing this trade id to fabricate a stub
+    const entries = (snapshot.log || []).filter((e: any) => String(e.id) === String(openTradeDetailId));
+    if (entries.length > 0) {
+      // Use earliest trade_* entry as base
+      const base = entries[0];
+      cacheTrade({ id: openTradeDetailId, from: base.from, to: base.to, type: base.type, stub: true });
+    }
+    // Fallback: attempt server fetch (Missing Data Guard)
+    (async () => {
+      try {
+        const res = await fetch(`${location.origin}/trade/${encodeURIComponent(lobbyId)}/${encodeURIComponent(openTradeDetailId)}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.trade) {
+            cacheTrade({ ...data.trade, id: openTradeDetailId, fetched: true });
+          }
+        }
+      } catch (err) {
+        // Silent network failure; UI will show unavailable state
+      }
+    })();
+  }, [openTradeDetailId, snapshot.log]);
 
   function act(type: string, payload: any = {}) {
     s.emit('game_action', { id: lobbyId, action: { type, ...payload } });
@@ -138,7 +207,10 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     // Continue rolling if allowed, regardless of non-blocking last_action like buy_denied
     const allow = myTurn && (!rolledThisTurn || (snapshot.rolls_left ?? 0) > 0);
     if (allow) {
-      const t = setTimeout(() => act('roll_dice'), 180);
+      const t = setTimeout(() => {
+        playGameSound('dice');
+        act('roll_dice');
+      }, 180);
       return () => clearTimeout(t);
     }
   }, [myTurn, autoRoll, rolledThisTurn, snapshot.rolls_left, snapshot.last_action]);
@@ -153,7 +225,10 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     const allowByMin = (myPlayer?.cash ?? 0) - price >= (minKeep || 0);
     const prop: any = (snapshot.properties as any)?.[pos];
     const unowned = !prop || !prop.owner;
-    if (unowned && allowByCost && allowByMin && canBuy) act('buy_property');
+    if (unowned && allowByCost && allowByMin && canBuy) {
+      playGameSound('purchase');
+      act('buy_property');
+    }
   }, [snapshot.last_action, myTurn, autoBuy, canBuy, minKeep, costRule, costValue, tiles, myPlayer?.position, myPlayer?.cash, snapshot.properties]);
 
   // Helper to find next house/hotel action candidate based on settings
@@ -231,7 +306,10 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       tryAutoMortgage();
       return;
     }
-    if (autoEnd && (myTurn && rolledThisTurn && (snapshot.rolls_left ?? 0) === 0)) act('end_turn');
+    if (autoEnd && (myTurn && rolledThisTurn && (snapshot.rolls_left ?? 0) === 0)) {
+      playGameSound('turn');
+      act('end_turn');
+    }
   }, [myTurn, autoEnd, rolledThisTurn, snapshot.rolls_left, autoHouses, nextHouseActionCandidate]);
 
   function tryAutoMortgage() {
@@ -312,7 +390,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
   {showTrades ? (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowTrades(false)}>
-          <div style={{ background: '#fff', minWidth: 420, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: 'var(--color-surface)', minWidth: 420, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>📬 Pending Trades</h3>
               <button className="btn btn-ghost" onClick={() => setShowTrades(false)}>❌ Close</button>
@@ -414,7 +492,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
       {showLog ? (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowLog(false)}>
-          <div style={{ background: '#fff', minWidth: 420, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ background: 'var(--color-surface)', minWidth: 420, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>📜 Game Log</h3>
               <button className="btn btn-ghost" onClick={() => setShowLog(false)}>❌ Close</button>
@@ -431,7 +509,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                         {e.type === 'rolled' ? '🎲' : e.type === 'buy' ? '🏠' : e.type === 'end_turn' ? '⏭' : e.type === 'bankrupt' ? '💥' : '•'}
                       </span>
                       {e.id && /^trade_/.test(String(e.type)) ? (
-                        <button className="btn btn-link" style={{ padding: 0 }} onClick={() => { setOpenTradeId(String(e.id)); setShowTrades(true); setShowLog(false); }} title={`Open trade ${e.id}`}>{e.text || JSON.stringify(e)}</button>
+                        <button className="btn btn-link" style={{ padding: 0 }} onClick={() => { openTradeDetail(String(e.id)); setShowLog(false); }} title={`Open trade ${e.id}`}>{e.text || JSON.stringify(e)}</button>
                       ) : (
                         <span>{e.text || JSON.stringify(e)}</span>
                       )}
@@ -444,52 +522,158 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
         </div>
       ) : null}
 
-      {/* Compact pending trades repositioned alongside players overview (below) */}
+      {/* Compact Pending Trades (panel height reduced, inline metadata, overflow guard) */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
-        <div className="ui-title ui-h3">📬 Pending Trades</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 220, overflowY: 'auto' }}>
-          {allTrades.length === 0 ? (
-            <div className="ui-sm" style={{ opacity: 0.7 }}>No pending trades</div>
-          ) : allTrades.map((t: any) => {
-            const bg = t.to === myName ? 'rgba(46, 204, 113, 0.15)' : (t.from === myName ? 'rgba(52, 152, 219, 0.15)' : 'rgba(0,0,0,0.05)');
-            const border = t.to === myName ? '1px solid rgba(39, 174, 96, 0.35)' : (t.from === myName ? '1px solid rgba(41, 128, 185, 0.35)' : '1px solid #e1e4e8');
-            const brief = concise(t);
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="ui-title ui-h3" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            📬 Pending
+            {allTrades.length > 0 && <span className="badge badge-info" style={{ fontSize: 10 }}>{allTrades.length}</span>}
+          </div>
+          {allTrades.length > 0 && <button className="btn btn-ghost" style={{ padding: '2px 6px' }} onClick={() => setShowTrades(true)}>List ▸</button>}
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 120, overflowY: 'auto' }}>
+          {allTrades.length === 0 ? <div className="ui-sm" style={{ opacity: 0.65 }}>None</div> : null}
+          {allTrades.slice(-8).reverse().map((t: any) => {
+            const mineFrom = t.from === myName;
+            const mineTo = t.to === myName;
+            const brief = concise(t) || '—';
+            const statusBadge = mineTo ? 'incoming' : (mineFrom ? 'outgoing' : 'watch');
+            const badgeColor = mineTo ? '#27ae60' : (mineFrom ? '#2980b9' : '#7f8c8d');
+            const [expanded, setExpanded] = [openInline.has(t.id), (val: boolean) => setOpenInline(prev => { const n = new Set(prev); if (val) n.add(t.id); else n.delete(t.id); return n; })];
             return (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: 6, minHeight: 24, background: bg, border, borderRadius: 6, padding: '2px 6px' }}>
-                <div style={{ fontSize: 11, whiteSpace: 'normal', wordBreak: 'break-word', flex: '1 1 auto' }} title={`#${t.id} ${t.from} → ${t.to} ${brief}`}>
-                  <strong style={{ opacity: 0.95 }}>{t.from}</strong> → <strong style={{ opacity: 0.95 }}>{t.to}</strong> • {brief || '—'}
+              <div key={t.id} style={{ background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 6, padding: '4px 6px', display: 'flex', flexDirection: 'column', fontSize: 11 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 6 }}>
+                  <button onClick={() => setExpanded(!expanded)} style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12 }} title={expanded ? 'Collapse' : 'Expand'}>{expanded ? '▾' : '▸'}</button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                    <span style={{ fontWeight: 600, maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.from}</span>
+                    <span style={{ opacity: 0.75 }}>→</span>
+                    <span style={{ fontWeight: 600, maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.to}</span>
+                  </div>
+                  <span style={{ justifySelf: 'end', fontSize: 9, padding: '1px 4px', borderRadius: 4, background: badgeColor, color: '#fff' }}>{statusBadge}</span>
+                  <button onClick={() => openTradeDetail(String(t.id))} className="btn btn-ghost" style={{ padding: '2px 4px', fontSize: 9 }} title="Open detail modal">Open</button>
+                  <div style={{ gridColumn: '1 / -1', fontSize: 10, lineHeight: 1.2, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85 }} title={brief}>{brief}</div>
                 </div>
-                <button className="btn btn-ghost" style={{ width: 34, minWidth: 34, padding: 0 }} title="View details" onClick={() => setShowTrades(true)}>👁️</button>
+                {expanded && (
+                  <div style={{ marginTop: 4, fontSize: 10, display: 'grid', gap: 2 }}>
+                    {t.type === 'rental' ? (
+                      <div>Rental: ${t.cash_amount || 0} • {(t.properties || []).length} props • {t.percentage || 0}% • {t.turns || 0}t</div>
+                    ) : (
+                      <>
+                        <div>Cash: {(t.give?.cash || 0)} ↔ {(t.receive?.cash || 0)}</div>
+                        <div>Give: {(t.give?.properties || []).length ? (t.give?.properties || []).join(', ') : '—'}</div>
+                        <div>Receive: {(t.receive?.properties || []).length ? (t.receive?.properties || []).join(', ') : '—'}</div>
+                        {(t.give?.jail_card || t.receive?.jail_card) && <div>Jail Card: {t.give?.jail_card ? 'give' : ''}{t.receive?.jail_card ? (t.give?.jail_card ? ' & receive' : 'receive') : ''}</div>}
+                      </>
+                    )}
+                    {t.terms?.payments?.length ? <div>Payments: {t.terms.payments.length}</div> : null}
+                    {t.terms?.rentals?.length ? <div>Rentals: {t.terms.rentals.length}</div> : null}
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* Automation toggles */}
+      {/* Automation toggles — trimmed vertical length */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div className="ui-title ui-h3">⚙️ Auto Actions</div>
+          <div className="ui-title ui-h3" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>⚙️ Auto Actions {autoRoll || autoBuy || autoEnd || autoHouses || autoMortgage ? <span style={{ fontSize: 10, padding: '2px 6px', background: '#3498db', color: '#fff', borderRadius: 4 }}>ON</span> : null}</div>
           <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseAuto(c => !c)}>{collapseAuto ? '➕' : '➖'}</button>
         </div>
-        {!collapseAuto && <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <label style={{ fontSize: 12 }}><input type="checkbox" checked={autoRoll} onChange={(e) => setAutoRoll(e.target.checked)} /> Auto Roll</label>
-          <label style={{ fontSize: 12 }}><input type="checkbox" checked={autoBuy} onChange={(e) => setAutoBuy(e.target.checked)} /> Auto Buy properties</label>
-          <label style={{ fontSize: 12 }}><input type="checkbox" checked={autoEnd} onChange={(e) => setAutoEnd(e.target.checked)} /> Auto End Turn</label>
-          <label style={{ fontSize: 12 }} title="Buys houses/hotels automatically when eligible"><input type="checkbox" checked={autoHouses} onChange={(e) => setAutoHouses(e.target.checked)} /> Auto Buy Houses/Hotels</label>
-          <label style={{ fontSize: 12 }} title="Automatically mortgage properties when below $0"><input type="checkbox" checked={autoMortgage} onChange={(e) => setAutoMortgage(e.target.checked)} /> Auto Mortgage when negative</label>
-        </div>}
-        {!collapseAuto && <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 8, flexWrap: 'wrap' }}>
-          <label style={{ fontSize: 12 }}>Keep at least $<input type="number" min={0} value={minKeep} onChange={(e) => setMinKeep(parseInt(e.target.value || '0', 10))} style={{ width: 90, marginLeft: 4 }} /></label>
-          <label style={{ fontSize: 12 }}>Only buy cost <select value={costRule} onChange={(e) => setCostRule(e.target.value as any)} style={{ marginLeft: 4 }}>
-            <option value="any">any</option>
-            <option value="above">≥</option>
-            <option value="below">≤</option>
-          </select>
-          $<input type="number" min={0} value={costValue} onChange={(e) => setCostValue(parseInt(e.target.value || '0', 10))} style={{ width: 100, marginLeft: 4 }} /></label>
-          <label style={{ fontSize: 12 }} title="Evenly distribute houses across the color set when buying"><input type="checkbox" checked={autoSpread} onChange={(e) => setAutoSpread(e.target.checked)} /> Auto-Spread Houses</label>
-        </div>}
+        {!collapseAuto && (
+          <div className="animate-fade-in" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 6, maxHeight: 150, overflowY: 'auto', paddingRight: 2 }}>
+            <label style={{ fontSize: 11 }}><input type="checkbox" checked={autoRoll} onChange={(e) => setAutoRoll(e.target.checked)} /> Roll</label>
+            <label style={{ fontSize: 11 }}><input type="checkbox" checked={autoBuy} onChange={(e) => setAutoBuy(e.target.checked)} /> Buy Props</label>
+            <label style={{ fontSize: 11 }}><input type="checkbox" checked={autoEnd} onChange={(e) => setAutoEnd(e.target.checked)} /> End Turn</label>
+            <label style={{ fontSize: 11 }} title="Buy houses/hotels automatically"><input type="checkbox" checked={autoHouses} onChange={(e) => setAutoHouses(e.target.checked)} /> Houses/Hotels</label>
+            <label style={{ fontSize: 11 }} title="Mortgage when cash below 0"><input type="checkbox" checked={autoMortgage} onChange={(e) => setAutoMortgage(e.target.checked)} /> Mortgage Neg.</label>
+            <label style={{ fontSize: 11 }}>Keep $<input type="number" min={0} value={minKeep} onChange={(e) => setMinKeep(parseInt(e.target.value || '0', 10))} style={{ width: 60, marginLeft: 2 }} /></label>
+            <label style={{ fontSize: 11 }}>Cost <select value={costRule} onChange={(e) => setCostRule(e.target.value as any)} style={{ marginLeft: 2 }}>
+              <option value="any">any</option>
+              <option value="above">≥</option>
+              <option value="below">≤</option>
+            </select> <input type="number" min={0} value={costValue} onChange={(e) => setCostValue(parseInt(e.target.value || '0', 10))} style={{ width: 60 }} /></label>
+            <label style={{ fontSize: 11 }} title="Evenly distribute houses"><input type="checkbox" checked={autoSpread} onChange={(e) => setAutoSpread(e.target.checked)} /> Spread Houses</label>
+          </div>
+        )}
       </div>
+
+            {openTradeDetailId ? (() => {
+              const cache = tradeCacheRef.current;
+              const trade: any = cache.get(openTradeDetailId) || (snapshot.pending_trades || []).find((t: any) => String(t.id) === openTradeDetailId);
+              const navIds = tradeOrderRef.current;
+              const idx = navIds.indexOf(openTradeDetailId);
+              const prevId = idx > 0 ? navIds[idx - 1] : null;
+              const nextId = idx >= 0 && idx < navIds.length - 1 ? navIds[idx + 1] : null;
+              // Determine status from latest log entry referencing this id
+              const relatedLogs = (snapshot.log || []).filter((e: any) => String(e.id) === openTradeDetailId);
+              const latest = relatedLogs[relatedLogs.length - 1];
+              const status = latest ? latest.type : (trade ? 'trade_offer' : 'unknown');
+        return (
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }} onClick={closeTradeDetail}>
+                  <div style={{ background: 'var(--color-surface)', minWidth: 460, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', borderRadius: 10, padding: 16, boxShadow: '0 4px 16px var(--color-shadow)' }} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h3 style={{ margin: 0 }}>📄 Trade #{openTradeDetailId}</h3>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="btn btn-ghost" disabled={!prevId} onClick={() => prevId && openTradeDetail(prevId)} title={prevId ? `Prev (#${prevId})` : 'No previous'}>⬅️</button>
+                        <button className="btn btn-ghost" disabled={!nextId} onClick={() => nextId && openTradeDetail(nextId)} title={nextId ? `Next (#${nextId})` : 'No next'}>➡️</button>
+                        <button className="btn btn-ghost" onClick={closeTradeDetail}>❌</button>
+                      </div>
+                    </div>
+                    {!trade ? (
+                      <div style={{ marginTop: 12 }}>Trade details unavailable (may have occurred before you joined).</div>
+                    ) : (
+                      <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                          <strong>{trade.from || '???'}</strong>
+                          <span style={{ opacity: 0.7 }}>→</span>
+                          <strong>{trade.to || '???'}</strong>
+                          <span style={{ fontSize: 12, padding: '2px 6px', background: '#eee', borderRadius: 4 }}>{status}</span>
+                          {trade.stub ? <span style={{ fontSize: 11, opacity: 0.6 }}>(reconstructed)</span> : null}
+                        </div>
+                        {trade.type === 'rental' || trade.cash_amount != null ? (
+                          <div className="ui-sm" style={{ lineHeight: 1.4 }}>
+                            <div><strong>Rental Offer</strong></div>
+                            <div>Cash: ${trade.cash_amount || 0}</div>
+                            <div>Properties: {(trade.properties || []).length}</div>
+                            <div>Percentage: {trade.percentage || 0}% • Turns: {trade.turns || 0}</div>
+                          </div>
+                        ) : (
+                          <div style={{ display: 'grid', gap: 4, fontSize: 13 }}>
+                            <div><strong>Give Cash:</strong> ${(trade.give?.cash || 0)}</div>
+                            <div><strong>Receive Cash:</strong> ${(trade.receive?.cash || 0)}</div>
+                            <div><strong>Give Props:</strong> {(trade.give?.properties || []).length ? (trade.give?.properties || []).join(', ') : '—'}</div>
+                            <div><strong>Receive Props:</strong> {(trade.receive?.properties || []).length ? (trade.receive?.properties || []).join(', ') : '—'}</div>
+                            {trade.give?.jail_card ? <div>Includes: Give Get Out of Jail Free</div> : null}
+                            {trade.receive?.jail_card ? <div>Includes: Receive Get Out of Jail Free</div> : null}
+                          </div>
+                        )}
+                        {trade.terms?.payments?.length ? (
+                          <div style={{ fontSize: 12 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 4 }}>Recurring Payments</div>
+                            <ul style={{ margin: 0, paddingLeft: 16 }}>
+                              {trade.terms.payments.map((p: any, i: number) => <li key={i}>{p.from} pays ${p.amount} to {p.to} for {p.turns} turns</li>)}
+                            </ul>
+                          </div>
+                        ) : null}
+                        {trade.terms?.rentals?.length ? (
+                          <div style={{ fontSize: 12 }}>
+                            <div style={{ fontWeight: 600, marginBottom: 4 }}>Property Rentals</div>
+                            <ul style={{ margin: 0, paddingLeft: 16 }}>
+                              {trade.terms.rentals.map((r: any, i: number) => <li key={i}>{r.percentage}% of rent from {(r.properties || []).length} properties ({r.turns} turns)</li>)}
+                            </ul>
+                          </div>
+                        ) : null}
+                        <div style={{ fontSize: 11, opacity: 0.65 }}>
+                          {relatedLogs.length ? `${relatedLogs.length} related events` : 'No related log events in current buffer'} • {trade?.fetched ? 'fetched' : trade?.stub ? 'reconstructed' : 'cached'}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })() : null}
 
       {/* Recurring obligations summary */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
@@ -497,7 +681,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
           <div className="ui-title ui-h3">📆 Recurring Payments</div>
           <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseRecurring(c => !c)}>{collapseRecurring ? '➕' : '➖'}</button>
         </div>
-        {!collapseRecurring && <div className="ui-sm" style={{ display: 'grid', gap: 4 }}>
+        {!collapseRecurring && <div className="ui-sm animate-fade-in" style={{ display: 'grid', gap: 4 }}>
           {((snapshot as any).recurring || []).length === 0 ? (
             <div style={{ opacity: 0.7 }}>None</div>
           ) : ((snapshot as any).recurring || []).map((r: any, idx: number) => (
@@ -514,7 +698,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
           <div className="ui-title ui-h3">🏠 Property Rentals</div>
           <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseRentals(c => !c)}>{collapseRentals ? '➕' : '➖'}</button>
         </div>
-        {!collapseRentals && <div className="ui-sm" style={{ display: 'grid', gap: 4 }}>
+        {!collapseRentals && <div className="ui-sm animate-fade-in" style={{ display: 'grid', gap: 4 }}>
           {((snapshot as any).property_rentals || []).length === 0 ? (
             <div style={{ opacity: 0.7 }}>None</div>
           ) : ((snapshot as any).property_rentals || []).map((rental: any, idx: number) => {
@@ -663,7 +847,13 @@ function StocksList({ lobbyId: _lobbyId, snapshot, myName, onOpen }: { lobbyId: 
             })()}
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            <button className="btn" onClick={() => onOpen(o)}>Open</button>
+            {o.owner === myName ? (
+              // Owner view: Settings icon only, no Open button
+              <button className="btn btn-ghost" onClick={() => onOpen(o)} title="Stock Settings">⚙️</button>
+            ) : (
+              // Buyer view: Open button for trading
+              <button className="btn" onClick={() => onOpen(o)}>Open</button>
+            )}
           </div>
       {o.holdings && o.holdings.length > 0 ? (
             <div style={{ gridColumn: '1 / -1', fontSize: 12, marginTop: 4 }}>

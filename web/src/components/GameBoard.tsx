@@ -1,123 +1,212 @@
-import { useEffect, useMemo, useState } from 'react';
-import { BACKEND_URL, BOARD_META_PATH } from '../config';
+import { useEffect, useMemo, useState, useRef } from 'react';
 import { buildDefaultBoardTiles } from '../lib/boardFallback';
 import TradePanel from './TradePanel';
 import type { BoardTile, GameSnapshot, PropertyState, PropertyStateLike } from '../types';
 import { buildPlayerColorMap } from '../lib/colors';
 import { getSocket, getRemembered } from '../lib/socket';
 import { getStreetRent, houseCostForGroup, mortgageValue, RAILROAD_RENTS } from '../lib/rentData';
+import { playGameSound } from '../lib/audio';
 
-type Props = { snapshot: GameSnapshot | null; lobbyId?: string };
+type Props = { snapshot: GameSnapshot; lobbyId: string };
+
+// Helper function to calculate optimal font size for single-line (or merged) property name text
+const calculateOptimalFontSize = (text: string, maxWidth: number, maxHeight: number, isCorner: boolean = false): number => {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return 11;
+  const baseFont = isCorner ? 14 : 11;
+  const minFont = 7;
+  const maxFont = isCorner ? 16 : 13;
+  for (let fontSize = Math.min(baseFont, maxFont); fontSize >= minFont; fontSize -= 0.5) {
+    ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+    const metrics = ctx.measureText(text);
+    const textWidth = metrics.width;
+    const textHeight = fontSize * 1.1;
+    if (textWidth <= maxWidth - 6 && textHeight <= maxHeight - 4) return fontSize;
+  }
+  return minFont;
+};
 
 export default function GameBoard({ snapshot, lobbyId }: Props) {
-  const [tiles, setTiles] = useState<BoardTile[]>([]);
-  const [err, setErr] = useState<string>('');
-  const [openPropPos, setOpenPropPos] = useState<number | null>(null);
   const s = getSocket();
+  // Core board / property state
+  const [tiles, setTiles] = useState<BoardTile[]>([]);
+  const [openPropPos, setOpenPropPos] = useState<number | null>(null);
   const [highlightedPlayer, setHighlightedPlayer] = useState<string | null>(null);
-  const [chatOpen, setChatOpen] = useState<boolean>(false);
-  const [chatLog, setChatLog] = useState<Array<{ from: string; message: string; ts?: number }>>([]);
-  const [chatMsg, setChatMsg] = useState<string>('');
-  const [unreadMessages, setUnreadMessages] = useState<number>(0);
-  const [kickBanner, setKickBanner] = useState<{ target?: string | null; remaining?: number | null }>({});
-  // Trade overlays and picker
   const [showTrade, setShowTrade] = useState(false);
   const [showTradeAdvanced, setShowTradeAdvanced] = useState(false);
   const [showPartnerPicker, setShowPartnerPicker] = useState<null | 'basic' | 'advanced'>(null);
   const [negativeBalanceError, setNegativeBalanceError] = useState<string | null>(null);
+  const [moneyAnimations, setMoneyAnimations] = useState<Record<string, string>>({});
+  const [turnChangeAnimation, setTurnChangeAnimation] = useState(false);
+  const [unreadIncoming, setUnreadIncoming] = useState(0);
+  const [propertyAnimations, setPropertyAnimations] = useState<Record<number, string>>({});
+  const [diceAnimation, setDiceAnimation] = useState('');
+  // (err placeholder removed) 
+  // Chat
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatLog, setChatLog] = useState<Array<{ from: string; message: string; ts?: number }>>([]);
+  const [chatMsg, setChatMsg] = useState('');
+  const [unreadMessages, setUnreadMessages] = useState(0);
+  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
+  // Vote kick banner
+  const [kickBanner, setKickBanner] = useState<{ target?: string | null; votes?: number; required?: number; remaining?: number }>({});
+  // Helpers to remember previous sets for unread counts
+  const prevIncomingRef = useRef<Set<string>>(new Set());
+  const prevTradeIdsRef = useRef<Set<string>>(new Set());
+  const prevLastActionRef = useRef<string | null>(null);
   const meName = (getRemembered().displayName || '').trim();
-  // For unread badge on View Trades
-  const unreadIncoming = useMemo(() => {
-    const my = meName || (snapshot?.players?.[snapshot?.current_turn ?? -1]?.name || '');
-    const incoming = (snapshot?.pending_trades || []).filter((t: any) => t.to === my);
-    return incoming.length;
-  }, [snapshot?.pending_trades, snapshot?.current_turn, snapshot?.players, meName]);
+
+  // Load tiles from snapshot or fallback
   useEffect(() => {
-    const onHi = (ev: any) => setHighlightedPlayer(ev?.detail?.name || null);
+    const snapTiles: any[] | undefined = (snapshot as any)?.tiles;
+    if (Array.isArray(snapTiles) && snapTiles.length > 0) {
+      setTiles(snapTiles as BoardTile[]);
+    } else if (tiles.length === 0) {
+      setTiles(buildDefaultBoardTiles());
+    }
+  }, [(snapshot as any)?.tiles]);
+
+  // Highlight player event (used for rent highlight logic)
+  useEffect(() => {
+    const onHi = (e: any) => setHighlightedPlayer(e.detail?.name || null);
     window.addEventListener('highlight-player' as any, onHi);
     return () => window.removeEventListener('highlight-player' as any, onHi);
   }, []);
 
+  // Track unread incoming trades (basic heuristic)
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setErr('');
-      const bases = [BACKEND_URL || '', 'http://127.0.0.1:8000'];
-      for (const base of bases) {
-        try {
-          const url = base ? `${base}${BOARD_META_PATH}` : BOARD_META_PATH;
-          const res = await fetch(url, { headers: { Accept: 'application/json' } });
-          if (!res.ok) continue;
-          const data = await res.json();
-          const arr = Array.isArray(data) ? data : (Array.isArray(data?.tiles) ? data.tiles : null);
-          if (arr && !cancelled) {
-            setTiles(arr as BoardTile[]);
-            return;
-          }
-        } catch (_) {
-          // try next base
-        }
-      }
-      if (!cancelled) {
-        setErr('Board metadata unavailable (using fallback)');
-        setTiles(buildDefaultBoardTiles());
+    const mine = new Set((snapshot?.pending_trades || []).filter((t: any) => t.to === meName).map((t: any) => String(t.id)));
+    let newly = 0;
+    mine.forEach(id => { if (!prevIncomingRef.current.has(id)) newly++; });
+    if (newly > 0) setUnreadIncoming(u => u + newly);
+    prevIncomingRef.current = mine;
+  }, [snapshot?.pending_trades, meName]);
+
+  // Global trade sound triggers (new pending, accepted, declined)
+  useEffect(() => {
+    const trades = (snapshot?.pending_trades || []) as any[];
+    const currentIds = new Set(trades.map(t => String(t.id)));
+    // Detect new trades
+    for (const t of trades) {
+      const id = String(t.id);
+      if (!prevTradeIdsRef.current.has(id)) {
+        playGameSound('trade_created');
       }
     }
-    load();
-    return () => { cancelled = true };
-  }, []);
+    prevTradeIdsRef.current = currentIds;
+    // Detect accepted/declined via last_action
+    const la: any = snapshot?.last_action;
+    const laType = la?.type || '';
+    if (laType && laType !== prevLastActionRef.current) {
+      if (laType === 'trade_accepted') playGameSound('trade_accepted');
+      if (laType === 'trade_declined') playGameSound('trade_denied');
+    }
+    prevLastActionRef.current = laType;
+  }, [snapshot?.pending_trades, snapshot?.last_action]);
 
-  // Subscribe to chat and lobby updates
+  // Chat socket listener
   useEffect(() => {
-    const onLobby = (l: any) => {
-      if (!lobbyId || !l || l.id !== lobbyId) return;
-      if (Array.isArray(l.chat)) {
-        setChatLog(l.chat.map((c: any) => ({ from: c.from, message: c.message, ts: c.ts })));
+    // Track seen messages to avoid duplicates when listening to multiple events
+    const seenRef: { current: Set<string> } = (window as any).__chatSeenRef || { current: new Set() };
+    (window as any).__chatSeenRef = seenRef;
+  const register = (msg: any) => {
+      if (!msg) return;
+      const ts = msg.ts || Date.now();
+      const from = msg.from || '???';
+      const text = msg.message || '';
+      const key = `${ts}-${from}-${text}`;
+      if (seenRef.current.has(key)) return; // duplicate (likely from second event)
+      seenRef.current.add(key);
+      if (seenRef.current.size > 600) { // trim occasionally
+        const arr = Array.from(seenRef.current).slice(-400);
+        seenRef.current.clear();
+        arr.forEach(k => seenRef.current.add(k));
       }
-      setKickBanner({ target: l.kick_target, remaining: l.kick_remaining });
+      setChatLog(prev => [...prev, { from, message: text, ts }]);
+      if (!chatOpen) setUnreadMessages(u => u + 1);
     };
-    const onChat = (payload: any) => {
-      if (!lobbyId || payload?.id !== lobbyId) return;
-      const newMessage = { from: payload.from, message: payload.message, ts: payload.ts };
-      setChatLog((prev) => [...prev, newMessage]);
-      
-      // Increment unread count if chat is closed and message is not from current user
-      const myName = (getRemembered().displayName || '').trim();
-      if (!chatOpen && payload.from !== myName) {
-        setUnreadMessages(prev => prev + 1);
-      }
+  const onChat = (msg: any) => register(msg);
+  const onLobbyChat = (msg: any) => {
+      // Filter to matching lobby
+      const lid = msg?.id || msg?.lobby_id;
+      if (lid && lid !== lobbyId) return;
+  register(msg);
     };
-    s.on('lobby_state', onLobby);
-    s.on('lobby_chat', onChat);
-    return () => {
-      s.off('lobby_state', onLobby);
-      s.off('lobby_chat', onChat);
-    };
-  }, [s, lobbyId]);
+    s.on('chat_message', onChat);
+    s.on('lobby_chat', onLobbyChat);
+    return () => { s.off('chat_message', onChat); s.off('lobby_chat', onLobbyChat); };
+  }, [s, chatOpen, lobbyId]);
 
-  // Chat functions
+  // Vote kick status
+  useEffect(() => {
+    const onLobbyState = (l: any) => {
+      setKickBanner({ target: l.kick_target, votes: l.kick_votes, required: l.kick_required, remaining: l.kick_remaining });
+    };
+    s.on('lobby_state', onLobbyState);
+    return () => { s.off('lobby_state', onLobbyState); };
+  }, [s]);
+
+  // Chat toggle
   const handleChatToggle = () => {
-    setChatOpen((prev) => {
-      const newState = !prev;
-      if (newState) {
-        // Clear notifications when opening chat
-        setUnreadMessages(0);
-      }
-      return newState;
+    setChatOpen(prev => {
+      const next = !prev;
+      if (next) setUnreadMessages(0);
+      return next;
     });
   };
 
-  // Local countdown tick for kick banner
+  // Auto-scroll chat
+  useEffect(() => {
+    if (chatOpen && chatMessagesRef.current) {
+      chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
+    }
+  }, [chatLog, chatOpen]);
+
+  // Local countdown for kick banner
   useEffect(() => {
     if (!kickBanner.remaining) return;
     const t = setInterval(() => {
-      setKickBanner((kb) => ({ ...kb, remaining: kb.remaining && kb.remaining > 0 ? kb.remaining - 1 : 0 }));
+      setKickBanner(kb => ({ ...kb, remaining: kb.remaining && kb.remaining > 0 ? kb.remaining - 1 : 0 }));
     }, 1000);
     return () => clearInterval(t);
   }, [kickBanner.remaining]);
 
-  // tiles are rendered directly; map by position if needed later
-  const tileByPos = useMemo(() => Object.fromEntries(tiles.map((t: BoardTile) => [t.pos, t])), [tiles]);
+  // Money change animations + audio
+  const prevMoney = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!snapshot?.players) return;
+    const myName = (getRemembered().displayName || '').trim();
+    for (const p of snapshot.players) {
+      const curCash = p.cash || 0;
+      const prevCash = prevMoney.current[p.name] || 0;
+      if (prevCash > 0 && curCash !== prevCash) {
+        const amount = curCash - prevCash;
+        if (p.name === myName) {
+          playGameSound('money_changed', { currentPlayer: p.name, myName, amount });
+        }
+        const cls = curCash > prevCash ? 'animate-money-gain' : 'animate-money-loss';
+        setMoneyAnimations(prev => ({ ...prev, [p.name]: cls }));
+        setTimeout(() => {
+          setMoneyAnimations(prev => { const cp = { ...prev }; delete cp[p.name]; return cp; });
+        }, 600);
+      }
+      prevMoney.current[p.name] = curCash;
+    }
+  }, [snapshot?.players]);
+
+  // Turn change animation
+  const prevTurn = useRef<number>(-1);
+  useEffect(() => {
+    if (snapshot?.current_turn !== undefined && snapshot.current_turn !== prevTurn.current && prevTurn.current >= 0) {
+      setTurnChangeAnimation(true);
+      setTimeout(() => setTurnChangeAnimation(false), 1500);
+    }
+    prevTurn.current = snapshot?.current_turn ?? -1;
+  }, [snapshot?.current_turn]);
+
+  // Derived helpers
+  const tileByPos = useMemo(() => Object.fromEntries(tiles.map(t => [t.pos, t])), [tiles]);
 
   const curIdx = snapshot?.current_turn ?? -1;
   const curName = curIdx >= 0 ? snapshot?.players?.[curIdx]?.name : undefined;
@@ -146,12 +235,48 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
 
   return (
     <div className="board" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-      {err ? <div style={{ color: '#e74c3c', fontSize: 12, marginBottom: 6 }}>{err}</div> : null}
+  {/* error banner removed (no err state) */}
       <div style={{ padding: '4px 6px', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Turn: {curName || '—'}</div>
       <div className="board-wrap" style={{ position: 'relative' }}>
         {kickBanner?.target ? (
-          <div style={{ position: 'absolute', left: '50%', top: -36, transform: 'translateX(-50%)', background: 'rgba(231, 76, 60, 0.9)', color: '#fff', padding: '4px 8px', borderRadius: 6, fontSize: 12, zIndex: 5 }}>
-            Vote-kick: {kickBanner.target} — {typeof kickBanner.remaining === 'number' ? `${Math.floor((kickBanner.remaining as number)/60)}:${String((kickBanner.remaining as number)%60).padStart(2,'0')}` : ''}
+          <div style={{ 
+            position: 'absolute', 
+            left: '50%', 
+            top: -48, 
+            transform: 'translateX(-50%)', 
+            background: 'linear-gradient(135deg, rgba(231, 76, 60, 0.95), rgba(192, 57, 43, 0.95))', 
+            color: '#fff', 
+            padding: '8px 16px', 
+            borderRadius: '12px', 
+            fontSize: '13px', 
+            fontWeight: '600',
+            zIndex: 10,
+            boxShadow: '0 4px 12px rgba(231, 76, 60, 0.4)',
+            border: '2px solid rgba(255, 255, 255, 0.2)',
+            minWidth: '220px',
+            textAlign: 'center'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <span>🚫</span>
+              <div>
+                <div style={{ fontSize: '14px', fontWeight: '700' }}>VOTE KICK ACTIVE</div>
+                <div style={{ fontSize: '12px', opacity: 0.9, marginTop: 2 }}>
+                  Target: <strong>{kickBanner.target}</strong>
+                </div>
+                <div style={{ fontSize: '12px', opacity: 0.9, marginTop: 2 }}>
+                  Votes: <strong>{kickBanner.votes || 0}/{kickBanner.required || 1}</strong>
+                  {(kickBanner.votes || 0) >= (kickBanner.required || 1) ? ' ✓' : ''}
+                </div>
+                <div style={{ fontSize: '11px', opacity: 0.8, marginTop: 2 }}>
+                  {typeof kickBanner.remaining === 'number' ? (
+                    <>Time: <strong>{Math.floor((kickBanner.remaining as number)/60)}:{String((kickBanner.remaining as number)%60).padStart(2,'0')}</strong></>
+                  ) : (
+                    'Pending...'
+                  )}
+                </div>
+              </div>
+              <span>⏰</span>
+            </div>
           </div>
         ) : null}
         <div className="grid">
@@ -173,31 +298,176 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             if (t.x === 10) return 'left'; // right col -> owner to left
             return 'top';
           })();
-          // Choose stripe orientation and side (inner edge toward board center)
-          const stripeClass = (() => {
-            if (t.y === 0) return 'h bottom';      // top row: stripe at bottom
-            if (t.y === 10) return 'h top';        // bottom row: stripe at top
-            if (t.x === 0) return 'v right';       // left col: stripe at right
-            if (t.x === 10) return 'v left';       // right col: stripe at left
-            return 'h bottom';
-          })();
+          
           return (
-            <div key={t.pos} className={`tile type-${t.type || 'prop'}`} style={{ gridColumn: t.x + 1, gridRow: t.y + 1, outline: isCurrent ? '2px solid #f1c40f' : undefined, cursor: clickable ? 'pointer' : undefined }} onClick={() => clickable ? setOpenPropPos(t.pos) : undefined}>
-              <div className={`stripe ${stripeClass}`} style={{ background: t.color || 'transparent' }} />
-              <div className="name">{t.name}</div>
+            <div 
+              key={t.pos} 
+              className={`tile type-${t.type || 'prop'} board-tile ${propertyAnimations[t.pos] || ''}`} 
+              data-corner={(t.x === 0 && t.y === 0) || (t.x === 10 && t.y === 0) || (t.x === 0 && t.y === 10) || (t.x === 10 && t.y === 10)}
+              style={{ gridColumn: t.x + 1, gridRow: t.y + 1, outline: isCurrent ? '2px solid #f1c40f' : undefined, cursor: clickable ? 'pointer' : undefined }} 
+              onClick={() => clickable ? setOpenPropPos(t.pos) : undefined}
+            >
+              {/* Flag background overlay for properties - restricted to card area */}
+              {t.type === 'property' && t.flag ? (
+                <div className="flag-overlay" style={{
+                  position: 'absolute',
+                  top: '2px',
+                  left: '2px',
+                  right: '2px',
+                  bottom: '2px',
+                  backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="50" x="50" text-anchor="middle" font-size="50">${t.flag}</text></svg>`)}")`,
+                  backgroundSize: '80% 80%',
+                  backgroundPosition: 'center',
+                  backgroundRepeat: 'no-repeat',
+                  opacity: 0.15,
+                  borderRadius: '4px',
+                  filter: 'blur(1px)',
+                  zIndex: 1
+                }} />
+              ) : null}
+              
+              {/* Flag circle for properties - positioned on inner edge */}
+              {t.type === 'property' && t.flag ? (
+                <div className="flag-circle" style={{
+                  position: 'absolute',
+                  width: '32px', // ~50% width of property card (~64px)
+                  height: '32px',
+                  borderRadius: '50%',
+                  background: 'white',
+                  border: '2px solid #333',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '16px', // Increased for larger flag circle
+                  zIndex: 5,
+                  ...((() => {
+                    // Position flag circle on inner edge closest to center
+                    if (t.y === 0) return { bottom: '-16px', left: '50%', transform: 'translateX(-50%)' }; // top row
+                    if (t.y === 10) return { top: '-16px', left: '50%', transform: 'translateX(-50%)' }; // bottom row
+                    if (t.x === 0) return { right: '-16px', top: '50%', transform: 'translateY(-50%)' }; // left col
+                    if (t.x === 10) return { left: '-16px', top: '50%', transform: 'translateY(-50%)' }; // right col
+                    return { bottom: '-16px', left: '50%', transform: 'translateX(-50%)' };
+                  })())
+                }}>
+                  {t.flag}
+                </div>
+              ) : null}
+              
+              {/* Property name with orientation + multi-line support for railroads/utilities & multi-word */}
+              {(() => {
+                const isCorner = (t.x === 0 && t.y === 0) || (t.x === 10 && t.y === 0) || (t.x === 0 && t.y === 10) || (t.x === 10 && t.y === 10);
+                const allowTwoLine = ['railroad', 'utility'].includes(String(t.type)) || /\s/.test(t.name.trim());
+                const words = t.name.split(/\s+/);
+                let displayLines: string[] = [t.name];
+                if (allowTwoLine && words.length === 2) {
+                  displayLines = [words[0], words[1]];
+                } else if (allowTwoLine && words.length > 2) {
+                  // put first word on first line, rest on second (fallback)
+                  displayLines = [words[0], words.slice(1).join(' ')];
+                }
+                const singleLine = !allowTwoLine || displayLines.length === 1;
+                const tileSize = 64;
+                const maxWidth = tileSize - 8;
+                const maxHeight = singleLine ? tileSize / 3 : tileSize / 2.2; // more vertical room for 2 lines
+                const baseContent = displayLines.join(' ');
+                const optimalBase = calculateOptimalFontSize(baseContent, maxWidth, maxHeight, isCorner);
+                // Increase size a bit for two-line since each line shorter
+                const fontSize = singleLine ? optimalBase : Math.min(optimalBase + 1, 14);
+                const rotation = (() => {
+                  if (isCorner) return 'translate(-50%, -50%) rotate(0deg)';
+                  // Top row: keep upright (no 180 flip) per new spec
+                  if (t.y === 0) return 'translate(-50%, -50%) rotate(0deg)';
+                  if (t.y === 10) return 'translate(-50%, 0%) rotate(0deg)';
+                  if (t.x === 0) return 'translate(-50%, -50%) rotate(90deg)';
+                  if (t.x === 10) return 'translate(-50%, -50%) rotate(-90deg)';
+                  return 'translate(-50%, -50%)';
+                })();
+                const posStyle = (() => {
+                  if (t.y === 0) return { top: '50%', left: '50%' } as const;
+                  if (t.y === 10) return { bottom: '24px', left: '50%' } as const;
+                  if (t.x === 0) return { top: '50%', left: '50%' } as const;
+                  if (t.x === 10) return { top: '50%', left: '50%' } as const;
+                  return { top: '50%', left: '50%' } as const;
+                })();
+                return (
+                  <div className="name" style={{ position: 'absolute', ...posStyle, transform: rotation, transformOrigin: 'center center', fontSize: `${fontSize}px`, fontWeight: t.name.includes('𝗦𝗧𝗔𝗥𝗧') ? 'bold' : 'normal', textShadow: t.name.includes('𝗦𝗧𝗔𝗥𝗧') ? '0 0 4px rgba(46, 204, 113, 0.8)' : undefined, whiteSpace: singleLine ? 'nowrap' : 'normal', textAlign: 'center', lineHeight: 1.05, zIndex: 2, padding: 0, maxWidth: 60, overflow: 'hidden' }}>
+                    {singleLine ? t.name : (
+                      <span style={{ display: 'inline-block', whiteSpace: 'pre-line' }}>
+                        {displayLines.join('\n')}
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+              
+              {/* Enhanced ownership bar - replaces price at bottom edge when owned */}
+              {ownerColor ? (() => {
+                const rgb = (() => {
+                  const c = ownerColor.replace('#','');
+                  if (c.length === 3) return [parseInt(c[0]+c[0],16), parseInt(c[1]+c[1],16), parseInt(c[2]+c[2],16)];
+                  return [parseInt(c.slice(0,2),16), parseInt(c.slice(2,4),16), parseInt(c.slice(4,6),16)];
+                })();
+                const lum = (0.2126*rgb[0] + 0.7152*rgb[1] + 0.0722*rgb[2]) / 255;
+                const outline = lum > 0.55 ? '#222' : '#fafafa';
+                return (
+                  <div className="ownership-bar" style={{
+                    position: 'absolute',
+                    height: '8px',
+                    background: ownerColor,
+                    border: `1px solid ${outline}`,
+                    borderRadius: '2px',
+                    boxShadow: lum > 0.55 ? 'inset 0 0 0 1px rgba(0,0,0,0.15)' : '0 0 0 1px rgba(255,255,255,0.25)',
+                    ...((() => {
+                      if (t.y === 0) return { top: 0, left: '4px', right: '4px' } as const;
+                      if (t.y === 10) return { bottom: 0, left: '4px', right: '4px' } as const;
+                      if (t.x === 0) return { left: 0, top: '4px', bottom: '4px', width: '8px', height: 'auto' } as const;
+                      if (t.x === 10) return { right: 0, top: '4px', bottom: '4px', width: '8px', height: 'auto' } as const;
+                      return { bottom: 0, left: '4px', right: '4px' } as const;
+                    })())
+                  }} />
+                );
+              })() : null}
+              
+              {/* Price display when not owned - sharpened (no fade) with higher contrast */}
+              {!ownerColor && (t.price || 0) > 0 ? (
+                <div className="price-tag" style={{
+                  position: 'absolute',
+                  fontSize: '9px',
+                  fontWeight: 600,
+                  letterSpacing: '0.25px',
+                  zIndex: 8,
+                  textShadow: '0 1px 2px rgba(0,0,0,0.35)',
+                  color: 'var(--color-text)',
+                  background: 'rgba(255,255,255,0.65)',
+                  padding: '1px 3px',
+                  borderRadius: 3,
+                  backdropFilter: 'blur(2px)',
+                  ...((() => {
+                    // Position price to match text positioning and avoid flag overlap
+                    if (t.y === 0) return { top: '20%', left: '50%', transform: 'translateX(-50%) rotate(0deg)' }; // top row upright
+                    if (t.y === 10) return { bottom: '4px', left: '50%', transform: 'translateX(-50%)' }; // bottom row - positioned at bottom edge
+                    if (t.x === 0) return { left: '2px', top: '50%', transform: 'translateY(-50%) rotate(90deg)' }; // left col - match text direction
+                    if (t.x === 10) return { right: '2px', top: '50%', transform: 'translateY(-50%) rotate(-90deg)' }; // right col - match text direction
+                    return { bottom: '2px', left: '50%', transform: 'translateX(-50%)' };
+                  })())
+                }}>
+                  ${t.price}
+                </div>
+              ) : null}
+              
               {ownerColor ? <div className={`owner ${edge}`} style={{ background: ownerColor }} /> : null}
               {/* Buildings bar: 🏠 xN or 🏨 x1 */}
               {(houses > 0 || hotel) ? (
                 <div className="buildings-bar">{hotel ? '🏨 x1' : `🏠 x${houses}`}</div>
               ) : null}
               {mortgaged ? <div className="mortgage-stamp">MORTGAGED</div> : null}
-              {(() => {
+        {(() => {
                 const here = (snapshot?.players || []).filter(pl => pl.position === t.pos);
                 if (here.length === 0) return null;
                 // Arrange up to 4 tokens in a centered 2x2 grid; 1 token stays centered
                 const gridTemplate = here.length <= 1 ? '1fr' : '1fr 1fr';
                 return (
-                  <div className="tokens" style={{ display: 'grid', gridTemplateColumns: gridTemplate, gridTemplateRows: gridTemplate, alignItems: 'center', justifyItems: 'center', gap: 4 }}>
+          <div className="tokens" style={{ display: 'grid', gridTemplateColumns: gridTemplate, gridTemplateRows: gridTemplate, alignItems: 'center', justifyItems: 'center', gap: 4, zIndex: 6, position: 'relative' }}>
                     {here.map((pl, idx) => (
                       <span key={idx} className="token" title={pl.name} style={{ background: pl.color || '#111' }} />
                     ))}
@@ -217,18 +487,65 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           </div>
           {/* Unified controls layer: contains trade controls and core action controls */}
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }}>
-            {/* Players Overview — centered, 250px above Trade row (trade is at 50%+50px => this at 50%-200px) */}
-            <div style={{ position: 'absolute', left: '50%', top: 'calc(50% - 200px)', transform: 'translateX(-50%)', pointerEvents: 'auto' }}>
-              <div className="ui-labelframe" style={{ background: 'rgba(255,255,255,0.96)', border: '1px solid #e1e4e8', borderRadius: 8, padding: 10, minWidth: 320, maxWidth: '80vw' }}>
+            {/* Players Overview — shifted left 45px and up 35px (spec) */}
+            <div style={{ position: 'absolute', left: 'calc(50% - 130px)', top: 'calc(50% - 235px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
+                <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, minWidth: 140, maxWidth: 200, color: 'var(--color-text)' }}>
                 <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Players Overview</div>
                 <div style={{ fontSize: 12, marginTop: 6, display: 'grid', gap: 6 }}>
-                  {(snapshot?.players || []).map((p, i) => (
-                    <div key={i} className={`list-item${i === (snapshot?.current_turn ?? -1) ? ' current' : ''}`} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || 'var(--muted)', display: 'inline-block' }} />
-                      <button className="btn btn-link" style={{ padding: 0 }} onClick={() => window.dispatchEvent(new CustomEvent('highlight-player', { detail: { name: p.name } }))} title="Highlight rents for this player's properties">{p.name}</button>
-                      <span style={{ marginLeft: 'auto' }}>${p.cash}</span>
-                    </div>
-                  ))}
+                  {(snapshot?.players || []).map((p, i) => {
+                    const disconnectRemain: Record<string, number> = (snapshot as any)?.disconnect_remain || ({} as any);
+                    const remain = disconnectRemain[p.name];
+                    const isDisc = typeof remain === 'number' && remain > 0;
+                    
+                    // Format timer display
+                    const formatTime = (seconds: number) => {
+                      const mins = Math.floor(seconds / 60);
+                      const secs = seconds % 60;
+                      return mins > 0 ? `${mins}:${String(secs).padStart(2, '0')}` : `${secs}s`;
+                    };
+                    
+                    return (
+                      <div 
+                        key={i} 
+                        className={`list-item${i === (snapshot?.current_turn ?? -1) ? ' current' : ''} ${turnChangeAnimation && i === (snapshot?.current_turn ?? -1) ? 'animate-turn-highlight' : ''}`} 
+                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}
+                      >
+                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || 'var(--muted)', display: 'inline-block' }} />
+                        <button className="btn btn-link" style={{ padding: 0 }} onClick={() => window.dispatchEvent(new CustomEvent('highlight-player', { detail: { name: p.name } }))} title="Highlight rents for this player's properties">{p.name}</button>
+                        {isDisc && (
+                          <div 
+                            title={`Player disconnected - ${formatTime(remain)} remaining to reconnect`} 
+                            className="disconnect-indicator"
+                            style={{ 
+                              display: 'inline-flex', 
+                              alignItems: 'center', 
+                              gap: 3, 
+                              background: 'rgba(231, 76, 60, 0.15)', 
+                              padding: '2px 6px', 
+                              borderRadius: '8px',
+                              border: '1px solid rgba(231, 76, 60, 0.4)',
+                              animation: 'pulse 2s infinite',
+                              fontSize: '10px',
+                              fontWeight: 600,
+                              color: '#e74c3c',
+                              boxShadow: '0 2px 4px rgba(231, 76, 60, 0.2)',
+                              backdropFilter: 'blur(2px)'
+                            }}
+                          >
+                            <span style={{ fontSize: '12px' }}>📶</span>
+                            <span style={{ opacity: 0.8 }}>❌</span>
+                            <span>{formatTime(remain)}</span>
+                          </div>
+                        )}
+                        <span 
+                          style={{ marginLeft: 'auto' }} 
+                          className={moneyAnimations[p.name] || ''}
+                        >
+                          ${p.cash}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'center' }}>
                   <button className={`btn btn-ghost${unreadIncoming > 0 ? ' btn-with-badge' : ''}`} onClick={() => window.dispatchEvent(new CustomEvent('open-trades'))}>
@@ -236,6 +553,30 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                     {unreadIncoming > 0 ? <span className="btn-badge" title={`${unreadIncoming} new`}>{unreadIncoming}</span> : null}
                   </button>
                   <button className="btn btn-ghost" onClick={() => window.dispatchEvent(new CustomEvent('open-log'))}>📜 Open Log</button>
+                </div>
+              </div>
+            </div>
+            {/* Game Log — shifted left 60px (was +150px) and up 35px (spec) */}
+            <div style={{ position: 'absolute', left: 'calc(50% + 90px)', top: 'calc(50% - 235px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
+              <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, width: 275, height: 225, display: 'flex', flexDirection: 'column', color: 'var(--color-text)' }}>
+                <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Game Log</div>
+                <div style={{ fontSize: 10, marginTop: 4, flex: 1, overflowY: 'auto', lineHeight: 1.25 }}>
+                  {snapshot?.log && snapshot.log.length ? (
+                    <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                      {snapshot.log.slice(-80).map((e: any, i: number) => (
+                        <li key={i} style={{ padding: '2px 0', borderBottom: '1px dotted #e1e4e8' }}>
+                          <span style={{ marginRight: 4 }}>
+                            {e.type === 'rolled' ? '🎲' : e.type === 'buy' ? '🏠' : e.type === 'end_turn' ? '⏭' : e.type === 'bankrupt' ? '💥' : '•'}
+                          </span>
+                          {e.id && /^trade_/.test(String(e.type)) ? (
+                            <button className="btn btn-link" style={{ padding: 0, fontSize: 10 }} onClick={() => window.dispatchEvent(new CustomEvent('open-trades'))} title={`Open trade ${e.id}`}>{e.text || JSON.stringify(e)}</button>
+                          ) : (
+                            <span style={{ fontSize: 10 }}>{e.text || JSON.stringify(e)}</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : <div style={{ opacity: 0.6 }}>No log entries.</div>}
                 </div>
               </div>
             </div>
@@ -266,11 +607,52 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 }
               }
               const canEndC = myTurn && rolledThisTurn && rollsLeft === 0;
+              
+              // Vote kick logic - can vote kick current turn holder if not me
+              const currentTurnPlayer = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
+              const canVoteKick = !myTurn && currentTurnPlayer && snapshot?.players && snapshot.players.length > 2;
+              
               return (
                 <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 80px)', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
-                  <button className="btn btn-primary" disabled={!canRollC} onClick={() => act('roll_dice')}>🎲 Roll</button>
-                  <button className="btn btn-success" disabled={!canBuyC} onClick={() => act('buy_property')}>🏠 Buy</button>
-                  <button className="btn btn-ghost" disabled={!canEndC} onClick={() => {
+                  <button 
+                    className={`btn btn-primary action-button ${diceAnimation}`} 
+                    disabled={!canRollC} 
+                    onClick={() => { 
+                      playGameSound('dice_rolled'); 
+                      setDiceAnimation('animate-dice-shake');
+                      setTimeout(() => setDiceAnimation(''), 500);
+                      act('roll_dice'); 
+                    }}
+                  >
+                    🎲 Roll
+                  </button>
+                  <button 
+                    className="btn btn-success action-button" 
+                    disabled={!canBuyC} 
+                    onClick={() => { 
+                      playGameSound('property_purchased'); 
+                      // Add property purchase animation
+                      if (snapshot?.players?.[curIdx]?.position !== undefined) {
+                        const pos = snapshot.players[curIdx].position;
+                        setPropertyAnimations(prev => ({ ...prev, [pos]: 'animate-property-purchase' }));
+                        setTimeout(() => {
+                          setPropertyAnimations(prev => {
+                            const updated = { ...prev };
+                            delete updated[pos];
+                            return updated;
+                          });
+                        }, 1000);
+                      }
+                      act('buy_property'); 
+                    }}
+                  >
+                    🏠 Buy
+                  </button>
+                  <button className="btn btn-ghost action-button" disabled={!canEndC} onClick={() => {
+                    playGameSound('turn_started', { 
+                      currentPlayer: snapshot?.players?.[snapshot?.current_turn ?? -1]?.name,
+                      myName: (getRemembered().displayName || '').trim()
+                    });
                     const socket = s;
                     socket.emit('game_action', { id: lobbyId, action: { type: 'end_turn' } }, (ack: any) => {
                       try { console.debug('[END_TURN][ACK]', ack); } catch {}
@@ -285,6 +667,25 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                       }
                     });
                   }} title={(!canEndC ? 'Need roll or extra rolls left' : 'End your turn')}>⏭ End Turn</button>
+                  
+                  {canVoteKick && (
+                    <button 
+                      className="btn btn-warning" 
+                      onClick={() => {
+                        if (confirm(`Vote to kick ${currentTurnPlayer.name}? This requires majority approval.`)) {
+                          s.emit('vote_kick', { 
+                            id: lobbyId, 
+                            target: currentTurnPlayer.name 
+                          });
+                        }
+                      }}
+                      title={`Vote to kick ${currentTurnPlayer.name} (majority required)`}
+                      style={{ fontSize: '12px', padding: '4px 8px' }}
+                    >
+                      🚫 Vote Kick
+                    </button>
+                  )}
+                  
                   <button 
                     className="btn btn-ghost" 
                     onClick={handleChatToggle} 
@@ -295,7 +696,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                     }}
                   >
                     💬
-                    {unreadMessages > 0 && (
+                    {!chatOpen && unreadMessages > 0 && (
                       <span style={{
                         position: 'absolute',
                         top: '-2px',
@@ -320,13 +721,13 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               );
             })()}
             {(() => {
-              // Trade / Advanced / Bankruptcy row — moved up by 40px (from bottom: 85px to 125px)
+              // Trade / Advanced / Bankruptcy row — shifted down by ~10px and reduced size by ~10%
               const cur = snapshot?.players?.[snapshot?.current_turn ?? -1];
               const myName = meName || cur?.name || '';
               const players = (snapshot?.players || []).map(p => p.name).filter(n => n !== myName);
               const enableTrade = players.length >= 1;
               return (
-                <div style={{ position: 'absolute', left: '50%', bottom: '125px', transform: 'translateX(-50%)', display: 'flex', gap: 10, alignItems: 'stretch', pointerEvents: 'auto', background: 'rgba(255,255,255,0.9)', padding: '6px 10px', borderRadius: 10, boxShadow: '0 4px 14px rgba(0,0,0,0.15)', border: '1px solid #d0d7de' }}>
+                <div style={{ position: 'absolute', left: '50%', bottom: '115px', transform: 'translateX(-50%) scale(0.9)', display: 'flex', gap: 10, alignItems: 'stretch', pointerEvents: 'auto', background: 'var(--color-surface)', padding: '6px 10px', borderRadius: 10, boxShadow: '0 4px 14px var(--color-shadow)', border: '1px solid var(--color-border)' }}>
                   <button className="btn btn-trade" style={{ minWidth: 110 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('basic')} title="Create a standard property/cash trade">🤝 Trade</button>
                   <button className="btn btn-advanced" style={{ minWidth: 140 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('advanced')} title="Open advanced combined trade (recurring terms)">⚡ Advanced</button>
                   <div style={{ width: 1, background: 'rgba(0,0,0,0.15)', margin: '0 2px' }} />
@@ -390,12 +791,12 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           right: 0, 
           width: 'min(400px, 40vw)', 
           height: '100vh', 
-          background: '#fff', 
-          boxShadow: '-4px 0 20px rgba(0,0,0,0.15)', 
+          background: 'var(--color-surface)', 
+          boxShadow: '-4px 0 20px var(--color-shadow)', 
           display: 'flex', 
           flexDirection: 'column',
           zIndex: 2000,
-          borderLeft: '1px solid #e0e0e0'
+          borderLeft: '1px solid var(--color-border)'
         }}>
           {/* Header */}
           <div style={{ 
@@ -424,15 +825,18 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           </div>
             
             {/* Messages area */}
-            <div style={{ 
-              flex: 1, 
-              padding: '16px 20px', 
-              overflowY: 'auto', 
-              background: '#f8f9fa',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8
-            }}>
+            <div 
+              ref={chatMessagesRef}
+              style={{ 
+                flex: 1, 
+                padding: '16px 20px', 
+                overflowY: 'auto', 
+                background: '#f8f9fa',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8
+              }}
+            >
               {chatLog.length === 0 ? (
                 <div style={{ 
                   textAlign: 'center', 
@@ -445,21 +849,30 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               ) : chatLog.map((c, i) => {
                 const myName = (getRemembered().displayName || '').trim();
                 const isMe = c.from === myName;
+                const alt = i % 2 === 0;
+                const baseOtherLightA = '#e9ecef';
+                const baseOtherLightB = '#dde3e8';
+                const baseOtherDarkA = '#2a3540';
+                const baseOtherDarkB = '#323f4a';
+                const dark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark';
+                const otherBg = dark ? (alt ? baseOtherDarkA : baseOtherDarkB) : (alt ? baseOtherLightA : baseOtherLightB);
+                const bubbleStyle: any = {
+                  maxWidth: '75%',
+                  padding: '8px 12px',
+                  borderRadius: '16px',
+                  background: isMe ? 'var(--color-accent)' : otherBg,
+                  color: isMe ? 'var(--color-accent-contrast)' : (dark ? 'var(--color-text)' : '#333'),
+                  fontSize: 14,
+                  wordBreak: 'break-word',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.15)'
+                };
                 return (
                   <div key={i} style={{ 
                     display: 'flex', 
                     justifyContent: isMe ? 'flex-end' : 'flex-start',
                     marginBottom: 4
                   }}>
-                    <div style={{
-                      maxWidth: '75%',
-                      padding: '8px 12px',
-                      borderRadius: '16px',
-                      background: isMe ? '#007bff' : '#e9ecef',
-                      color: isMe ? 'white' : '#333',
-                      fontSize: 14,
-                      wordBreak: 'break-word'
-                    }}>
+                    <div style={bubbleStyle}>
                       {!isMe && (
                         <div style={{ 
                           fontSize: 11, 
@@ -529,7 +942,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             </div>
         </div>
       )}
-      {openPropPos != null ? (() => {
+  {openPropPos != null ? (() => {
         const t = tileByPos[openPropPos!];
   const p = normalize(openPropPos!, props[openPropPos as any]);
         const owner = p?.owner;
@@ -537,7 +950,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   // Buy button moved to central action bar; evaluate there
         return (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setOpenPropPos(null)}>
-            <div style={{ background: '#fff', minWidth: 320, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ background: 'var(--color-surface)', minWidth: 320, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0 }}>{t?.name || `Tile ${openPropPos}`}</h3>
                 <button className="btn btn-ghost" onClick={() => setOpenPropPos(null)}>❌ Close</button>
@@ -667,7 +1080,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
       })() : null}
 
       {/* Negative Balance Error Modal */}
-      {negativeBalanceError ? (
+  {negativeBalanceError ? (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500 }} onClick={() => setNegativeBalanceError(null)}>
           <div style={{ 
             background: 'white', 

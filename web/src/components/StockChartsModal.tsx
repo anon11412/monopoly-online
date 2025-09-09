@@ -23,7 +23,7 @@ export default function StockChartsModal({ open, snapshot, onClose, lobbyId, onO
   if (!open) return null;
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }} onClick={onClose}>
-      <div className="card" style={{ background: '#fff', width: 'min(900px, 94vw)', maxHeight: '88vh', overflow: 'auto', borderRadius: 10, padding: 14 }} onClick={(e) => e.stopPropagation()}>
+  <div className="card" style={{ background: 'var(--color-surface)', width: 'min(900px, 94vw)', maxHeight: '88vh', overflow: 'auto', borderRadius: 10, padding: 14 }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0 }}>📈 Stock Charts</h3>
           <button className="btn btn-ghost" onClick={onClose}>❌ Close</button>

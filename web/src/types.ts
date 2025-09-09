@@ -18,6 +18,8 @@ export type BoardTile = {
   type?: string;
   price?: number;
   group?: string;
+  flag?: string;
+  country?: string;
 };
 
 export type GamePlayer = {

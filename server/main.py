@@ -66,6 +66,8 @@ class Game:
     stocks: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     # Property rental agreements: { id, renter, owner, properties: [pos], percentage, turns_left, cash_paid }
     property_rentals: List[Dict[str, Any]] = field(default_factory=list)
+    # Cache of recently completed/declined trades for detail view (id -> trade dict)
+    recent_trades: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def snapshot(self) -> Dict[str, Any]:
         # Defensive: ensure pending_trades list exists
@@ -94,6 +96,8 @@ class Game:
             "stocks": _stocks_snapshot(self),
             # Include property rental agreements
             "property_rentals": list(self.property_rentals),
+            # Provide list of recent trade ids for clients to prime caches
+            "recent_trade_ids": list(self.recent_trades.keys())[-100:],
         }
 
 
@@ -148,6 +152,8 @@ asgi = socketio.ASGIApp(sio, other_asgi_app=app)
 BOT_TASKS: Dict[str, asyncio.Task] = {}
 # Track kick timer tasks per lobby
 KICK_TASKS: Dict[str, asyncio.Task] = {}
+# Periodic lobby consistency validator task handle
+LOBBY_VALIDATOR_TASK: Optional[asyncio.Task] = None
 
 
 # ---------------------------
@@ -155,48 +161,48 @@ KICK_TASKS: Dict[str, asyncio.Task] = {}
 # ---------------------------
 
 def monopoly_tiles() -> List[Dict[str, Any]]:
-    """Classic Monopoly tiles with names, types, colors, and prices where applicable."""
+    """Updated Monopoly tiles with international property names, emojis for special spaces."""
     T = [
-    {"name": "GO", "type": "go"},
-    {"name": "Mediterranean Avenue", "type": "property", "group": "brown", "price": 60, "color": "#8B4513", "rent": 2},
-        {"name": "Community Chest", "type": "chest"},
-    {"name": "Baltic Avenue", "type": "property", "group": "brown", "price": 60, "color": "#8B4513", "rent": 4},
+    {"name": "𝗦𝗧𝗔𝗥𝗧 ➡️➡️", "type": "go"},  # Bubbly font START with two arrows
+    {"name": "Salvador", "type": "property", "group": "brown", "price": 60, "color": "#8B4513", "rent": 2, "country": "🇧🇷", "flag": "🇧🇷"},
+        {"name": "Treasure 💰", "type": "chest"},
+    {"name": "Rio", "type": "property", "group": "brown", "price": 60, "color": "#8B4513", "rent": 4, "country": "🇧🇷", "flag": "🇧🇷"},
         {"name": "Income Tax", "type": "tax"},
         {"name": "Reading Railroad", "type": "railroad", "group": "railroad", "price": 200},
-    {"name": "Oriental Avenue", "type": "property", "group": "light-blue", "price": 100, "color": "#ADD8E6", "rent": 6},
-        {"name": "Chance", "type": "chance"},
-    {"name": "Vermont Avenue", "type": "property", "group": "light-blue", "price": 100, "color": "#ADD8E6", "rent": 6},
-    {"name": "Connecticut Avenue", "type": "property", "group": "light-blue", "price": 120, "color": "#ADD8E6", "rent": 8},
-        {"name": "Jail / Just Visiting", "type": "jail"},
-    {"name": "St. Charles Place", "type": "property", "group": "pink", "price": 140, "color": "#FF69B4", "rent": 10},
-        {"name": "Electric Company", "type": "utility", "group": "utility", "price": 150},
-    {"name": "States Avenue", "type": "property", "group": "pink", "price": 140, "color": "#FF69B4", "rent": 10},
-    {"name": "Virginia Avenue", "type": "property", "group": "pink", "price": 160, "color": "#FF69B4", "rent": 12},
+    {"name": "Tel Aviv", "type": "property", "group": "light-blue", "price": 100, "color": "#ADD8E6", "rent": 6, "country": "🇮🇱", "flag": "🇮🇱"},
+        {"name": "Chance ❓", "type": "chance"},
+    {"name": "Haifa", "type": "property", "group": "light-blue", "price": 100, "color": "#ADD8E6", "rent": 6, "country": "🇮🇱", "flag": "🇮🇱"},
+    {"name": "Jerusalem", "type": "property", "group": "light-blue", "price": 120, "color": "#ADD8E6", "rent": 8, "country": "🇮🇱", "flag": "🇮🇱"},
+        {"name": "Just Visiting / In Prison 🚔", "type": "jail"},  # Keep upright
+    {"name": "Venice", "type": "property", "group": "pink", "price": 140, "color": "#FF69B4", "rent": 10, "country": "🇮🇹", "flag": "🇮🇹"},
+        {"name": "Electric Company ⚡", "type": "utility", "group": "utility", "price": 150},
+    {"name": "Milan", "type": "property", "group": "pink", "price": 140, "color": "#FF69B4", "rent": 10, "country": "🇮🇹", "flag": "🇮🇹"},
+    {"name": "Rome", "type": "property", "group": "pink", "price": 160, "color": "#FF69B4", "rent": 12, "country": "🇮🇹", "flag": "🇮🇹"},
         {"name": "Pennsylvania Railroad", "type": "railroad", "group": "railroad", "price": 200},
-    {"name": "St. James Place", "type": "property", "group": "orange", "price": 180, "color": "#FFA500", "rent": 14},
-        {"name": "Community Chest", "type": "chest"},
-    {"name": "Tennessee Avenue", "type": "property", "group": "orange", "price": 180, "color": "#FFA500", "rent": 14},
-    {"name": "New York Avenue", "type": "property", "group": "orange", "price": 200, "color": "#FFA500", "rent": 16},
-        {"name": "Free Parking", "type": "free"},
-    {"name": "Kentucky Avenue", "type": "property", "group": "red", "price": 220, "color": "#FF0000", "rent": 18},
-        {"name": "Chance", "type": "chance"},
-    {"name": "Indiana Avenue", "type": "property", "group": "red", "price": 220, "color": "#FF0000", "rent": 18},
-    {"name": "Illinois Avenue", "type": "property", "group": "red", "price": 240, "color": "#FF0000", "rent": 20},
+    {"name": "Frankfurt", "type": "property", "group": "orange", "price": 180, "color": "#FFA500", "rent": 14, "country": "🇩🇪", "flag": "🇩🇪"},
+        {"name": "Treasure 💰", "type": "chest"},
+    {"name": "Munich", "type": "property", "group": "orange", "price": 180, "color": "#FFA500", "rent": 14, "country": "🇩🇪", "flag": "🇩🇪"},
+    {"name": "Berlin", "type": "property", "group": "orange", "price": 200, "color": "#FFA500", "rent": 16, "country": "🇩🇪", "flag": "🇩🇪"},
+        {"name": "Vacation 🏖️", "type": "free"},  # Fixed: render upright
+    {"name": "Shenzhen", "type": "property", "group": "red", "price": 220, "color": "#FF0000", "rent": 18, "country": "🇨🇳", "flag": "🇨🇳"},
+        {"name": "Chance ❓", "type": "chance"},
+    {"name": "Beijing", "type": "property", "group": "red", "price": 220, "color": "#FF0000", "rent": 18, "country": "🇨🇳", "flag": "🇨🇳"},
+    {"name": "Shanghai", "type": "property", "group": "red", "price": 240, "color": "#FF0000", "rent": 20, "country": "🇨🇳", "flag": "🇨🇳"},
         {"name": "B. & O. Railroad", "type": "railroad", "group": "railroad", "price": 200},
-    {"name": "Atlantic Avenue", "type": "property", "group": "yellow", "price": 260, "color": "#FFFF00", "rent": 22},
-    {"name": "Ventnor Avenue", "type": "property", "group": "yellow", "price": 260, "color": "#FFFF00", "rent": 22},
-        {"name": "Water Works", "type": "utility", "group": "utility", "price": 150},
-    {"name": "Marvin Gardens", "type": "property", "group": "yellow", "price": 280, "color": "#FFFF00", "rent": 24},
-        {"name": "Go To Jail", "type": "gotojail"},
-    {"name": "Pacific Avenue", "type": "property", "group": "green", "price": 300, "color": "#008000", "rent": 26},
-    {"name": "North Carolina Avenue", "type": "property", "group": "green", "price": 300, "color": "#008000", "rent": 26},
-        {"name": "Community Chest", "type": "chest"},
-    {"name": "Pennsylvania Avenue", "type": "property", "group": "green", "price": 320, "color": "#008000", "rent": 28},
+    {"name": "Lyon", "type": "property", "group": "yellow", "price": 260, "color": "#FFFF00", "rent": 22, "country": "🇫🇷", "flag": "🇫🇷"},
+    {"name": "Toulouse", "type": "property", "group": "yellow", "price": 260, "color": "#FFFF00", "rent": 22, "country": "🇫🇷", "flag": "🇫🇷"},
+        {"name": "Water Works 🚰", "type": "utility", "group": "utility", "price": 150},
+    {"name": "Paris", "type": "property", "group": "yellow", "price": 280, "color": "#FFFF00", "rent": 24, "country": "🇫🇷", "flag": "🇫🇷"},
+        {"name": "Go to Prison 📜", "type": "gotojail"},  # Fixed: render upright with scroll icon
+    {"name": "Liverpool", "type": "property", "group": "green", "price": 300, "color": "#008000", "rent": 26, "country": "🇬🇧", "flag": "🇬🇧"},
+    {"name": "Manchester", "type": "property", "group": "green", "price": 300, "color": "#008000", "rent": 26, "country": "🇬🇧", "flag": "🇬🇧"},
+        {"name": "Treasure 💰", "type": "chest"},
+    {"name": "London", "type": "property", "group": "green", "price": 320, "color": "#008000", "rent": 28, "country": "🇬🇧", "flag": "🇬🇧"},
         {"name": "Short Line", "type": "railroad", "group": "railroad", "price": 200},
-        {"name": "Chance", "type": "chance"},
-    {"name": "Park Place", "type": "property", "group": "dark-blue", "price": 350, "color": "#00008B", "rent": 35},
+        {"name": "Chance ❓", "type": "chance"},
+    {"name": "San Francisco", "type": "property", "group": "dark-blue", "price": 350, "color": "#00008B", "rent": 35, "country": "🇺🇸", "flag": "🇺🇸"},
         {"name": "Luxury Tax", "type": "tax"},
-    {"name": "Boardwalk", "type": "property", "group": "dark-blue", "price": 400, "color": "#00008B", "rent": 50},
+    {"name": "New York", "type": "property", "group": "dark-blue", "price": 400, "color": "#00008B", "rent": 50, "country": "🇺🇸", "flag": "🇺🇸"},
     ]
     for pos, t in enumerate(T):
         t["pos"] = pos
@@ -288,6 +294,22 @@ def pos_to_xy(pos: int) -> tuple[int, int]:
 @app.get("/board_meta")
 async def board_meta():
     return JSONResponse({"tiles": build_board_meta()})
+
+@app.get("/trade/{lobby_id}/{trade_id}")
+async def get_trade(lobby_id: str, trade_id: str):
+    l = LOBBIES.get(lobby_id)
+    if not l or not l.game:
+        return JSONResponse({"error": "lobby_or_game_missing"}, status_code=404)
+    g = l.game
+    # Look in pending first
+    pending = next((t for t in g.pending_trades if str(t.get("id")) == str(trade_id)), None)
+    if pending:
+        return JSONResponse({"trade": pending, "status": "pending"})
+    # Then recent cache
+    recent = g.recent_trades.get(str(trade_id))
+    if recent:
+        return JSONResponse({"trade": recent, "status": "archived"})
+    return JSONResponse({"error": "not_found"}, status_code=404)
 
 # Optionally serve static frontend if directory is present
 STATIC_DIR = os.environ.get("SERVE_STATIC_DIR", "/app/static")
@@ -402,8 +424,84 @@ async def auth(sid, data):
 
 @sio.event
 async def lobby_list(sid):
-    # Only include lobbies without an active game
-    await sio.emit("lobby_list", {"lobbies": [lobby_state(l) for l in LOBBIES.values() if not l.game]}, to=sid)
+    # Reuse consistency pass (no broadcast unless changed)
+    await _lobby_consistency_pass(broadcast=False)
+    active_lobbies = [lobby_state(l) for l in LOBBIES.values() if _lobby_visible(l)]
+    await sio.emit("lobby_list", {"lobbies": active_lobbies}, to=sid)
+
+def _lobby_visible(l: Lobby) -> bool:
+    """Visibility rules for advertising in main menu."""
+    # Hide if active game in progress (game exists & not over)
+    if l.game and not getattr(l.game, "game_over", None):
+        return False
+    # Hide zero-player pre-game lobbies
+    if not l.game and len(l.players) == 0:
+        return False
+    return True
+
+async def _lobby_consistency_pass(broadcast: bool = True):
+    """Validate lobby membership vs live connections, prune empties.
+    Returns True if any structural change occurred."""
+    changed = False
+    to_remove: List[str] = []
+    for lobby_id, l in list(LOBBIES.items()):
+        # Rebuild live players from connected sids
+        connected_players: List[str] = []
+        for s, name in list(l.sid_to_name.items()):
+            try:
+                await sio.get_session(s)
+                connected_players.append(name)
+            except Exception:
+                # stale sid mapping removed lazily below
+                pass
+        new_players = list(dict.fromkeys(connected_players + (l.bots or [])))
+        if new_players != l.players:
+            l.players = new_players
+            changed = True
+        # Drop sid mappings for names no longer present
+        before_sid_map = set(l.sid_to_name.keys())
+        l.sid_to_name = {s: n for s, n in l.sid_to_name.items() if n in l.players}
+        if set(l.sid_to_name.keys()) != before_sid_map:
+            changed = True
+        # Auto clear finished games (expose lobby again) after game_over present
+        if l.game and getattr(l.game, "game_over", None):
+            # Keep brief grace period? For now immediate exposure by clearing game reference
+            l.game = None
+            changed = True
+        # Schedule removal if empty pre-game lobby
+        if not l.game and len(l.players) == 0:
+            to_remove.append(lobby_id)
+    for lobby_id in to_remove:
+        LOBBIES.pop(lobby_id, None)
+        changed = True
+        try:
+            await sio.emit("lobby_deleted", {"id": lobby_id})
+        except Exception:
+            pass
+        print(f"[LOBBY_CLEANUP] Removed empty lobby {lobby_id}", flush=True)
+    if changed and broadcast:
+        try:
+            visible = [lobby_state(x) for x in LOBBIES.values() if _lobby_visible(x)]
+            await sio.emit("lobby_list", {"lobbies": visible})
+        except Exception:
+            pass
+    return changed
+
+async def _ensure_lobby_validator():
+    global LOBBY_VALIDATOR_TASK
+    if LOBBY_VALIDATOR_TASK and not LOBBY_VALIDATOR_TASK.done():
+        return
+    async def _loop():
+        try:
+            while True:
+                await asyncio.sleep(20)
+                try:
+                    await _lobby_consistency_pass(broadcast=True)
+                except Exception:
+                    pass
+        except asyncio.CancelledError:
+            pass
+    LOBBY_VALIDATOR_TASK = asyncio.create_task(_loop())
 
 
 @sio.event
@@ -412,9 +510,51 @@ async def lobby_create(sid, data):
     name = data.get("name") or lobby_id
     l = Lobby(id=lobby_id, name=name, host_sid=sid)
     LOBBIES[lobby_id] = l
+    # Fire creation event early (optimistic)
+    try:
+        await sio.emit("lobby_created", {"lobby": lobby_state(l)})
+    except Exception:
+        pass
     await lobby_join(sid, {"id": lobby_id})
-    await sio.emit("lobby_list", {"lobbies": [lobby_state(x) for x in LOBBIES.values() if not x.game]})
+    await _lobby_consistency_pass(broadcast=True)
+    await _ensure_lobby_validator()
     return {"ok": True, "lobby": lobby_state(l)}
+
+@sio.event
+async def leave_lobby(sid, data):
+    """Explicit client intent to leave current lobby. Removes membership immediately if game not active.
+    If game active, keeps player in list (spectator potential) unless they were never in a started game.
+    """
+    lobby_id = data.get("id") or data.get("lobby_id")
+    if not lobby_id or lobby_id not in LOBBIES:
+        return {"ok": False, "error": "missing_lobby"}
+    l = LOBBIES[lobby_id]
+    name = l.sid_to_name.get(sid)
+    if not name:
+        return {"ok": True}
+    # Remove sid mapping
+    l.sid_to_name.pop(sid, None)
+    # If game not started, drop from players entirely
+    if not l.game and name in l.players:
+        l.players.remove(name)
+    # Transfer host if host left
+    if l.host_sid == sid:
+        l.host_sid = next(iter(l.sid_to_name.keys()), l.host_sid)
+    await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
+    # Auto-delete empty lobby (no game & no players) after short delay
+    if not l.game and len(l.players) == 0:
+        async def _delayed_delete(lid: str):
+            await asyncio.sleep(5)
+            l2 = LOBBIES.get(lid)
+            if l2 and not l2.game and len(l2.players) == 0:
+                LOBBIES.pop(lid, None)
+                try:
+                    await sio.emit("lobby_deleted", {"id": lid})
+                except Exception:
+                    pass
+                await _lobby_consistency_pass(broadcast=True)
+        asyncio.create_task(_delayed_delete(lobby_id))
+    return {"ok": True}
 
 
 @sio.event
@@ -756,13 +896,17 @@ async def game_action(sid, data):
             return
         
         # Process recurring payments at start of turn (first roll only)
+        recurring_processed = False
         if not g.rolled_this_turn:
             try:
                 print(f"[RECURRING_START] Processing for {cur.name}", flush=True)
             except Exception:
                 pass
             _process_recurring_for(g, cur.name)
-            # If recurring payments caused negative balance, deny the roll
+            recurring_processed = True
+            # Mark that we've rolled this turn IMMEDIATELY to prevent re-processing on rapid clicks
+            g.rolled_this_turn = True
+            # If recurring payments caused negative balance, deny the roll but keep rolled_this_turn = True
             if cur.cash < 0:
                 g.last_action = {"type": "roll_denied", "by": cur.name, "reason": "negative_after_recurring"}
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
@@ -773,6 +917,7 @@ async def game_action(sid, data):
         roll = d1 + d2
 
         # Mark that we've rolled this turn; set last_action first so UI can show dice consistently
+        # (Already set above for recurring payment protection)
         g.rolled_this_turn = True
         g.last_action = {"type": "rolled", "by": cur.name, "roll": roll, "d1": d1, "d2": d2, "doubles": bool(d1 == d2)}
         g.log.append({"type": "rolled", "text": f"{cur.name} rolled {d1} + {d2} = {roll}"})
@@ -981,15 +1126,21 @@ async def game_action(sid, data):
                     min_pool_owner = 0
             except Exception:
                 min_pool_owner = int(st.get("min_pool_owner") or 0)
+            # Support both legacy single flag and new independent flags
             enforce_min_pool = bool(payload.get("enforce_min_pool")) if ("enforce_min_pool" in payload) else bool(st.get("enforce_min_pool", False))
+            enforce_min_pool_total = bool(payload.get("enforce_min_pool_total")) if ("enforce_min_pool_total" in payload) else bool(st.get("enforce_min_pool_total", enforce_min_pool))
+            enforce_min_pool_owner = bool(payload.get("enforce_min_pool_owner")) if ("enforce_min_pool_owner" in payload) else bool(st.get("enforce_min_pool_owner", enforce_min_pool))
+            
             st["allow_investing"] = allow_investing
             st["enforce_min_buy"] = enforce_min_buy
             st["min_buy"] = min_buy
-            st["enforce_min_pool"] = enforce_min_pool
+            st["enforce_min_pool"] = enforce_min_pool  # Keep for backwards compatibility
+            st["enforce_min_pool_total"] = enforce_min_pool_total
+            st["enforce_min_pool_owner"] = enforce_min_pool_owner
             st["min_pool_total"] = min_pool_total
             st["min_pool_owner"] = min_pool_owner
             g.stocks[owner] = st
-            g.last_action = {"type": "stock_settings", "owner": owner, "allow_investing": allow_investing, "enforce_min_buy": enforce_min_buy, "min_buy": min_buy, "enforce_min_pool": enforce_min_pool, "min_pool_total": min_pool_total, "min_pool_owner": min_pool_owner}
+            g.last_action = {"type": "stock_settings", "owner": owner, "allow_investing": allow_investing, "enforce_min_buy": enforce_min_buy, "min_buy": min_buy, "enforce_min_pool": enforce_min_pool, "enforce_min_pool_total": enforce_min_pool_total, "enforce_min_pool_owner": enforce_min_pool_owner, "min_pool_total": min_pool_total, "min_pool_owner": min_pool_owner}
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
         
@@ -1026,15 +1177,18 @@ async def game_action(sid, data):
             outside_sum = sum(float(v or 0.0) for v in hold.values())
             owner_percent = max(0.0, 1.0 - outside_sum)
             E = p_cur * float(P)
-            # Enforce rules
+            # Enforce independent pool gates
             min_pool_total = int(st.get("min_pool_total") or 0)
             min_pool_owner = int(st.get("min_pool_owner") or 0)
-            if bool(st.get("enforce_min_pool", False)) and min_pool_total > 0 and P < min_pool_total:
+            enforce_min_pool_total = bool(st.get("enforce_min_pool_total", st.get("enforce_min_pool", False)))
+            enforce_min_pool_owner = bool(st.get("enforce_min_pool_owner", st.get("enforce_min_pool", False)))
+            
+            if enforce_min_pool_total and min_pool_total > 0 and P < min_pool_total:
                 g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "below_min_pool_total", "needed": min_pool_total, "pool_value": P}
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
             owner_value = owner_percent * float(P)
-            if bool(st.get("enforce_min_pool", False)) and min_pool_owner > 0 and owner_value < float(min_pool_owner):
+            if enforce_min_pool_owner and min_pool_owner > 0 and owner_value < float(min_pool_owner):
                 g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "below_min_pool_owner", "needed": min_pool_owner, "owner_value": int(owner_value)}
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
@@ -1063,10 +1217,30 @@ async def game_action(sid, data):
             # Convert back to percents under new pool
             new_hold: Dict[str, float] = {}
             if P_new > 0:
-                for k, Ek in stakes.items():
+                total_pct_accum = 0.0
+                ordered = list(stakes.items())
+                for idx, (k, Ek) in enumerate(ordered):
                     if Ek <= 0.0:
                         continue
-                    new_hold[k] = max(0.0, min(1.0, float(Ek) / P_new))
+                    pct = max(0.0, min(1.0, float(Ek) / P_new))
+                    # Drop dust below 0.000001 to avoid lingering microscopic holders
+                    if pct < 0.000001:
+                        continue
+                    # Round to 1e-9 for stability
+                    pct = round(pct, 9)
+                    new_hold[k] = pct
+                    total_pct_accum += pct
+                # Normalize if accumulated percent drifts from 1.0 significantly
+                if 0.0001 < total_pct_accum < 1.9999:
+                    # Owner implicit percent = 1 - outside sum; clamp if rounding error pushes outside sum >1
+                    if total_pct_accum > 1.0:
+                        scale = 1.0 / total_pct_accum
+                        for k in list(new_hold.keys()):
+                            new_hold[k] = round(new_hold[k] * scale, 9)
+                # Final cleanup: remove any entries that became zero after scaling
+                for k in list(new_hold.keys()):
+                    if new_hold[k] <= 0.0:
+                        del new_hold[k]
             st["holdings"] = new_hold
             g.stocks[owner] = st
             g.last_action = {"type": "stock_invest", "by": investor, "owner": owner, "amount": A, "pool_before": P, "pool_after": int(P_new)}
@@ -1126,10 +1300,23 @@ async def game_action(sid, data):
                     stakes[k] = 0.0
             stakes[investor] = max(0.0, float(stakes.get(investor) or 0.0) - float(S))
             new_hold: Dict[str, float] = {}
+            total_pct_accum = 0.0
             for k, Ek in stakes.items():
                 if Ek <= 0.0:
                     continue
-                new_hold[k] = max(0.0, min(1.0, float(Ek) / float(P_new)))
+                pct = max(0.0, min(1.0, float(Ek) / float(P_new)))
+                if pct < 0.000001:
+                    continue
+                pct = round(pct, 9)
+                new_hold[k] = pct
+                total_pct_accum += pct
+            if 0.0001 < total_pct_accum < 1.9999 and total_pct_accum > 1.0:
+                scale = 1.0 / total_pct_accum
+                for k in list(new_hold.keys()):
+                    new_hold[k] = round(new_hold[k] * scale, 9)
+            for k in list(new_hold.keys()):
+                if new_hold[k] <= 0.0:
+                    del new_hold[k]
             st["holdings"] = new_hold
             g.stocks[owner] = st
             g.last_action = {"type": "stock_sell", "by": investor, "owner": owner, "amount": S, "pool_before": P, "pool_after": int(P_new)}
@@ -1455,6 +1642,15 @@ async def game_action(sid, data):
         g.pending_trades = [o for o in trades if o.get("id") != trade_id]
         g.last_action = {"type": "trade_accepted", "id": trade_id}
         g.log.append({"type": "trade_accepted", "id": trade_id, "text": f"Trade {trade_id} accepted by {actor}"})
+        try:
+            # Cache final form of trade for later retrieval
+            g.recent_trades[str(trade_id)] = dict(offer)
+            # Trim cache size
+            if len(g.recent_trades) > 300:
+                for k in list(g.recent_trades.keys())[:len(g.recent_trades)-300]:
+                    g.recent_trades.pop(k, None)
+        except Exception:
+            pass
         await _broadcast_state(lobby_id, g)
         return {"ok": True, "trade_id": trade_id, "accepted": True}
     if t == "decline_trade":
@@ -1469,6 +1665,10 @@ async def game_action(sid, data):
             g.pending_trades = [o for o in trades if o.get("id") != trade_id]
             g.last_action = {"type": "trade_declined", "id": trade_id}
             g.log.append({"type": "trade_declined", "id": trade_id, "text": f"Trade {trade_id} declined by {actor}"})
+            try:
+                g.recent_trades[str(trade_id)] = dict(offer)
+            except Exception:
+                pass
         await _broadcast_state(lobby_id, g)
         return {"ok": True, "trade_id": trade_id, "declined": g.last_action.get("type") == "trade_declined"}
     if t == "cancel_trade":
@@ -1479,6 +1679,13 @@ async def game_action(sid, data):
         if len(g.pending_trades) < before:
             g.last_action = {"type": "trade_canceled", "id": trade_id}
             g.log.append({"type": "trade_canceled", "id": trade_id, "text": f"Trade {trade_id} canceled by {actor}"})
+            # Cache canceled trade
+            try:
+                off = next((o for o in trades if o.get("id") == trade_id), None)
+                if off:
+                    g.recent_trades[str(trade_id)] = dict(off)
+            except Exception:
+                pass
         else:
             g.last_action = {"type": "trade_cancel_denied", "id": trade_id}
         await _broadcast_state(lobby_id, g)
@@ -1849,7 +2056,8 @@ def _player_cash(g: Game, name: str) -> int:
 
 def _stock_price(g: Game, owner: str) -> int:
     # In the percent-based model, "price" reported in the snapshot is the owner's current cash (the pool P)
-    return int(_player_cash(g, owner))
+    # Ensure minimum price of 1 to avoid division by zero edge cases
+    return max(1, int(_player_cash(g, owner)))
 
 
 def _stocks_ensure(g: Game, owner: str) -> Dict[str, Any]:
@@ -2239,6 +2447,11 @@ async def bot_add(sid, data):
     if lobby_id not in LOBBIES:
         return {"ok": False, "error": "Lobby missing"}
     l = LOBBIES[lobby_id]
+    # Only host can add bots and only before game start
+    if l.host_sid and sid != l.host_sid:
+        return {"ok": False, "error": "host_only"}
+    if l.game:
+        return {"ok": False, "error": "game_started"}
     # Add a simple bot as a named player; bots share lobby player list
     bot_name = f"Bot-{random.randint(100,999)}"
     l.players.append(bot_name)
@@ -2247,6 +2460,31 @@ async def bot_add(sid, data):
     # Ensure bot runner is active
     await _ensure_bot_runner(l)
     return {"ok": True, "name": bot_name}
+
+
+@sio.event
+async def bot_remove(sid, data):
+    """Remove a previously added server bot (host only, pre-game)."""
+    lobby_id = data.get("id")
+    bot_name = (data.get("name") or "").strip()
+    if not lobby_id or lobby_id not in LOBBIES:
+        return {"ok": False, "error": "Lobby missing"}
+    l = LOBBIES[lobby_id]
+    if l.host_sid and sid != l.host_sid:
+        return {"ok": False, "error": "host_only"}
+    if l.game:
+        return {"ok": False, "error": "game_started"}
+    if not bot_name or bot_name not in l.bots:
+        return {"ok": False, "error": "bot_not_found"}
+    # Remove bot from lobby player list and bots list
+    try:
+        l.bots.remove(bot_name)
+    except ValueError:
+        pass
+    # Remove all occurrences from players (there should be exactly one)
+    l.players = [p for p in l.players if p != bot_name]
+    await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
+    return {"ok": True, "removed": bot_name}
 
 
 async def _ensure_bot_runner(l: Lobby):
@@ -2459,7 +2697,10 @@ async def chat_send(sid, data):
             l.chat = l.chat[-200:]
     except Exception:
         pass
+    # Emit legacy lobby chat event (kept for backward compatibility)
     await sio.emit("lobby_chat", payload, room=lobby_id)
+    # Always emit unified chat_message event so clients can rely on it regardless of game state
+    await sio.emit("chat_message", {"from": name, "message": message, "lobby_id": lobby_id, "ts": payload["ts"]}, room=lobby_id)
 
 
 # ---------------------------

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getSocket, getRemembered } from '../lib/socket';
 import { BACKEND_URL, BOARD_META_PATH } from '../config';
 import { buildDefaultBoardTiles } from '../lib/boardFallback';
+import { playGameSound } from '../lib/audio';
 import type { BoardTile, GameSnapshot, PropertyStateLike } from '../types';
 
 type Props = {
@@ -87,6 +88,7 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
 
   function sendOffer() {
     if (!canSend) return;
+    playGameSound('trade_created');
     const terms = variant === 'advanced' ? {
       payments: advPayments.filter(p => p.amount > 0 && p.turns > 0).map(p => ({
         from: p.from === 'me' ? myName : counterparty,
@@ -136,24 +138,80 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
 
   function acceptOffer() {
     if (!incomingOffer) return;
+    playGameSound('trade_accepted');
     s.emit('game_action', { id: lobbyId, action: { type: 'accept_trade', trade_id: incomingOffer.id, offer: incomingOffer } });
   }
   function declineOffer() {
     if (!incomingOffer) return;
+    playGameSound('trade_denied');
     s.emit('game_action', { id: lobbyId, action: { type: 'decline_trade', trade_id: incomingOffer.id } });
   }
 
   const renderPropItem = (t: BoardTile, selected: boolean, toggle: () => void, owned: boolean) => (
-    <label key={t.pos} style={{ display: 'flex', gap: 6, alignItems: 'center', opacity: owned ? 1 : 0.35 }}>
+    <label key={t.pos} style={{ 
+      display: 'flex', 
+      gap: 8, 
+      alignItems: 'center', 
+      opacity: owned ? 1 : 0.35,
+      padding: '6px 8px',
+      borderRadius: '6px',
+      background: selected ? 'rgba(52, 152, 219, 0.1)' : 'transparent',
+      border: selected ? '1px solid #3498db' : '1px solid transparent',
+      transition: 'all 0.2s ease'
+    }}>
       <input type="checkbox" checked={selected} onChange={toggle} disabled={!owned} />
-      <span style={{ width: 10, height: 10, background: t.color || 'transparent', border: '1px solid #bbb', display: 'inline-block' }} />
-      <span style={{ fontSize: 12 }}>{t.name || `Tile ${t.pos}`}</span>
+      
+      {/* Flag for international properties */}
+      {t.flag && (
+        <span style={{ 
+          fontSize: '14px',
+          display: 'inline-block',
+          width: '18px',
+          textAlign: 'center'
+        }}>
+          {t.flag}
+        </span>
+      )}
+      
+      {/* Color indicator - remove legacy color bar styling */}
+      <span style={{ 
+        width: 12, 
+        height: 12, 
+        background: t.color || '#ddd', 
+        border: '1px solid #999', 
+        borderRadius: '2px',
+        display: 'inline-block',
+        flexShrink: 0
+      }} />
+      
+      {/* Property name with better alignment */}
+      <span style={{ 
+        fontSize: 13, 
+        flex: 1,
+        lineHeight: 1.2,
+        color: '#2c3e50'
+      }}>
+        {t.name || `Tile ${t.pos}`}
+      </span>
+      
+      {/* Cash value display */}
+      {t.price && (
+        <span style={{ 
+          fontSize: 11, 
+          color: '#7f8c8d',
+          fontWeight: 500,
+          textAlign: 'right',
+          minWidth: '40px'
+        }}>
+          ${t.price}
+        </span>
+      )}
     </label>
   );
 
   return (
     <div className="trade-panel" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
-      <div style={{ background: '#fff', minWidth: 720, maxWidth: '90vw', maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 16, boxShadow: '0 8px 24px rgba(0,0,0,0.2)' }} onClick={(e) => e.stopPropagation()}>
+  <div style={{ background: 'var(--color-surface)', minWidth: 720, maxWidth: '90vw', maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 16, boxShadow: '0 8px 24px var(--color-shadow)' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0 }}>{variant === 'advanced' ? '⚡ Advanced Combined Trade' : '🤝 Trade Properties'}</h3>
           <button className="btn btn-ghost" onClick={onClose}>❌ Close</button>
@@ -318,8 +376,8 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
                     </div>
                   ) : null}
                   <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                    {mineTo && <button className="btn btn-success" style={{ padding: '2px 8px' }} onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'accept_trade', trade_id: tr.id } })}>Accept</button>}
-                    {mineTo && <button className="btn btn-danger" style={{ padding: '2px 8px' }} onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'decline_trade', trade_id: tr.id } })}>Decline</button>}
+                    {mineTo && <button className="btn btn-success" style={{ padding: '2px 8px' }} onClick={() => { playGameSound('trade_accepted'); s.emit('game_action', { id: lobbyId, action: { type: 'accept_trade', trade_id: tr.id } }); }}>Accept</button>}
+                    {mineTo && <button className="btn btn-danger" style={{ padding: '2px 8px' }} onClick={() => { playGameSound('trade_denied'); s.emit('game_action', { id: lobbyId, action: { type: 'decline_trade', trade_id: tr.id } }); }}>Decline</button>}
                     {mineFrom && <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'cancel_trade', trade_id: tr.id } })}>Cancel</button>}
                   </div>
                 </div>

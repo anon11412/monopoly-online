@@ -1,0 +1,215 @@
+Local Development Startup Guide (Backend + Frontend)
+=====================================================
+Purpose:
+Provide an exact, highly detailed, reproducible walkthrough of how to start the Monopoly Online backend (FastAPI + Socket.IO) and frontend (React + Vite) locally for rapid development, along with the reasoning behind each action. This document is written to be machine- and human-friendly so other AI assistants can autonomously follow it.
+
+Repository High-Level Structure (essential parts)
+-------------------------------------------------
+server/                  Python FastAPI + Socket.IO application
+  main.py                Core ASGI app + game logic (very large, exports `asgi`)
+  requirements.txt       Backend dependency lock (minimal)
+web/                     React + TypeScript frontend (Vite dev server / build)
+  package.json           NPM scripts (dev, build, preview)
+proxy/                   Nginx reverse proxy config (Docker runtime only)
+docker-compose.yml       Orchestrates server + built web + proxy for production-like integration
+
+Two Supported Local Dev Modes
+-----------------------------
+1. Lightweight Hot-Reload Mode (recommended while coding):
+   - Run backend directly with `uvicorn --reload`.
+   - Run frontend with `vite` dev server.
+   - Pros: Instant code reload, no container rebuild.
+   - Cons: Not behind the production nginx proxy; CORS must be allowed.
+
+2. Docker Compose Integrated Mode (production simulation):
+   - Builds frontend, bakes static bundle into server image, serves via nginx + proxy.
+   - Pros: Mirrors deployment, single entry on port 80.
+   - Cons: Slow iteration; requires rebuild after frontend changes.
+
+Mode Selection Logic:
+If editing Python or React code frequently → use Mode 1.
+If validating deployment integration or testing nginx/static serving → use Mode 2.
+
+--------------------------------------------------
+MODE 1: Lightweight Dev (Separate Processes)
+--------------------------------------------------
+PREREQUISITES (assumed in this environment):
+- Python 3.11+ available.
+- Node.js 20+ & npm installed.
+- Working directory: repository root.
+
+STEP 1: Install backend dependencies
+Reason: Ensure uvicorn/FastAPI/socketio are available before starting server.
+Command:
+  pip install -r server/requirements.txt
+
+STEP 2: Determine the correct ASGI target
+File: server/main.py
+The exported ASGI app is named `asgi` (created from `socketio.ASGIApp`). Not `app`.
+Therefore the uvicorn target is: server.main:asgi
+Why: uvicorn syntax is module_path:variable_name
+
+STEP 3: Handle Python import path issue
+Problem Observed: `ModuleNotFoundError: No module named 'server'` when running from inside `server/`.
+Cause: When executing from the `server/` directory, Python's module search path lacks the parent folder, so `import server.main` fails.
+Solution: Set PYTHONPATH to repo root OR run from root.
+Chosen Approach: Explicitly set PYTHONPATH to guarantee reproducibility.
+
+STEP 4: Ensure port 8000 is free
+Reason: Previous gunicorn/uvicorn or orphaned processes may still hold the port.
+Command pattern (Linux):
+  fuser -k 8000/tcp || lsof -ti:8000 | xargs -r kill
+Why: `fuser -k` is fast; fallback with lsof for portability.
+
+STEP 5: Start backend with autoreload
+Command:
+  PYTHONPATH=$(pwd) uvicorn server.main:asgi --reload --host 0.0.0.0 --port 8000
+Rationale per flag:
+  PYTHONPATH=$(pwd)  Adds repo root so 'server' is resolvable.
+  --reload           Watches backend files; restarts workers upon changes.
+  --host 0.0.0.0     Listens on all interfaces (needed inside containers / cloud dev envs).
+  --port 8000        Consistent with production config & frontend expectations.
+Validation:
+  curl -I http://localhost:8000/board_meta  (Expect HTTP/1.1 200 OK)
+  curl -s http://localhost:8000/board_meta | head  (Expect JSON with tiles array)
+
+STEP 6: Install frontend dependencies
+Reason: Guarantee node_modules present before launching Vite.
+Command:
+  cd web && npm install --no-audit --no-fund
+Why flags: Suppress non-essential audit/funding noise for automation.
+
+STEP 7: Start Vite dev server
+Command:
+  npm run dev -- --host 0.0.0.0
+Why: `--host 0.0.0.0` exposes the dev server externally (so other containers / remote browser can connect).
+Default Vite Port: 5173 (printed after start).
+Expected Output Snippet:
+  VITE v7.x ready
+  Local:   http://localhost:5173/
+
+STEP 8: Point frontend to backend (CORS)
+Current Implementation: In dev, the frontend likely calls relative or environment-based backend URLs. If direct calls fail due to CORS, confirm server/main.py added CORSMiddleware with ALLOWED_ORIGINS=* (or includes http://localhost:5173).
+If adjustment needed: Export VITE_BACKEND_URL in a `.env` or inline when starting.
+Example (if required):
+  VITE_BACKEND_URL=http://localhost:8000 npm run dev -- --host 0.0.0.0
+
+STEP 9: Open the app
+Visit:
+  Frontend: http://localhost:5173/
+  Backend (test): http://localhost:8000/board_meta
+
+STEP 10: Live Development Loop
+- Edit Python under server/ → uvicorn auto-reloads.
+- Edit React/TS under web/src/ → Vite HMR updates browser instantly.
+No rebuild required.
+
+--------------------------------------------------
+MODE 2: Docker Compose (Integrated Simulation)
+--------------------------------------------------
+Purpose: Validate production-style deployment (nginx static serving + proxy) in one command.
+
+STEP A1: Build & start
+Command:
+  docker-compose up --build
+What Happens Internally:
+  1. web (build stage)   → npm ci / npm build → produces dist/
+  2. server (multi-stage) copies dist/ into /app/static
+  3. web runtime image    serves static via nginx (not for live dev changes)
+  4. proxy container      routes external :80 to internal services per nginx.conf
+Note: docker-compose.yml uses `expose` for internal ports (8000 server, 80 web) and publishes only proxy:80.
+
+STEP A2: Access application
+URL:
+  http://localhost/        (served by proxy → web nginx → static assets)
+Backend still accessible internally; if proxy config routes API/socket, they work seamlessly.
+
+STEP A3: Stopping stack
+Command:
+  docker-compose down
+Reason: Clean up containers & network to avoid port conflicts.
+
+STEP A4: Rebuilding after code changes
+Frontend source changes require re-run of:
+  docker-compose build (or up --build)
+Backend Python changes require the same because image needs rebuild.
+Reason this is slow for day-to-day coding; hence preference for Mode 1.
+
+--------------------------------------------------
+Key Environment Variables
+--------------------------------------------------
+ALLOWED_ORIGINS  (server)  Controls CORS origins; '*' or comma-separated list.
+HOST / PORT      (server)  Bound in uvicorn/gunicorn; default 0.0.0.0:8000.
+WORKERS          (server)  Gunicorn worker count in Docker (1 during dev simplicity outside Docker).
+VITE_BACKEND_URL (web)     Override backend base URL if not using same-origin.
+SERVE_STATIC_DIR (server)  Directory for static assets when bundling frontend (in container build).
+
+--------------------------------------------------
+Common Pitfalls & Resolutions
+--------------------------------------------------
+1. Error: Address already in use (port 8000)
+   Cause: Orphan uvicorn/gunicorn process.
+   Fix: fuser -k 8000/tcp || lsof -ti:8000 | xargs -r kill
+
+2. ModuleNotFoundError: No module named 'server'
+   Cause: Missing repo root in sys.path.
+   Fix: Set PYTHONPATH to repo root or run uvicorn from root with module path.
+
+3. Frontend cannot reach backend (CORS / wrong URL)
+   - Ensure backend logs show requests.
+   - Confirm ALLOWED_ORIGINS includes dev frontend origin.
+   - Set VITE_BACKEND_URL explicitly if frontend uses env-based config.
+
+4. Socket.IO connection issues
+   - Verify ws/wss requests not blocked by proxy (in Mode 2).
+   - In Mode 1, direct http://localhost:8000 should accept websocket upgrade.
+
+5. Changes not reflected in Docker mode
+   - You are using built static assets. Switch to Mode 1 for rapid iteration.
+
+6. Memory / Exit Code 137
+   - Container or process OOM killed. Reduce workers or avoid unnecessary parallel builds.
+
+--------------------------------------------------
+Verification Checklist (Automatable)
+--------------------------------------------------
+[ ] Backend responds 200 at /board_meta
+[ ] Backend JSON contains 'tiles'
+[ ] Web dev server prints accessible URLs
+[ ] Socket.IO handshake succeeds (check browser dev tools network -> ws)
+[ ] Creating a lobby (if UI provides) updates backend log (optional deeper test)
+
+--------------------------------------------------
+Minimal Command Summary (Mode 1)
+--------------------------------------------------
+# From repo root
+pip install -r server/requirements.txt
+fuser -k 8000/tcp || lsof -ti:8000 | xargs -r kill
+PYTHONPATH=$(pwd) uvicorn server.main:asgi --reload --host 0.0.0.0 --port 8000 &
+cd web && npm install --no-audit --no-fund && npm run dev -- --host 0.0.0.0
+
+--------------------------------------------------
+Minimal Command Summary (Mode 2)
+--------------------------------------------------
+docker-compose up --build
+# ... interact ...
+docker-compose down
+
+--------------------------------------------------
+Rationale Recap
+--------------------------------------------------
+- Used uvicorn --reload for immediate Python changes.
+- Set PYTHONPATH to resolve package imports without restructuring.
+- Freed port proactively to avoid random conflicts halting automation.
+- Used Vite dev server for hot module replacement instead of rebuilding static bundles.
+- Reserved docker-compose for integration parity, not day-to-day iteration.
+
+--------------------------------------------------
+Next Automation Opportunities
+--------------------------------------------------
+1. Add a Makefile with targets: make dev, make up, make down.
+2. Add a .env.example documenting VITE_BACKEND_URL, ALLOWED_ORIGINS.
+3. Introduce a lightweight health script verifying both services before opening browser.
+4. Add pre-commit lint/type tasks for frontend & backend.
+
+End of Guide.

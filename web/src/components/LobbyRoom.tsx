@@ -17,6 +17,9 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
   const [botError, setBotError] = useState<string>('');
   const [startMsg, setStartMsg] = useState<string>('');
   const [startPending, setStartPending] = useState<boolean>(false);
+  
+  // Animation state tracking for player join/leave
+  const [prevPlayerNames, setPrevPlayerNames] = useState<Set<string>>(new Set());
 
   useEffect(() => {
   rememberLobby(state.id);
@@ -44,6 +47,14 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
       s.off('game_state', onGameState);
     };
   }, [state.id, onGameStarted]);
+
+  // Track player changes for animations
+  useEffect(() => {
+  const currentPlayerNames = new Set((state.players || []).map(name => name));
+  // (Player join/leave animations removed for simplification)
+    
+    setPrevPlayerNames(currentPlayerNames);
+  }, [state.players, prevPlayerNames]);
 
   function setReady(ready: boolean) {
     const s = getSocket();
@@ -125,6 +136,27 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
 
   return (
     <div className="lobby-room" style={{ maxWidth: 960, margin: '0 auto' }}>
+      {/* Vote Kick Banner */}
+      {(state as any).kick_target && (
+        <div style={{
+          background: '#ffebcd',
+          border: '2px solid #ffa500',
+          borderRadius: 8,
+          padding: 12,
+          marginBottom: 16,
+          textAlign: 'center'
+        }}>
+          <div style={{ fontSize: 14, fontWeight: 'bold', marginBottom: 4 }}>
+            VOTE KICK ACTIVE
+          </div>
+          <div style={{ fontSize: 13 }}>
+            Target: <strong>{(state as any).kick_target}</strong> | 
+            Votes: <strong>{((state as any).kick_votes?.[(state as any).kick_target] || []).length}/{Math.floor(players.length / 2) + 1}</strong> | 
+            Time: <strong>{Math.ceil(((state as any).kick_remaining || 0) / 1000)}s</strong>
+          </div>
+        </div>
+      )}
+      
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2>Lobby: {state.name}</h2>
         {onBackToMenu && (
@@ -303,50 +335,72 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
         ) : null)}
       </div>
       
-      <div className="bot-controls" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        <button 
-          className="btn btn-ghost" 
-          onClick={async () => {
-            setBotError('');
-            try {
-              const bot = await spawnBot(state.id, `Bot ${bots.length + 1}`);
-              setBots((b) => [...b, bot]);
-            } catch (e: any) {
-              setBotError(e?.message || String(e));
-            }
-          }}
-          style={{ padding: '6px 12px' }}
-        >
-          🤖 Add Client Bot
-        </button>
-        <button 
-          className="btn btn-ghost" 
-          onClick={() => {
-            setBotError('');
-            try {
-              const s = getSocket();
-              s.emit('bot_add', { id: state.id }, (resp: any) => {
-                if (resp && resp.ok === false) setBotError(resp.error || 'Server bot add failed');
-              });
-            } catch (e: any) {
-              setBotError(e?.message || String(e));
-            }
-          }}
-          style={{ padding: '6px 12px' }}
-        >
-          🤖 Add Server Bot
-        </button>
-        {bots.length > 0 ? (
+  {isHost && (
+        <div className="bot-controls" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
           <button 
             className="btn btn-ghost" 
-            onClick={() => { bots.forEach(b => b.stop()); setBots([]); }}
+            onClick={async () => {
+              setBotError('');
+              try {
+                const bot = await spawnBot(state.id, `Bot ${bots.length + 1}`);
+                setBots((b) => [...b, bot]);
+              } catch (e: any) {
+                setBotError(e?.message || String(e));
+              }
+            }}
             style={{ padding: '6px 12px' }}
           >
-            🗑 Remove Bots
+            🤖 Add Client Bot
           </button>
-        ) : null}
-        {botError ? <div style={{ color: '#e74c3c', fontSize: 12, width: '100%' }}>{botError}</div> : null}
-      </div>
+          <button 
+            className="btn btn-ghost" 
+            onClick={() => {
+              setBotError('');
+              try {
+                const s = getSocket();
+                s.emit('bot_add', { id: state.id }, (resp: any) => {
+                  if (resp && resp.ok === false) setBotError(resp.error || 'Server bot add failed');
+                });
+              } catch (e: any) {
+                setBotError(e?.message || String(e));
+              }
+            }}
+            style={{ padding: '6px 12px' }}
+          >
+            🤖 Add Server Bot
+          </button>
+          {(state.bots || []).length > 0 && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              {(state.bots || []).map(bn => (
+                <button
+                  key={bn}
+                  className="btn btn-ghost"
+                  title={`Remove ${bn}`}
+                  onClick={() => {
+                    const s = getSocket();
+                    s.emit('bot_remove', { id: state.id, name: bn }, (resp: any) => {
+                      if (resp && resp.ok === false) setBotError(resp.error || 'Remove failed');
+                    });
+                  }}
+                  style={{ padding: '4px 8px', fontSize: 12 }}
+                >
+                  🗑 {bn}
+                </button>
+              ))}
+            </div>
+          )}
+          {bots.length > 0 ? (
+            <button 
+              className="btn btn-ghost" 
+              onClick={() => { bots.forEach(b => b.stop()); setBots([]); }}
+              style={{ padding: '6px 12px' }}
+            >
+              🗑 Remove Client Bots
+            </button>
+          ) : null}
+          {botError ? <div style={{ color: '#e74c3c', fontSize: 12, width: '100%' }}>{botError}</div> : null}
+        </div>
+      )}
       <div className="chat">
         <div className="log">
           {chat.map((c, i) => (
