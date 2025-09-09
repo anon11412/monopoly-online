@@ -49,7 +49,11 @@ export default function App() {
         {!lobby ? (
           <MainMenu onEnterLobby={(l) => setLobby(l)} />
         ) : !game ? (
-          <LobbyRoom lobby={lobby} onGameStarted={() => { /* state updates on game_state */ }} />
+          <LobbyRoom 
+            lobby={lobby} 
+            onGameStarted={() => { /* state updates on game_state */ }} 
+            onBackToMenu={() => setLobby(null)}
+          />
     ) : (
           <div className="game-view">
             <GameBoard snapshot={game} lobbyId={lobby.id} />

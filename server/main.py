@@ -64,11 +64,16 @@ class Game:
     #            allow_investing, enforce_min_buy, min_buy,
     #            enforce_min_pool, min_pool_total, min_pool_owner }
     stocks: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Property rental agreements: { id, renter, owner, properties: [pos], percentage, turns_left, cash_paid }
+    property_rentals: List[Dict[str, Any]] = field(default_factory=list)
 
     def snapshot(self) -> Dict[str, Any]:
         # Defensive: ensure pending_trades list exists
         if not isinstance(self.pending_trades, list):
             self.pending_trades = []
+        # Defensive: ensure property_rentals list exists
+        if not isinstance(self.property_rentals, list):
+            self.property_rentals = []
         return {
             "players": [asdict(p) for p in self.players],
             "current_turn": self.current_turn,
@@ -87,6 +92,8 @@ class Game:
             "tiles": build_board_meta(),
             # Include computed stocks view
             "stocks": _stocks_snapshot(self),
+            # Include property rental agreements
+            "property_rentals": list(self.property_rentals),
         }
 
 
@@ -110,6 +117,8 @@ class Lobby:
     kick_deadline: Optional[float] = None  # monotonic deadline seconds
     # Simple chat history for lobby (recent messages only)
     chat: List[Dict[str, Any]] = field(default_factory=list)
+    # Game settings
+    starting_cash: int = 1500
 
 
 # ---------------------------
@@ -321,6 +330,7 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
         "kick_remaining": kick_remaining,
         "disconnect_remain": remain,
         "chat": l.chat[-50:],
+        "starting_cash": l.starting_cash,
     }
 
 
@@ -417,7 +427,29 @@ async def vote_kick(sid, data):
     voter = l.sid_to_name.get(sid)
     if not voter or not target or target not in l.players:
         return
-    # Only allow targeting current turn player if a game is active
+    
+    # Host can instantly kick any player in pre-game lobby
+    is_host = (sid == l.host_sid)
+    is_pregame = (l.game is None)
+    
+    if is_host and is_pregame:
+        # Host instant kick in pre-game lobby
+        if target in l.players:
+            l.players.remove(target)
+        # Remove from session mapping
+        target_sid = None
+        for s, name in l.sid_to_name.items():
+            if name == target:
+                target_sid = s
+                break
+        if target_sid:
+            del l.sid_to_name[target_sid]
+        # Clear any existing votes
+        l.kick_votes.pop(target, None)
+        await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
+        return
+    
+    # During game, only allow targeting current turn player and use majority vote
     if not l.game or target != (l.game.players[l.game.current_turn].name if (0 <= l.game.current_turn < len(l.game.players)) else None):
         return
     votes = set(l.kick_votes.get(target, []))
@@ -564,6 +596,28 @@ async def lobby_ready(sid, data):
 
 
 @sio.event
+async def lobby_setting(sid, data):
+    lobby_id = data.get("id")
+    setting = data.get("setting")
+    value = data.get("value")
+    if lobby_id not in LOBBIES:
+        return {"ok": False, "error": "Lobby not found"}
+    l = LOBBIES[lobby_id]
+    # Only host can change settings
+    if sid != l.host_sid:
+        return {"ok": False, "error": "Only host can change settings"}
+    # Validate setting
+    if setting == "starting_cash":
+        if not isinstance(value, (int, float)) or value < 1 or value > 25000:
+            return {"ok": False, "error": "Starting cash must be between $1 and $25,000"}
+        l.starting_cash = int(value)
+    else:
+        return {"ok": False, "error": "Unknown setting"}
+    await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
+    return {"ok": True}
+
+
+@sio.event
 async def lobby_start(sid, data):
     lobby_id = data.get("id")
     if lobby_id not in LOBBIES:
@@ -573,8 +627,19 @@ async def lobby_start(sid, data):
         return {"ok": False, "error": "Only host"}
     if len(l.players) < 2:
         return {"ok": False, "error": "Need at least 2 players"}
+    
+    # Check if all players are ready
+    ready_sids = set(l.ready)
+    player_sids = set(l.sid_to_name.keys())
+    # Filter out bots from ready check (they're always considered ready)
+    non_bot_players = [p for p in l.players if p not in (l.bots or [])]
+    non_bot_sids = {sid for sid, name in l.sid_to_name.items() if name in non_bot_players}
+    
+    if not non_bot_sids.issubset(ready_sids):
+        unready_players = [l.sid_to_name.get(sid, sid) for sid in non_bot_sids - ready_sids]
+        return {"ok": False, "error": f"Not all players ready: {', '.join(unready_players)}"}
 
-    players = [Player(name=p) for p in l.players]
+    players = [Player(name=p, cash=l.starting_cash) for p in l.players]
     game = Game(players=players)
     # Assign colors
     palette = [
@@ -814,8 +879,12 @@ async def game_action(sid, data):
                     g.log.append({"type": "tax", "text": f"{cur.name} paid ${amount} in taxes (card move)"})
 
         # Rent payment
+        rent_paid = False
         try:
-            _handle_rent(g, cur, new_pos, d1 + d2)
+            rent_paid = _handle_rent(g, cur, new_pos, d1 + d2)
+            # Force sync if rental payments were made to ensure immediate UI update
+            if rent_paid and any(rental.get("last_payment_turn") == g.turns for rental in _ensure_rentals(g)):
+                await _force_sync_all_clients(lobby_id, g)
         except Exception:
             # Avoid crashing game on rent errors; continue
             pass
@@ -1107,6 +1176,8 @@ async def game_action(sid, data):
         g.last_action = {"type": "end_turn", "by": cur.name}
         g.log.append({"type": "end_turn", "text": f"{cur.name} ended their turn"})
         g.turns += 1
+        # Process property rental expiry
+        _process_rental_turn_expiry(g)
         try:
             _record_stock_history(g)
         except Exception:
@@ -1338,6 +1409,39 @@ async def game_action(sid, data):
                 "turns_left": turns,
             })
             g.log.append({"type": "recurring_created", "text": f"Recurring: {frm} pays ${amt} to {to} for {turns} turns"})
+        
+        # Advanced terms: rental agreements
+        rentals = terms.get("rentals") or []
+        for rental in rentals:
+            try:
+                properties = rental.get("properties") or []
+                percentage = int(rental.get("percentage") or 0)
+                turns = int(rental.get("turns") or 0)
+                direction = rental.get("direction") # 'give' or 'receive'
+            except Exception:
+                continue
+            if not properties or percentage <= 0 or turns <= 0:
+                continue
+            
+            # Determine owner and renter based on direction
+            if direction == "give":
+                # Offer maker is giving rental rights (renting out their properties)
+                owner = offer.get("from")
+                renter = offer.get("to")
+            else:
+                # Offer maker is receiving rental rights (renting the other's properties)
+                owner = offer.get("to") 
+                renter = offer.get("from")
+            
+            g.property_rentals.append({
+                "properties": properties,
+                "owner": owner,
+                "renter": renter,
+                "percentage": percentage,
+                "turns_left": turns,
+                "cash_paid": 0,  # Cash is handled separately in the trade
+            })
+            g.log.append({"type": "rental_created", "text": f"Rental: {renter} gets {percentage}% rent from {len(properties)} properties owned by {owner} for {turns} turns"})
         # Transfer properties
         for pos in offer.get("give", {}).get("properties", []) or []:
             st = g.properties.get(pos) or PropertyState(pos=pos)
@@ -1380,6 +1484,144 @@ async def game_action(sid, data):
         await _broadcast_state(lobby_id, g)
         return {"ok": True, "trade_id": trade_id, "canceled": g.last_action.get("type") == "trade_canceled"}
 
+    # Property rental trades
+    if t == "offer_rental":
+        trades = _ensure_trades(g)
+        target = action.get("to")
+        if not target or target == actor:
+            return {"ok": False, "error": "invalid_target"}
+        
+        cash_amount = int(action.get("cash_amount") or 0)
+        properties = action.get("properties") or []
+        percentage = int(action.get("percentage") or 0)
+        turns = int(action.get("turns") or 0)
+        
+        if cash_amount <= 0 or not properties or percentage <= 0 or percentage > 100 or turns <= 0:
+            return {"ok": False, "error": "invalid_rental_terms"}
+        
+        # Validate that actor owns all specified properties
+        tiles = monopoly_tiles()
+        for pos in properties:
+            st = g.properties.get(pos)
+            if not st or st.owner != actor:
+                return {"ok": False, "error": "property_not_owned"}
+        
+        # Validate that target has enough cash
+        target_player = _find_player(g, target)
+        if not target_player or target_player.cash < cash_amount:
+            return {"ok": False, "error": "insufficient_cash"}
+        
+        offer = {
+            "id": _new_trade_id(g),
+            "type": "rental_offer",
+            "from": actor,
+            "to": target,
+            "cash_amount": cash_amount,
+            "properties": properties,
+            "percentage": percentage,
+            "turns": turns,
+            "created": asyncio.get_event_loop().time()
+        }
+        
+        trades.append(offer)
+        g.last_action = offer
+        
+        property_names = [tiles[p].get("name", f"Property {p}") for p in properties]
+        g.log.append({"type": "rental_offered", "id": offer["id"], "text": f"{actor} offered ${cash_amount} to {target} for {percentage}% of rent from {len(properties)} properties for {turns} turns"})
+        
+        try: 
+            print(f"[RENTAL][OFFER] {offer}", flush=True)
+        except Exception: 
+            pass
+        await _broadcast_state(lobby_id, g)
+        return {"ok": True, "rental": offer}
+
+    if t == "accept_rental":
+        trade_id = action.get("trade_id")
+        trades = _ensure_trades(g)
+        offer = next((o for o in trades if o.get("id") == trade_id and o.get("type") == "rental_offer"), None)
+        if not offer:
+            g.last_action = {"type": "rental_missing", "id": trade_id}
+            await _broadcast_state(lobby_id, g)
+            return {"ok": False, "error": "missing"}
+        if actor != offer.get("to"):
+            g.last_action = {"type": "rental_accept_denied", "by": actor, "expected": offer.get("to"), "id": trade_id}
+            await _broadcast_state(lobby_id, g)
+            return {"ok": False, "error": "not_recipient"}
+        
+        # Execute the rental agreement
+        cash_amount = offer.get("cash_amount")
+        properties = offer.get("properties")
+        percentage = offer.get("percentage")
+        turns = offer.get("turns")
+        
+        renter = _find_player(g, offer.get("to"))
+        owner = _find_player(g, offer.get("from"))
+        
+        if renter and owner and renter.cash >= cash_amount:
+            # Transfer cash immediately
+            renter.cash -= cash_amount
+            owner.cash += cash_amount
+            
+            # Create rental agreement
+            rental_id = f"rental{random.randint(1000,9999)}"
+            rentals = _ensure_rentals(g)
+            rentals.append({
+                "id": rental_id,
+                "renter": renter.name,
+                "owner": owner.name,
+                "properties": properties,
+                "percentage": percentage,
+                "turns_left": turns,
+                "cash_paid": cash_amount,
+                "total_received": 0,  # Running total of rental income
+                "last_payment": 0,    # Last payment amount
+                "last_payment_turn": 0,  # Turn when last payment was made
+                "created": asyncio.get_event_loop().time()
+            })
+            
+            tiles = monopoly_tiles()
+            property_names = [tiles[p].get("name", f"Property {p}") for p in properties]
+            g.log.append({"type": "rental_created", "id": rental_id, "text": f"Property rental: {renter.name} paid ${cash_amount} for {percentage}% rent from {len(properties)} properties for {turns} turns"})
+        else:
+            g.last_action = {"type": "rental_failed", "id": trade_id, "reason": "insufficient_funds"}
+            await _broadcast_state(lobby_id, g)
+            return {"ok": False, "error": "insufficient_funds"}
+        
+        # Remove from pending trades
+        g.pending_trades = [o for o in trades if o.get("id") != trade_id]
+        g.last_action = {"type": "rental_accepted", "id": trade_id}
+        await _broadcast_state(lobby_id, g)
+        return {"ok": True, "trade_id": trade_id, "rental_id": rental_id, "accepted": True}
+
+    if t == "decline_rental":
+        trade_id = action.get("trade_id")
+        trades = _ensure_trades(g)
+        offer = next((o for o in trades if o.get("id") == trade_id and o.get("type") == "rental_offer"), None)
+        if not offer:
+            g.last_action = {"type": "rental_missing", "id": trade_id}
+        elif actor != offer.get("to"):
+            g.last_action = {"type": "rental_decline_denied", "by": actor, "expected": offer.get("to"), "id": trade_id}
+        else:
+            g.pending_trades = [o for o in trades if o.get("id") != trade_id]
+            g.last_action = {"type": "rental_declined", "id": trade_id}
+            g.log.append({"type": "rental_declined", "id": trade_id, "text": f"Property rental {trade_id} declined by {actor}"})
+        await _broadcast_state(lobby_id, g)
+        return {"ok": True, "trade_id": trade_id, "declined": g.last_action.get("type") == "rental_declined"}
+
+    if t == "cancel_rental":
+        trade_id = action.get("trade_id")
+        trades = _ensure_trades(g)
+        before = len(trades)
+        g.pending_trades = [o for o in trades if not (o.get("id") == trade_id and o.get("from") == actor and o.get("type") == "rental_offer")]
+        if len(g.pending_trades) < before:
+            g.last_action = {"type": "rental_canceled", "id": trade_id}
+            g.log.append({"type": "rental_canceled", "id": trade_id, "text": f"Property rental {trade_id} canceled by {actor}"})
+        else:
+            g.last_action = {"type": "rental_cancel_denied", "id": trade_id}
+        await _broadcast_state(lobby_id, g)
+        return {"ok": True, "trade_id": trade_id, "canceled": g.last_action.get("type") == "rental_canceled"}
+
 
 # ---------------------------
 # Rent calculation helpers
@@ -1398,6 +1640,11 @@ def _ensure_trades(g: Game) -> List[Dict[str, Any]]:
     if not hasattr(g, 'pending_trades') or not isinstance(g.pending_trades, list):
         g.pending_trades = []
     return g.pending_trades
+
+def _ensure_rentals(g: Game) -> List[Dict[str, Any]]:
+    if not hasattr(g, 'property_rentals') or not isinstance(g.property_rentals, list):
+        g.property_rentals = []
+    return g.property_rentals
 
 async def _force_sync_all_clients(lobby_id: str, g: Game):
     """Force synchronization for all clients in lobby - use for critical state changes"""
@@ -1432,23 +1679,24 @@ def _new_trade_id(g: Game) -> str:
     return f"tr{len(_ensure_trades(g))}_{random.randint(1000,9999)}"
 
 
-def _handle_rent(g: Game, cur: Player, pos: int, last_roll: int) -> None:
+def _handle_rent(g: Game, cur: Player, pos: int, last_roll: int) -> bool:
+    """Handle rent payment and return True if rent was paid"""
     tiles = monopoly_tiles()
     tile = tiles[pos]
     ttype = tile.get("type")
     if ttype not in {"property", "railroad", "utility"}:
-        return
+        return False
 
     st = g.properties.get(pos)
     owner_name = st.owner if st else None
     if not owner_name or owner_name == cur.name:
-        return
+        return False
     if st and st.mortgaged:
-        return
+        return False
 
     owner = _find_player(g, owner_name)
     if not owner:
-        return
+        return False
 
     # Compute rent
     rent = 0
@@ -1475,11 +1723,75 @@ def _handle_rent(g: Game, cur: Player, pos: int, last_roll: int) -> None:
         rent = mult * max(2, min(12, int(last_roll or 0)))
 
     if rent <= 0:
-        return
+        return False
 
+    # Handle property rental agreements
+    rental_redirected = 0
+    rentals = _ensure_rentals(g)
+    for rental in rentals[:]:  # Use slice to allow removal during iteration
+        if pos in rental.get("properties", []) and rental.get("turns_left", 0) > 0:
+            renter_name = rental.get("renter")
+            percentage = rental.get("percentage", 0)
+            if renter_name and 0 < percentage <= 100:
+                renter = _find_player(g, renter_name)
+                if renter:
+                    redirected_amount = int((rent * percentage) / 100)
+                    rental_redirected += redirected_amount
+                    renter.cash += redirected_amount
+                    
+                    # Update rental tracking
+                    rental["total_received"] = rental.get("total_received", 0) + redirected_amount
+                    rental["last_payment"] = redirected_amount
+                    rental["last_payment_turn"] = g.turns
+                    
+                    g.log.append({
+                        "type": "rental_income", 
+                        "text": f"{renter_name} received ${redirected_amount} ({percentage}%) from {tile.get('name')} rental",
+                        "rental_id": rental.get("id"),
+                        "property": pos,
+                        "payer": cur.name,
+                        "payee": renter_name,
+                        "percentage": percentage,
+                        "amount": redirected_amount,
+                        "turn": g.turns
+                    })
+
+    # Owner receives the remaining rent
+    remaining_rent = rent - rental_redirected
+    if remaining_rent > 0:
+        owner.cash += remaining_rent
+
+    # Player pays full rent
     cur.cash -= rent
-    owner.cash += rent
-    g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} rent to {owner.name} for landing on {tile.get('name')}"})
+    
+    if rental_redirected > 0:
+        g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} rent (${remaining_rent} to {owner.name}, ${rental_redirected} to renters) for {tile.get('name')}"})
+    else:
+        g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} rent to {owner.name} for landing on {tile.get('name')}"})
+
+    return True
+
+
+def _process_rental_turn_expiry(g: Game) -> None:
+    """Decrement rental agreement turns and remove expired ones"""
+    rentals = _ensure_rentals(g)
+    for rental in rentals[:]:  # Use slice to allow removal during iteration
+        if rental.get("turns_left", 0) > 0:
+            rental["turns_left"] -= 1
+            if rental["turns_left"] <= 0:
+                renter_name = rental.get("renter", "Unknown")
+                owner_name = rental.get("owner", "Unknown")
+                property_count = len(rental.get("properties", []))
+                total_received = rental.get("total_received", 0)
+                g.log.append({
+                    "type": "rental_expired", 
+                    "text": f"Property rental expired: {renter_name} received ${total_received} total from {property_count} properties owned by {owner_name}",
+                    "rental_id": rental.get("id"),
+                    "renter": renter_name,
+                    "owner": owner_name,
+                    "total_received": total_received
+                })
+                g.property_rentals.remove(rental)
 
 
 def _is_monopoly(g: Game, owner: str, group: Optional[str]) -> bool:
@@ -2084,7 +2396,10 @@ async def _bot_take_simple_turn(l: Lobby):
 
     # Rent
     try:
-        _handle_rent(g, cur, cur.position, d1 + d2)
+        rent_paid = _handle_rent(g, cur, cur.position, d1 + d2)
+        # Force sync if rental payments were made to ensure immediate UI update
+        if rent_paid and any(rental.get("last_payment_turn") == g.turns for rental in _ensure_rentals(g)):
+            await _force_sync_all_clients(l.id, g)
     except Exception:
         pass
 

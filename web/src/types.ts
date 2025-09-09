@@ -6,6 +6,7 @@ export type LobbyInfo = {
   players_map?: Record<string, string>;
   ready?: string[];
   bots?: string[];
+  starting_cash?: number;
 };
 
 export type BoardTile = {
@@ -40,7 +41,27 @@ export type TradeOffer = {
   to: string;   // player name
   give?: TradeSide;
   receive?: TradeSide;
-  terms?: { payments?: Array<{ from: string; to: string; amount: number; turns: number }> };
+  terms?: { 
+    payments?: Array<{ from: string; to: string; amount: number; turns: number }>;
+    rentals?: Array<{ properties: number[]; percentage: number; turns: number; direction: 'give' | 'receive' }>;
+  };
+  type?: string; // "trade_offer" or "rental_offer"
+  // Rental-specific fields
+  cash_amount?: number;
+  properties?: number[];
+  percentage?: number;
+  turns?: number;
+};
+
+export type PropertyRental = {
+  id: string;
+  renter: string;
+  owner: string;
+  properties: number[];
+  percentage: number;
+  turns_left: number;
+  cash_paid: number;
+  created?: number;
 };
 
 export type GameSnapshot = {
@@ -54,6 +75,8 @@ export type GameSnapshot = {
   rolled_this_turn?: boolean;
   rolls_left?: number;
   pending_trades?: TradeOffer[];
+  // Property rental agreements
+  property_rentals?: PropertyRental[];
   // Optional tiles metadata included by server snapshot to avoid extra fetches
   tiles?: BoardTile[];
   // Advanced recurring obligations (if server includes them)

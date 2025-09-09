@@ -147,10 +147,36 @@ export default function MainMenu({ onEnterLobby }: Props) {
           <h3>Available Lobbies</h3>
           <ul>
             {lobbies.map((l) => (
-              <li key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <li 
+                key={l.id} 
+                style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: 8, 
+                  cursor: 'pointer',
+                  padding: 8,
+                  borderRadius: 4,
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  transition: 'background-color 0.2s'
+                }}
+                onClick={() => joinLobby(l.id)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = 'transparent';
+                }}
+              >
                 <span className="badge">{(l.players || []).length} in lobby</span>
                 <span>{l.name}</span>
-                <button onClick={() => joinLobby(l.id)} disabled={pendingJoinId === l.id} style={{ marginLeft: 'auto' }}>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation(); // Prevent double-triggering from li click
+                    joinLobby(l.id);
+                  }} 
+                  disabled={pendingJoinId === l.id} 
+                  style={{ marginLeft: 'auto' }}
+                >
                   {pendingJoinId === l.id ? 'Joining…' : 'Join'}
                 </button>
               </li>

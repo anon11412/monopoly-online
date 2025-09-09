@@ -39,6 +39,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const [showStockCharts, setShowStockCharts] = useState(false);
   const [collapseAuto, setCollapseAuto] = useState(false);
   const [collapseRecurring, setCollapseRecurring] = useState(false);
+  const [collapseRentals, setCollapseRentals] = useState(false);
 
   // Allow GameBoard to open Trades/Log via global events
   useEffect(() => {
@@ -73,6 +74,23 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       setTiles(Object.fromEntries(arr.map((t) => [t.pos, t])));
     }
   }, [(snapshot as any)?.tiles]);
+
+  // Reset automation settings to defaults when a new game starts
+  useEffect(() => {
+    const currentTurns = snapshot?.turns || 0;
+    if (currentTurns <= 1) {
+      // New game detected - reset all automation settings to defaults
+      setAutoRoll(false);
+      setAutoBuy(false);
+      setAutoEnd(false);
+      setAutoHouses(false);
+      setAutoMortgage(false);
+      setMinKeep(0);
+      setCostRule('any');
+      setCostValue(0);
+      setAutoSpread(false);
+    }
+  }, [snapshot?.turns]);
 
   function act(type: string, payload: any = {}) {
     s.emit('game_action', { id: lobbyId, action: { type, ...payload } });
@@ -243,15 +261,16 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     }
   }, [showLog, snapshot.log]);
 
-  // Derive current tile info for Buy UI
-  const currentTile = useMemo(() => {
-    const pos = myPlayer?.position ?? -1;
-    return pos >= 0 ? tiles[pos] : undefined;
-  }, [myPlayer?.position, tiles]);
-
   // Compact sidebar derived lists
   const allTrades = snapshot.pending_trades || [];
   const concise = (t: any) => {
+    // Handle rental-type trades
+    if (t?.type === 'rental') {
+      const propCount = (t?.properties || []).length;
+      return `💰$${t?.cash_amount || 0} ↔ 🏠${propCount}prop ${t?.percentage || 0}% rent (${t?.turns || 0}t)`;
+    }
+    
+    // Handle traditional trades
     const giveCash = t?.give?.cash || 0; const recvCash = t?.receive?.cash || 0;
     const giveProps = (t?.give?.properties || []).length; const recvProps = (t?.receive?.properties || []).length;
     const jail = (t?.give?.jail_card ? '🪪→' : '') + (t?.receive?.jail_card ? '🪪←' : '');
@@ -267,29 +286,6 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
           Vote-kick: {kickStatus.target} — {typeof kickStatus.remaining === 'number' ? `${Math.floor((kickStatus.remaining as number)/60)}:${String((kickStatus.remaining as number)%60).padStart(2,'0')}` : ''}
         </div>
       ) : null}
-  <div className="ui-labelframe" style={{ marginBottom: 8 }}>
-        <div className="ui-title ui-h3">Current Turn</div>
-        <div className="ui-h3" style={{ marginTop: 6 }}>Turn: {snapshot.players?.[snapshot.current_turn || 0]?.name ?? '\u2014'}</div>
-  {/* Roll/Buy/End buttons removed; use in-board controls instead */}
-        {canBuy && currentTile ? (
-          <div className="ui-sm" style={{ marginTop: 6, color: '#2c3e50' }}>
-            You may buy <strong>{currentTile.name}</strong> for <strong>${currentTile.price ?? 0}</strong>.
-          </div>
-        ) : null}
-        {(() => {
-          const la: any = snapshot.last_action;
-          if (la?.type === 'buy_failed' && myTurn) {
-            const map: Record<string, string> = {
-              not_buyable: 'Tile cannot be purchased.',
-              owned: 'Already owned.',
-              no_price: 'No price set.',
-              insufficient_cash: 'Not enough cash.'
-            };
-            return <div className="ui-sm" style={{ marginTop: 6, color: '#c0392b' }}>Buy denied: {map[la.reason] || 'Not allowed'}</div>;
-          }
-          return null;
-        })()}
-      </div>
 
   {/* Dice moved to GameBoard center */}
 
@@ -338,6 +334,27 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                         </ul>
                       </div>
                     ) : null}
+                    {t.terms?.rentals?.length ? (
+                      <div style={{ fontSize: 12, marginTop: 6 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>🏠 Rental Agreements</div>
+                        <ul style={{ margin: 0, paddingLeft: 16 }}>
+                          {t.terms.rentals.map((r: any, i: number) => {
+                            const propNames = (r.properties || []).map((pos: number) => {
+                              const tile = tiles[pos];
+                              return tile?.name || `Property ${pos}`;
+                            }).join(', ');
+                            const direction = r.direction === 'give' ? 
+                              `${t.from} rents out to ${t.to}` : 
+                              `${t.from} rents from ${t.to}`;
+                            return (
+                              <li key={i}>
+                                {direction}: {r.percentage}% of rent from {propNames} for {r.turns} turns
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    ) : null}
                     <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                       <button className="btn" onClick={() => act('accept_trade', { trade_id: t.id })} disabled={t.to !== myName}>Accept</button>
                       <button className="btn" onClick={() => act('decline_trade', { trade_id: t.id })}>Decline</button>
@@ -359,6 +376,27 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                           {t.terms.payments.map((p: any, i: number) => (
                             <li key={i}>{p.from} pays ${p.amount} to {p.to} for {p.turns} turns</li>
                           ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {t.terms?.rentals?.length ? (
+                      <div style={{ fontSize: 12, marginTop: 6 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 4 }}>🏠 Rental Agreements</div>
+                        <ul style={{ margin: 0, paddingLeft: 16 }}>
+                          {t.terms.rentals.map((r: any, i: number) => {
+                            const propNames = (r.properties || []).map((pos: number) => {
+                              const tile = tiles[pos];
+                              return tile?.name || `Property ${pos}`;
+                            }).join(', ');
+                            const direction = r.direction === 'give' ? 
+                              `${t.from} rents out to ${t.to}` : 
+                              `${t.from} rents from ${t.to}`;
+                            return (
+                              <li key={i}>
+                                {direction}: {r.percentage}% of rent from {propNames} for {r.turns} turns
+                              </li>
+                            );
+                          })}
                         </ul>
                       </div>
                     ) : null}
@@ -467,6 +505,55 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
               {r.from} → {r.to}: ${r.amount} ({r.turns_left} turns left)
             </div>
           ))}
+        </div>}
+      </div>
+
+      {/* Property Rental Agreements */}
+      <div className="ui-labelframe" style={{ marginBottom: 8 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="ui-title ui-h3">🏠 Property Rentals</div>
+          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseRentals(c => !c)}>{collapseRentals ? '➕' : '➖'}</button>
+        </div>
+        {!collapseRentals && <div className="ui-sm" style={{ display: 'grid', gap: 4 }}>
+          {((snapshot as any).property_rentals || []).length === 0 ? (
+            <div style={{ opacity: 0.7 }}>None</div>
+          ) : ((snapshot as any).property_rentals || []).map((rental: any, idx: number) => {
+            const propertyNames = rental.properties?.map((pos: number) => {
+              const tile = tiles[pos] || { name: `Property ${pos}` };
+              return tile.name;
+            }).join(', ') || 'Properties';
+            
+            const totalReceived = rental.total_received || 0;
+            const lastPayment = rental.last_payment || 0;
+            const lastPaymentTurn = rental.last_payment_turn || 0;
+            
+            return (
+              <div key={idx} style={{ 
+                padding: '8px', 
+                border: '1px solid #ddd', 
+                borderRadius: '4px',
+                backgroundColor: rental.renter === myName ? '#e8f5e8' : rental.owner === myName ? '#fff8e1' : '#f5f5f5'
+              }}>
+                <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                  {rental.renter} ←→ {rental.owner}
+                </div>
+                <div style={{ fontSize: '0.9em', marginBottom: '2px' }}>
+                  <strong>{rental.percentage}%</strong> rent from: {propertyNames}
+                </div>
+                <div style={{ fontSize: '0.8em', marginBottom: '2px' }}>
+                  <strong>Total received:</strong> ${totalReceived}
+                  {lastPayment > 0 && (
+                    <span style={{ marginLeft: '8px', opacity: 0.8 }}>
+                      (last: ${lastPayment} on turn {lastPaymentTurn})
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '0.8em', opacity: 0.8 }}>
+                  Initial payment: ${rental.cash_paid} • {rental.turns_left} turns left
+                </div>
+              </div>
+            );
+          })}
         </div>}
       </div>
 

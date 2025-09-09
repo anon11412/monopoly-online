@@ -40,6 +40,8 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
   const [err, setErr] = useState<string>('');
   // Advanced terms: per-turn payments
   const [advPayments, setAdvPayments] = useState<Array<{ from: 'me' | 'them', amount: number, turns: number }>>([]);
+  // Advanced terms: rental agreements
+  const [rentalAgreements, setRentalAgreements] = useState<Array<{ properties: number[], percentage: number, turns: number, direction: 'give' | 'receive' }>>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,6 +93,12 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
         to: p.from === 'me' ? counterparty : myName,
         amount: p.amount,
         turns: p.turns,
+      })),
+      rentals: rentalAgreements.filter(r => r.properties.length > 0 && r.percentage > 0 && r.turns > 0).map(r => ({
+        properties: r.properties,
+        percentage: r.percentage,
+        turns: r.turns,
+        direction: r.direction, // 'give' means I'm giving rental rights, 'receive' means I'm getting rental rights
       }))
     } : undefined;
     s.emit('game_action', {
@@ -109,7 +117,7 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
       onClose();
     } else {
       // Reset form for rapid consecutive offers while keeping panel open (live updates)
-      setGiveCash(0); setReceiveCash(0); setGiveProps(new Set()); setReceiveProps(new Set()); setGiveJailCard(false); setReceiveJailCard(false); setAdvPayments([]);
+      setGiveCash(0); setReceiveCash(0); setGiveProps(new Set()); setReceiveProps(new Set()); setGiveJailCard(false); setReceiveJailCard(false); setAdvPayments([]); setRentalAgreements([]);
     }
   }
 
@@ -233,6 +241,22 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
           </div>
         ) : null}
 
+        {variant === 'advanced' ? (
+          <div className="ui-labelframe" style={{ marginTop: 12 }}>
+            <div className="ui-title ui-h3">🏠 Rental Agreements</div>
+            <div style={{ fontSize: 12, margin: '6px 0' }}>Add property rental agreements where one player receives a percentage of rent income for a set duration.</div>
+            <RentalAgreementsEditor
+              agreements={rentalAgreements}
+              setAgreements={setRentalAgreements}
+              myName={myName}
+              counterparty={counterparty}
+              tiles={tiles}
+              mineOwned={mineOwned}
+              theirOwned={theirOwned}
+            />
+          </div>
+        ) : null}
+
         {incomingOffer ? (
           <div style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>📊 Trade Details</div>
@@ -244,6 +268,20 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
                 <ul>
                   {incomingOffer.terms.payments.map((p: any, i: number) => (
                     <li key={i}>{p.from} pays ${p.amount} to {p.to} for {p.turns} turns</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+            {incomingOffer.terms?.rentals?.length ? (
+              <div style={{ fontSize: 12, marginBottom: 6 }}>
+                Rental agreements:
+                <ul>
+                  {incomingOffer.terms.rentals.map((r: any, i: number) => (
+                    <li key={i}>
+                      {r.direction === 'give' ? `${incomingOffer.from} rents ${r.properties.length} properties to ${incomingOffer.to}` 
+                                                : `${incomingOffer.to} rents ${r.properties.length} properties to ${incomingOffer.from}`} 
+                      - {r.percentage}% rent for {r.turns} turns
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -272,6 +310,11 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
                   {(tr.terms?.payments?.length || 0) > 0 ? (
                     <div style={{ fontSize: 11, marginTop: 4 }}>
                       Payments: {tr.terms.payments.map((p: any) => `${p.from}→${p.to} $${p.amount}x${p.turns}`).join('; ')}
+                    </div>
+                  ) : null}
+                  {(tr.terms?.rentals?.length || 0) > 0 ? (
+                    <div style={{ fontSize: 11, marginTop: 4 }}>
+                      Rentals: {tr.terms.rentals.map((r: any) => `${r.properties.length}props ${r.percentage}%x${r.turns}t`).join('; ')}
                     </div>
                   ) : null}
                   <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
@@ -321,6 +364,123 @@ function AdvPaymentsEditor({ payments, setPayments, myName, counterparty }: {
         </div>
       ))}
       <button className="btn" onClick={add}>➕ Add payment</button>
+    </div>
+  );
+}
+
+function RentalAgreementsEditor({ agreements, setAgreements, myName, counterparty, tiles, mineOwned, theirOwned }: {
+  agreements: Array<{ properties: number[], percentage: number, turns: number, direction: 'give' | 'receive' }>;
+  setAgreements: (r: Array<{ properties: number[], percentage: number, turns: number, direction: 'give' | 'receive' }>) => void;
+  myName: string;
+  counterparty: string;
+  tiles: any[];
+  mineOwned: Set<number>;
+  theirOwned: Set<number>;
+}) {
+  const add = () => setAgreements([...agreements, { properties: [], percentage: 25, turns: 5, direction: 'give' }]);
+  const update = (i: number, patch: Partial<{ properties: number[], percentage: number, turns: number, direction: 'give' | 'receive' }>) => {
+    const next = agreements.slice();
+    next[i] = { ...next[i], ...patch } as any;
+    setAgreements(next);
+  };
+  const remove = (i: number) => setAgreements(agreements.filter((_, idx) => idx !== i));
+  
+  const toggleProperty = (agreementIndex: number, propertyPos: number) => {
+    const agreement = agreements[agreementIndex];
+    const newProperties = agreement.properties.includes(propertyPos)
+      ? agreement.properties.filter(p => p !== propertyPos)
+      : [...agreement.properties, propertyPos];
+    update(agreementIndex, { properties: newProperties });
+  };
+
+  return (
+    <div>
+      {agreements.length === 0 ? <div className="ui-sm" style={{ opacity: 0.75 }}>No rental agreements added.</div> : null}
+      {agreements.map((agreement, i) => {
+        const availableProperties = agreement.direction === 'give' ? mineOwned : theirOwned;
+        const ownerName = agreement.direction === 'give' ? myName : counterparty;
+        const renterName = agreement.direction === 'give' ? counterparty : myName;
+        
+        return (
+          <div key={i} style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12, marginBottom: 8, background: '#fafafa' }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+              <select value={agreement.direction} onChange={(e) => update(i, { direction: (e.target.value as any), properties: [] })}>
+                <option value="give">I rent out my properties to {counterparty}</option>
+                <option value="receive">I get rental rights to {counterparty}'s properties</option>
+              </select>
+              <button className="btn btn-ghost" onClick={() => remove(i)}>🗑️</button>
+            </div>
+            
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 4 }}>
+                Properties owned by {ownerName}:
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                {Array.from(availableProperties).map(pos => {
+                  const tile = tiles.find(t => t.position === pos) || tiles[pos];
+                  const isSelected = agreement.properties.includes(pos);
+                  return (
+                    <label key={pos} style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: 4, 
+                      fontSize: 11,
+                      padding: '2px 6px',
+                      border: '1px solid #ccc',
+                      borderRadius: 4,
+                      background: isSelected ? '#e8f5e8' : '#fff',
+                      cursor: 'pointer'
+                    }}>
+                      <input 
+                        type="checkbox" 
+                        checked={isSelected}
+                        onChange={() => toggleProperty(i, pos)}
+                        style={{ margin: 0 }}
+                      />
+                      {tile?.name || `Property ${pos}`}
+                    </label>
+                  );
+                })}
+                {availableProperties.size === 0 && (
+                  <div style={{ fontSize: 11, opacity: 0.7 }}>No properties owned by {ownerName}</div>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <label style={{ fontSize: 12 }}>
+                {renterName} gets
+                <input 
+                  type="number" 
+                  min={1} 
+                  max={100} 
+                  value={agreement.percentage} 
+                  onChange={(e) => update(i, { percentage: parseInt(e.target.value || '0', 10) })} 
+                  style={{ width: 60, marginLeft: 4, marginRight: 4 }} 
+                />
+                % of rent
+              </label>
+              <label style={{ fontSize: 12 }}>for
+                <input 
+                  type="number" 
+                  min={1} 
+                  value={agreement.turns} 
+                  onChange={(e) => update(i, { turns: parseInt(e.target.value || '0', 10) })} 
+                  style={{ width: 60, marginLeft: 4, marginRight: 4 }} 
+                />
+                turns
+              </label>
+            </div>
+            
+            {agreement.properties.length > 0 && (
+              <div style={{ fontSize: 11, marginTop: 6, padding: 6, background: '#e8f5e8', borderRadius: 4 }}>
+                <strong>Agreement:</strong> {renterName} will receive {agreement.percentage}% of rent from {agreement.properties.length} properties for {agreement.turns} turns
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <button className="btn" onClick={add}>➕ Add rental agreement</button>
     </div>
   );
 }

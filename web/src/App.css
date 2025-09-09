@@ -47,7 +47,23 @@
 .tile .owner.left { right: 100%; top: 50%; transform: translate(2px, -50%); }
 .tile .owner.right { left: 100%; top: 50%; transform: translate(-2px, -50%); }
 .tile .buildings-bar { position: absolute; right: 4px; bottom: 4px; background: rgba(0,0,0,0.7); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; }
-.tile .mortgage { position: absolute; top: 4px; left: 4px; font-size: 11px; color: #b03a2e; font-weight: 700; }
+.tile .mortgage-stamp { 
+  position: absolute; 
+  top: 50%; 
+  left: 50%; 
+  transform: translate(-50%, -50%) rotate(-20deg); 
+  background: rgba(220, 38, 38, 0.98); 
+  color: white; 
+  font-size: 4.2px; 
+  font-weight: 900; 
+  padding: 1.7px 3.4px; 
+  border-radius: 1.7px; 
+  border: 0.8px solid #dc2626; 
+  letter-spacing: 0.4px; 
+  text-shadow: 1px 1px 2px rgba(0,0,0,1); 
+  box-shadow: 0 1px 3px rgba(0,0,0,0.8), inset 0 0.5px 1px rgba(255,255,255,0.2); 
+  z-index: 10; 
+}
 .actions { display: flex; flex-direction: column; gap: 8px; position: sticky; top: 8px; }
 .actions-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; }
 .actions-panel > .ui-labelframe { min-height: 0; }

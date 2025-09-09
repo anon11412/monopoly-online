@@ -18,11 +18,13 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   const [chatOpen, setChatOpen] = useState<boolean>(false);
   const [chatLog, setChatLog] = useState<Array<{ from: string; message: string; ts?: number }>>([]);
   const [chatMsg, setChatMsg] = useState<string>('');
+  const [unreadMessages, setUnreadMessages] = useState<number>(0);
   const [kickBanner, setKickBanner] = useState<{ target?: string | null; remaining?: number | null }>({});
   // Trade overlays and picker
   const [showTrade, setShowTrade] = useState(false);
   const [showTradeAdvanced, setShowTradeAdvanced] = useState(false);
   const [showPartnerPicker, setShowPartnerPicker] = useState<null | 'basic' | 'advanced'>(null);
+  const [negativeBalanceError, setNegativeBalanceError] = useState<string | null>(null);
   const meName = (getRemembered().displayName || '').trim();
   // For unread badge on View Trades
   const unreadIncoming = useMemo(() => {
@@ -76,7 +78,14 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     };
     const onChat = (payload: any) => {
       if (!lobbyId || payload?.id !== lobbyId) return;
-      setChatLog((prev) => [...prev, { from: payload.from, message: payload.message, ts: payload.ts }]);
+      const newMessage = { from: payload.from, message: payload.message, ts: payload.ts };
+      setChatLog((prev) => [...prev, newMessage]);
+      
+      // Increment unread count if chat is closed and message is not from current user
+      const myName = (getRemembered().displayName || '').trim();
+      if (!chatOpen && payload.from !== myName) {
+        setUnreadMessages(prev => prev + 1);
+      }
     };
     s.on('lobby_state', onLobby);
     s.on('lobby_chat', onChat);
@@ -85,6 +94,18 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
       s.off('lobby_chat', onChat);
     };
   }, [s, lobbyId]);
+
+  // Chat functions
+  const handleChatToggle = () => {
+    setChatOpen((prev) => {
+      const newState = !prev;
+      if (newState) {
+        // Clear notifications when opening chat
+        setUnreadMessages(0);
+      }
+      return newState;
+    });
+  };
 
   // Local countdown tick for kick banner
   useEffect(() => {
@@ -169,7 +190,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               {(houses > 0 || hotel) ? (
                 <div className="buildings-bar">{hotel ? '🏨 x1' : `🏠 x${houses}`}</div>
               ) : null}
-              {mortgaged ? <div className="mortgage">M</div> : null}
+              {mortgaged ? <div className="mortgage-stamp">MORTGAGED</div> : null}
               {(() => {
                 const here = (snapshot?.players || []).filter(pl => pl.position === t.pos);
                 if (here.length === 0) return null;
@@ -255,14 +276,46 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                       try { console.debug('[END_TURN][ACK]', ack); } catch {}
                       if (ack && ack.ok === false) {
                         const reasons: string[] = ack.reasons || [];
-                        if (reasons.length) {
-                          // Simple surfacing; replace with nicer toast later
+                        if (reasons.includes('negative_balance')) {
+                          setNegativeBalanceError('You cannot end your turn with a negative balance. Please mortgage properties, sell houses, or get money from other players to bring your balance to $0 or higher.');
+                        } else if (reasons.length) {
+                          // For other reasons, use alert as fallback
                           alert('Cannot end turn: ' + reasons.join(', '));
                         }
                       }
                     });
                   }} title={(!canEndC ? 'Need roll or extra rolls left' : 'End your turn')}>⏭ End Turn</button>
-                  <button className="btn btn-ghost" onClick={() => setChatOpen((v) => !v)} title="Toggle chat">💬</button>
+                  <button 
+                    className="btn btn-ghost" 
+                    onClick={handleChatToggle} 
+                    title="Toggle chat"
+                    style={{
+                      position: 'relative',
+                      animation: unreadMessages > 1 ? 'jiggle 0.5s ease-in-out infinite alternate' : 'none'
+                    }}
+                  >
+                    💬
+                    {unreadMessages > 0 && (
+                      <span style={{
+                        position: 'absolute',
+                        top: '-2px',
+                        right: '-2px',
+                        background: '#ff4444',
+                        color: 'white',
+                        borderRadius: '50%',
+                        width: '16px',
+                        height: '16px',
+                        fontSize: '10px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 'bold',
+                        minWidth: '16px'
+                      }}>
+                        {unreadMessages > 9 ? '9+' : unreadMessages}
+                      </span>
+                    )}
+                  </button>
                 </div>
               );
             })()}
@@ -329,44 +382,46 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     />
   ) : null}
   
-      {/* Modern chat overlay */}
+      {/* Modern chat panel - positioned on the right side */}
       {chatOpen && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 }} onClick={() => setChatOpen(false)}>
+        <div style={{ 
+          position: 'fixed', 
+          top: 0, 
+          right: 0, 
+          width: 'min(400px, 40vw)', 
+          height: '100vh', 
+          background: '#fff', 
+          boxShadow: '-4px 0 20px rgba(0,0,0,0.15)', 
+          display: 'flex', 
+          flexDirection: 'column',
+          zIndex: 2000,
+          borderLeft: '1px solid #e0e0e0'
+        }}>
+          {/* Header */}
           <div style={{ 
-            background: '#fff', 
-            width: 'min(480px, 90vw)', 
-            height: 'min(600px, 80vh)', 
-            borderRadius: 12, 
-            boxShadow: '0 20px 40px rgba(0,0,0,0.15)', 
+            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
+            color: 'white', 
+            padding: '16px 20px', 
             display: 'flex', 
-            flexDirection: 'column',
-            overflow: 'hidden'
-          }} onClick={(e) => e.stopPropagation()}>
-            {/* Header */}
-            <div style={{ 
-              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
-              color: 'white', 
-              padding: '16px 20px', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'space-between'
-            }}>
-              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>💬 Game Chat</h3>
-              <button 
-                onClick={() => setChatOpen(false)} 
-                style={{ 
-                  background: 'rgba(255,255,255,0.2)', 
-                  border: 'none', 
-                  color: 'white', 
-                  borderRadius: 6, 
-                  padding: '6px 8px', 
-                  cursor: 'pointer',
-                  fontSize: 14
-                }}
-              >
-                ✕
-              </button>
-            </div>
+            alignItems: 'center', 
+            justifyContent: 'space-between'
+          }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>💬 Game Chat</h3>
+            <button 
+              onClick={handleChatToggle} 
+              style={{ 
+                background: 'rgba(255,255,255,0.2)', 
+                border: 'none', 
+                color: 'white', 
+                borderRadius: 6, 
+                padding: '6px 8px', 
+                cursor: 'pointer',
+                fontSize: 14
+              }}
+            >
+              ✕
+            </button>
+          </div>
             
             {/* Messages area */}
             <div style={{ 
@@ -472,7 +527,6 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 </button>
               </div>
             </div>
-          </div>
         </div>
       )}
       {openPropPos != null ? (() => {
@@ -611,6 +665,34 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           </div>
         );
       })() : null}
+
+      {/* Negative Balance Error Modal */}
+      {negativeBalanceError ? (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500 }} onClick={() => setNegativeBalanceError(null)}>
+          <div style={{ 
+            background: 'white', 
+            padding: '24px', 
+            borderRadius: '8px', 
+            maxWidth: '500px', 
+            margin: '20px',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            border: '2px solid #e74c3c'
+          }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '16px' }}>
+              <span style={{ fontSize: '24px', marginRight: '12px' }}>⚠️</span>
+              <h3 style={{ margin: 0, color: '#e74c3c' }}>Cannot End Turn</h3>
+            </div>
+            <p style={{ margin: '0 0 20px 0', lineHeight: '1.5' }}>
+              {negativeBalanceError}
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button className="btn btn-primary" onClick={() => setNegativeBalanceError(null)}>
+                Got it
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
