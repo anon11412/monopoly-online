@@ -20,7 +20,7 @@ export const useTheme = () => {
 export const useThemeState = () => {
   const [theme, setTheme] = useState<Theme>(() => {
     const stored = localStorage.getItem('monopoly-theme');
-    return (stored === 'dark' || stored === 'light') ? stored : 'light';
+    return (stored === 'dark' || stored === 'light') ? (stored as Theme) : 'dark';
   });
 
   useEffect(() => {

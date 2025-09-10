@@ -34,21 +34,39 @@ body {
 .btn:active { transform: translateY(1px); }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text);
+}
+
 #root { max-width: 1600px; margin: 0 auto; padding: 0.5rem; }
 .app { display: flex; flex-direction: column; gap: 1rem; }
 
 /* Responsive game layout */
-.game-view { 
-  display: grid; 
-  grid-template-columns: minmax(480px, 1fr) 480px; 
-  gap: 12px; 
-  align-items: start; 
+.game-view {
+  display: grid;
+  /* Default to single column to prevent horizontal scroll on narrow viewports */
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: start;
+  overflow-x: clip; /* guard against accidental overflow */
+}
+
+/* Switch to two columns only when there's enough space for board + panel */
+  @media (min-width: 1100px) {
+  .game-view {
+    /* Left: fixed board width; Right: narrower panel (≈280px max) */
+    grid-template-columns: 626px minmax(250px, 280px);
+    /* Center the two-column block within the viewport */
+    justify-content: center;
+  }
 }
 
 /* Mobile and tablet responsiveness */
 @media (max-width: 1024px) {
   .game-view {
-    grid-template-columns: 1fr;
     gap: 8px;
   }
   
@@ -76,38 +94,16 @@ body {
 /* Responsive board sizing */
 .board .board-wrap {
   position: relative;
-  width: 626px; /* 736 * 0.85 */
-  height: 626px; /* 736 * 0.85 */
+  width: 626px; /* fixed square size */
+  height: 626px; /* fixed square size */
   margin: 0 auto;
   background: var(--bg-secondary);
   border-radius: 10px;
   border: 2px solid var(--border-color);
   overflow: hidden;
-  max-width: 100%;
-  max-height: 100vh;
 }
 
-/* Mobile board scaling */
-@media (max-width: 1024px) {
-  .board .board-wrap {
-    width: min(90vw, 500px);
-    height: min(90vw, 500px);
-  }
-}
-
-@media (max-width: 768px) {
-  .board .board-wrap {
-    width: min(95vw, 400px);
-    height: min(95vw, 400px);
-  }
-}
-
-@media (max-width: 480px) {
-  .board .board-wrap {
-    width: min(98vw, 350px);
-    height: min(98vw, 350px);
-  }
-}
+/* Mobile board scaling removed: board remains fixed size */
 .board .grid {
 	position: absolute; inset: 0;
 	display: grid;
@@ -264,7 +260,8 @@ body {
   transition: transform 0.2s ease;
 }
 .actions { display: flex; flex-direction: column; gap: 8px; position: sticky; top: 8px; }
-.actions-panel { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; align-content: start; }
+/* Make the panel content adapt: two columns when there's room, one column when narrower */
+.actions-panel { display: grid; grid-template-columns: 1fr; gap: 8px; align-content: start; }
 .actions-panel > .ui-labelframe { min-height: 0; }
 .main-menu, .lobby-room { background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%); padding: 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 8px 24px rgba(0,0,0,0.25); color: #e6edf3; }
 .main-menu h1 { margin: 0 0 10px; letter-spacing: 0.5px; font-weight: 800; }
@@ -290,10 +287,8 @@ body {
 .rent-highlight { background: rgba(241, 196, 15, 0.18); border-radius: 4px; padding: 2px 4px; }
 .badge { display: inline-block; padding: 2px 6px; border-radius: 999px; border: 1px solid #ccd5db; font-size: 11px; }
 
-/* Responsive tweaks for smaller screens */
-@media (max-width: 1100px) {
-	.game-view { grid-template-columns: 1fr; }
-}
+/* Wrap side panel below the fixed 626px board when width is tight */
+/* (Removed) 1200px stack override; base is already single column */
 
 /* Board embedded overlays */
 .board .board-overlay { position: absolute; background: rgba(255,255,255,0.9); border: 1px solid #ccd5db; border-radius: 8px; padding: 6px 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); max-width: 42%; }
@@ -793,18 +788,14 @@ textarea:focus {
   outline-offset: 2px;
 }
 
-/* Landscape mode optimizations for mobile */
+/* Landscape mode optimizations for mobile
+   NOTE: Keep single-column to avoid horizontal scroll when board is fixed-size */
 @media (max-width: 768px) and (orientation: landscape) {
   .game-view {
-    grid-template-columns: 1fr 300px;
+    grid-template-columns: 1fr; /* stack to prevent sideways scroll */
     gap: 8px;
   }
-  
-  .board .board-wrap {
-    width: min(60vh, 400px);
-    height: min(60vh, 400px);
-  }
-  
+  /* Keep board fixed; allow the action panel to scroll vertically */
   .action-panel {
     max-height: 80vh;
     overflow-y: auto;

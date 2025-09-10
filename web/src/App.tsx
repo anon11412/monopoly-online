@@ -4,9 +4,9 @@ import LobbyRoom from './components/LobbyRoom';
 import GameBoard from './components/GameBoard';
 import ActionPanel from './components/ActionPanel';
 import DisconnectHandler from './components/DisconnectHandler';
-import { getSocket, getConnectionStatus } from './lib/socket';
+import { getSocket, getConnectionStatus, getRemembered } from './lib/socket';
 import { ThemeContext, useThemeState } from './lib/theme';
-import { initializeAudio } from './lib/audio';
+import { initializeAudio, playGameSound } from './lib/audio';
 import { setupKeyboardNavigation } from './lib/accessibility';
 import type { GameSnapshot, LobbyInfo } from './types';
 import './App.css';
@@ -34,9 +34,23 @@ export default function App() {
       }
     };
     const onConn = () => setConn(getConnectionStatus());
+  const onSound = (evt: any) => {
+      try {
+        const e = typeof evt === 'string' ? evt : evt?.event;
+        if (e) {
+      // Use the current game state to find the proper resolved name
+      const storedName = (getRemembered().displayName || '').trim();
+      const myName = game?.players?.find((p: any) => p.name === storedName)?.name || storedName;
+      playGameSound(e, { myName, ...(evt || {}) });
+        }
+      } catch (err) {
+        console.warn('Failed to play broadcast sound:', err);
+      }
+    };
     s.on('game_state', onGameState);
     s.on('connect', onConn);
     s.on('disconnect', onConn);
+    s.on('sound', onSound);
     
     // Initialize audio system
     initializeAudio().catch(err => {
@@ -58,6 +72,7 @@ export default function App() {
       s.off('game_state', onGameState);
       s.off('connect', onConn);
       s.off('disconnect', onConn);
+  s.off('sound', onSound);
       clearInterval(refreshInterval);
       cleanupKeyboard();
     };

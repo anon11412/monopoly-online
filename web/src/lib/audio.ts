@@ -20,10 +20,11 @@ class AudioManager {
   private soundPacks: Map<string, Record<string, SoundDefinition>> = new Map();
 
   constructor() {
+  const storedPack = localStorage.getItem('audio.soundPack');
     this.config = {
       enabled: localStorage.getItem('audio.enabled') !== '0',
       volume: parseFloat(localStorage.getItem('audio.volume') || '0.7'),
-      soundPack: localStorage.getItem('audio.soundPack') || 'classic'
+      soundPack: storedPack ? storedPack : 'retro'
     };
     this.initializeSoundPacks();
   }
@@ -47,6 +48,8 @@ class AudioManager {
       'treasure_landed': { url: '', frequency: 1400, duration: 0.4, volume: 0.8 },
       'sent_to_jail': { url: '', frequency: 250, duration: 0.6, volume: 0.9 },
       'pass_go': { url: '', frequency: 1500, duration: 0.6, volume: 0.9 },
+      'mortgage': { url: '', frequency: 480, duration: 0.5, volume: 0.9 },
+      'unmortgage': { url: '', frequency: 720, duration: 0.4, volume: 0.9 },
       'button_click': { url: '', frequency: 900, duration: 0.1, volume: 0.4 },
       'notification': { url: '', frequency: 1100, duration: 0.2, volume: 0.6 }
     });
@@ -68,6 +71,8 @@ class AudioManager {
       'treasure_landed': { url: '', frequency: 1320, duration: 0.35, volume: 0.8 },
       'sent_to_jail': { url: '', frequency: 165, duration: 0.5, volume: 0.9 },
       'pass_go': { url: '', frequency: 1760, duration: 0.5, volume: 0.9 },
+      'mortgage': { url: '', frequency: 330, duration: 0.4, volume: 0.9 },
+      'unmortgage': { url: '', frequency: 550, duration: 0.35, volume: 0.9 },
       'button_click': { url: '', frequency: 600, duration: 0.08, volume: 0.4 },
       'notification': { url: '', frequency: 800, duration: 0.15, volume: 0.6 }
     });
@@ -89,6 +94,8 @@ class AudioManager {
       'treasure_landed': { url: '', frequency: 1500, duration: 0.45, volume: 0.8 },
       'sent_to_jail': { url: '', frequency: 200, duration: 0.7, volume: 0.9 },
       'pass_go': { url: '', frequency: 1600, duration: 0.7, volume: 0.9 },
+      'mortgage': { url: '', frequency: 420, duration: 0.55, volume: 0.9 },
+      'unmortgage': { url: '', frequency: 780, duration: 0.45, volume: 0.9 },
       'button_click': { url: '', frequency: 1000, duration: 0.12, volume: 0.4 },
       'notification': { url: '', frequency: 1250, duration: 0.25, volume: 0.6 }
     });
@@ -263,7 +270,9 @@ export async function initializeAudio(): Promise<void> {
     const sounds = [
       'dice_roll', 'your_turn', 'property_bought', 'money_gained', 'money_lost',
       'trade_sent', 'trade_declined', 'chance_landed', 'treasure_landed',
-      'sent_to_jail', 'pass_go', 'button_click', 'notification'
+      'sent_to_jail', 'pass_go', 'button_click', 'notification',
+      // extra commonly used keys
+      'trade_created', 'trade_accepted', 'trade_denied', 'chat_message'
     ];
     
     for (const soundKey of sounds) {

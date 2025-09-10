@@ -4,8 +4,6 @@ This template provides a minimal setup to get React working in Vite with HMR and
 
 Currently, two official plugins are available:
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
 ## Expanding the ESLint configuration
 
@@ -38,6 +36,11 @@ export default tseslint.config([
   },
 ])
 ```
+
+## Project Notes
+
+- Audio defaults to the "retro" sound pack unless the user has selected a different pack in localStorage (`audio.soundPack`).
+- For robust cross-browser flag rendering, add country flag assets in `public/flags` using ISO country codes (e.g., `us.svg` and `us.png`). The board UI will fall back to emoji when an asset is missing.
 
 You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
 

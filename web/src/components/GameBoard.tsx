@@ -31,6 +31,8 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   const s = getSocket();
   // Core board / property state
   const [tiles, setTiles] = useState<BoardTile[]>([]);
+  // Map of country code -> 'png' | 'svg' | null (asset availability)
+  const [flagAssetOk, setFlagAssetOk] = useState<Record<string, 'png' | 'svg' | null>>({});
   const [openPropPos, setOpenPropPos] = useState<number | null>(null);
   const [highlightedPlayer, setHighlightedPlayer] = useState<string | null>(null);
   const [showTrade, setShowTrade] = useState(false);
@@ -45,17 +47,73 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   // (err placeholder removed) 
   // Chat
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState<Array<{ from: string; message: string; ts?: number }>>([]);
+  const [chatLog, setChatLog] = useState<Array<{ from: string; message: string; ts?: number; pending?: boolean; localId?: string }>>([]);
   const [chatMsg, setChatMsg] = useState('');
   const [unreadMessages, setUnreadMessages] = useState(0);
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
+  const chatInputRef = useRef<HTMLInputElement | null>(null);
+  const [chatError, setChatError] = useState<string>('');
+  const pendingQueueRef = useRef<Array<{ message: string; localId: string; ts: number }>>([]);
+  const hasJoinedRef = useRef<boolean>(false);
+  // Responsive: measure tile size to scale elements when not at baseline
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const [tilePx, setTilePx] = useState<number>(64);
+  const BASE_TILE = 64; // baseline constant in current layout
+  // Widen tolerance so tiny measurement jitter doesn't change layout mode
+  const baselineActive = useMemo(() => Math.abs(tilePx - BASE_TILE) <= 4, [tilePx]);
+  const scale = useMemo(() => {
+    const factor = tilePx / BASE_TILE;
+    return (v: number) => Math.round(v * factor);
+  }, [tilePx]);
+  useEffect(() => {
+    if (!gridRef.current) return;
+    const el = gridRef.current;
+    const ro = new ResizeObserver(() => {
+      try {
+        // Find one tile to measure
+        const tile = el.querySelector('.board-tile') as HTMLElement | null;
+        if (tile) {
+          const r = tile.getBoundingClientRect();
+          const size = Math.max(1, Math.round(r.width));
+          setTilePx(size);
+        }
+      } catch {}
+    });
+    ro.observe(el);
+    return () => { try { ro.disconnect(); } catch {} };
+  }, []);
   // Vote kick banner
   const [kickBanner, setKickBanner] = useState<{ target?: string | null; votes?: number; required?: number; remaining?: number }>({});
   // Helpers to remember previous sets for unread counts
   const prevIncomingRef = useRef<Set<string>>(new Set());
   const prevTradeIdsRef = useRef<Set<string>>(new Set());
   const prevLastActionRef = useRef<string | null>(null);
-  const meName = (getRemembered().displayName || '').trim();
+  
+  // Simple stored name - back to basics
+  const storedName = (getRemembered().displayName || '').trim();
+  
+  const meName = useMemo(() => {
+    if (!storedName) return '';
+    
+    // Simple exact match - no more complex suffix handling
+    const found = (snapshot?.players || []).find(p => p.name === storedName);
+    const result = found?.name || storedName;
+    console.log('meName resolution (simple):', { storedName, found: found?.name, result });
+    return result;
+  }, [snapshot?.players, storedName]);
+
+  // Helper: map flag emoji to ISO code for asset lookups (e.g., 🇺🇸 -> us)
+  const flagToCode = (flag: string): string | null => {
+    try {
+      if (!flag) return null;
+      const codePoints = Array.from(flag)
+        .map(c => c.codePointAt(0) || 0)
+        .filter(cp => cp >= 0x1F1E6 && cp <= 0x1F1FF)
+        .map(cp => String.fromCharCode(cp - 0x1F1E6 + 0x41))
+        .join('');
+      return codePoints ? codePoints.toLowerCase() : null;
+    } catch { return null; }
+  };
 
   // Load tiles from snapshot or fallback
   useEffect(() => {
@@ -66,6 +124,56 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
       setTiles(buildDefaultBoardTiles());
     }
   }, [(snapshot as any)?.tiles]);
+
+  // Detect which flag assets exist; use assets ONLY when confirmed present
+  useEffect(() => {
+    let cancelled = false;
+    // unique ISO codes from current tiles
+    const codeList = (tiles || [])
+      .map(t => (t as any)?.flag as string | null | undefined)
+      .filter((f): f is string => !!f)
+      .map((f: string) => {
+        try {
+          const s = String(f);
+          const cps = Array.from(s)
+            .map(c => c.codePointAt(0) || 0)
+            .filter(cp => cp >= 0x1F1E6 && cp <= 0x1F1FF)
+            .map(cp => String.fromCharCode(cp - 0x1F1E6 + 0x41))
+            .join('');
+          return cps ? cps.toLowerCase() : null;
+        } catch { return null; }
+      })
+      .filter((x): x is string => !!x);
+    const codes = Array.from(new Set<string>(codeList));
+
+    const toCheck = codes.filter(c => !(c in flagAssetOk));
+    if (toCheck.length === 0) return;
+
+    toCheck.forEach(code => {
+      // Try PNG first
+      const imgPng = new Image();
+      imgPng.onload = () => {
+        if (cancelled) return;
+        setFlagAssetOk(prev => (prev[code] ? prev : { ...prev, [code]: 'png' }));
+      };
+      imgPng.onerror = () => {
+        // Try SVG
+        const imgSvg = new Image();
+        imgSvg.onload = () => {
+          if (cancelled) return;
+          setFlagAssetOk(prev => (prev[code] ? prev : { ...prev, [code]: 'svg' }));
+        };
+        imgSvg.onerror = () => {
+          if (cancelled) return;
+          setFlagAssetOk(prev => (prev[code] ? prev : { ...prev, [code]: null }));
+        };
+        imgSvg.src = `/flags/${code}.svg`;
+      };
+      imgPng.src = `/flags/${code}.png`;
+    });
+
+    return () => { cancelled = true; };
+  }, [tiles, flagAssetOk]);
 
   // Highlight player event (used for rent highlight logic)
   useEffect(() => {
@@ -105,18 +213,46 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     prevLastActionRef.current = laType;
   }, [snapshot?.pending_trades, snapshot?.last_action]);
 
-  // Chat socket listener
+  // Chat socket listener + hydrate from lobby events
   useEffect(() => {
     // Track seen messages to avoid duplicates when listening to multiple events
     const seenRef: { current: Set<string> } = (window as any).__chatSeenRef || { current: new Set() };
     (window as any).__chatSeenRef = seenRef;
-  const register = (msg: any) => {
+    const register = (msg: any) => {
       if (!msg) return;
       const ts = msg.ts || Date.now();
       const from = msg.from || '???';
       const text = msg.message || '';
       const key = `${ts}-${from}-${text}`;
+      // If this event was already processed, ignore (handles duplicate events like lobby_chat + chat_message)
       if (seenRef.current.has(key)) return; // duplicate (likely from second event)
+      // Try to match/resolve a pending local message from me; if merged, mark seen and skip append
+    // Check both meName and stored name to handle name resolution edge cases
+    const isFromMe = from === meName || from === storedName || from === (meName || 'me');
+    if (isFromMe) {
+        let merged = false;
+        setChatLog(prev => {
+      const idx = prev.findIndex(p => p.pending && p.message === text && (p.from === meName || p.from === storedName || p.from === 'me'));
+          if (idx >= 0) {
+            merged = true;
+            const copy = prev.slice();
+            copy[idx] = { ...copy[idx], pending: false, ts, from }; // Use server's from name
+            return copy;
+          }
+          return prev;
+        });
+        if (merged) {
+          seenRef.current.add(key);
+          if (seenRef.current.size > 600) {
+            const arr = Array.from(seenRef.current).slice(-400);
+            seenRef.current.clear();
+            arr.forEach(k => seenRef.current.add(k));
+          }
+          if (!chatOpen) setUnreadMessages(u => u + 1);
+          return;
+        }
+      }
+      // Record and append new incoming chat line
       seenRef.current.add(key);
       if (seenRef.current.size > 600) { // trim occasionally
         const arr = Array.from(seenRef.current).slice(-400);
@@ -126,17 +262,68 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
       setChatLog(prev => [...prev, { from, message: text, ts }]);
       if (!chatOpen) setUnreadMessages(u => u + 1);
     };
-  const onChat = (msg: any) => register(msg);
-  const onLobbyChat = (msg: any) => {
-      // Filter to matching lobby
-      const lid = msg?.id || msg?.lobby_id;
-      if (lid && lid !== lobbyId) return;
-  register(msg);
+    const onChat = (msg: any) => register(msg);
+  // Stop listening to legacy lobby_chat to avoid duplicate messages
+  // Legacy lobby_chat removed
+    const onLobbyJoined = (data: any) => {
+      if (!data || (data.id && data.id !== lobbyId)) return;
+      
+      // Don't update stored name - keep original for consistency
+      // The meName resolution will handle the mapping to actual game names
+      
+      // Hydrate recent history
+      const hist = Array.isArray((data as any).chat) ? (data as any).chat : [];
+      const mapped = hist.map((c: any) => ({ from: c.from || 'anon', message: c.message || '', ts: c.ts ? Number(c.ts) : undefined }));
+      // Preserve any local pending
+      setChatLog(prev => {
+        const pending = prev.filter(p => p.pending);
+        return [...mapped, ...pending];
+      });
+      // Seed seen set to avoid double-inserting hydrated messages
+      try {
+        for (const c of mapped) {
+          const k = `${c.ts || 0}-${c.from}-${c.message}`;
+          seenRef.current.add(k);
+        }
+      } catch {}
+      setChatError('');
+      hasJoinedRef.current = true;
+      // Flush any queued messages
+      const q = pendingQueueRef.current.slice();
+      pendingQueueRef.current = [];
+      for (const item of q) {
+        s.emit('chat_send', { id: lobbyId, message: item.message });
+      }
+      // Focus chat input if open
+      if (chatOpen && chatInputRef.current) {
+        try { chatInputRef.current.focus(); } catch {}
+      }
     };
-    s.on('chat_message', onChat);
-    s.on('lobby_chat', onLobbyChat);
-    return () => { s.off('chat_message', onChat); s.off('lobby_chat', onLobbyChat); };
-  }, [s, chatOpen, lobbyId]);
+  s.on('chat_message', onChat);
+  s.on('lobby_joined', onLobbyJoined);
+  return () => { s.off('chat_message', onChat); s.off('lobby_joined', onLobbyJoined); };
+  }, [s, chatOpen, lobbyId, meName]);
+
+  // Rejoin lobby on reconnect/connect to hydrate chat and resume
+  useEffect(() => {
+    const onConnect = () => {
+      try {
+        s.emit('lobby_join', { id: lobbyId, lobby_id: lobbyId }, (ack: any) => {
+          if (!ack || ack.ok === false) {
+            setChatError(ack?.error || 'Rejoin failed');
+          } else {
+            setChatError('');
+          }
+        });
+      } catch (e) {
+        setChatError('Rejoin failed');
+      }
+    };
+    s.on('connect', onConnect);
+    // If already connected and not yet joined in this session, attempt once
+    if (s.connected && !hasJoinedRef.current) onConnect();
+    return () => { s.off('connect', onConnect); };
+  }, [s, lobbyId]);
 
   // Vote kick status
   useEffect(() => {
@@ -156,12 +343,35 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     });
   };
 
+  // Focus chat input when opening panel
+  useEffect(() => {
+    if (chatOpen && chatInputRef.current) {
+      try { chatInputRef.current.focus(); } catch {}
+    }
+  }, [chatOpen]);
+
   // Auto-scroll chat
   useEffect(() => {
     if (chatOpen && chatMessagesRef.current) {
       chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
     }
   }, [chatLog, chatOpen]);
+
+  // Chat send helper with offline queue/pending placeholder
+  const sendChat = () => {
+    const text = chatMsg.trim();
+    if (!text) return;
+    const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const entry = { from: meName || 'me', message: text, ts: Date.now(), pending: true as const, localId };
+    setChatLog(prev => [...prev, entry]);
+    setChatMsg('');
+    if (s.connected) {
+      s.emit('chat_send', { id: lobbyId, message: text });
+    } else {
+      pendingQueueRef.current.push({ message: text, localId, ts: entry.ts! });
+      setChatError('Offline: message queued');
+    }
+  };
 
   // Local countdown for kick banner
   useEffect(() => {
@@ -229,14 +439,25 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     if (la?.type === 'rolled') return { d1: la.d1 || 0, d2: la.d2 || 0 };
     return null;
   })();
-  const act = (type: string, payload: any = {}) => s.emit('game_action', { id: lobbyId || (window as any).__lobbyId || '', action: { type, ...payload } });
+  const act = (type: string, payload: any = {}) => {
+    const finalLobbyId = lobbyId || (window as any).__lobbyId || '';
+    const actionData = { id: finalLobbyId, action: { type, ...payload } };
+    console.log('Sending game action:', actionData);
+    s.emit('game_action', actionData, (response: any) => {
+      console.log('Game action response:', response);
+      if (response && response.ok === false) {
+        console.error('Game action failed:', response);
+        alert(`Action failed: ${response.error || 'Unknown error'}`);
+      }
+    });
+  };
   // No embedded panels here; board-only visuals
   
 
   return (
     <div className="board" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
   {/* error banner removed (no err state) */}
-      <div style={{ padding: '4px 6px', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Turn: {curName || '—'}</div>
+  <div style={{ padding: '4px 6px', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Turn: {curName || '—'}</div>
       <div className="board-wrap" style={{ position: 'relative' }}>
         {kickBanner?.target ? (
           <div style={{ 
@@ -279,7 +500,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             </div>
           </div>
         ) : null}
-        <div className="grid">
+  <div className="grid" ref={gridRef}>
         {tiles.length === 0 ? (
           <div style={{ gridColumn: 6, gridRow: 6, alignSelf: 'center', justifySelf: 'center', fontSize: 12, opacity: 0.8 }}>No board to display</div>
         ) : tiles.map((t: BoardTile) => {
@@ -307,51 +528,27 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               style={{ gridColumn: t.x + 1, gridRow: t.y + 1, outline: isCurrent ? '2px solid #f1c40f' : undefined, cursor: clickable ? 'pointer' : undefined }} 
               onClick={() => clickable ? setOpenPropPos(t.pos) : undefined}
             >
-              {/* Flag background overlay for properties - restricted to card area */}
-              {t.type === 'property' && t.flag ? (
-                <div className="flag-overlay" style={{
-                  position: 'absolute',
-                  top: '2px',
-                  left: '2px',
-                  right: '2px',
-                  bottom: '2px',
-                  backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><text y="50" x="50" text-anchor="middle" font-size="50">${t.flag}</text></svg>`)}")`,
-                  backgroundSize: '80% 80%',
-                  backgroundPosition: 'center',
-                  backgroundRepeat: 'no-repeat',
-                  opacity: 0.15,
-                  borderRadius: '4px',
-                  filter: 'blur(1px)',
-                  zIndex: 1
-                }} />
-              ) : null}
+              {/* Flag background overlay removed to avoid flicker; circle badge remains below */}
               
-              {/* Flag circle for properties - positioned on inner edge */}
-              {t.type === 'property' && t.flag ? (
-                <div className="flag-circle" style={{
-                  position: 'absolute',
-                  width: '32px', // ~50% width of property card (~64px)
-                  height: '32px',
-                  borderRadius: '50%',
-                  background: 'white',
-                  border: '2px solid #333',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '16px', // Increased for larger flag circle
-                  zIndex: 5,
-                  ...((() => {
-                    // Position flag circle on inner edge closest to center
-                    if (t.y === 0) return { bottom: '-16px', left: '50%', transform: 'translateX(-50%)' }; // top row
-                    if (t.y === 10) return { top: '-16px', left: '50%', transform: 'translateX(-50%)' }; // bottom row
-                    if (t.x === 0) return { right: '-16px', top: '50%', transform: 'translateY(-50%)' }; // left col
-                    if (t.x === 10) return { left: '-16px', top: '50%', transform: 'translateY(-50%)' }; // right col
-                    return { bottom: '-16px', left: '50%', transform: 'translateX(-50%)' };
-                  })())
-                }}>
-                  {t.flag}
-                </div>
-              ) : null}
+              {/* Flag circle for properties - positioned on inner edge (emoji fallback if asset missing) */}
+              {t.type === 'property' && t.flag ? (() => {
+                const code = flagToCode(t.flag);
+                const off = baselineActive ? 16 : scale(16);
+                const posStyle = (() => {
+                  if (t.y === 0) return { bottom: `-${off}px`, left: '50%', transform: 'translateX(-50%)' } as const;
+                  if (t.y === 10) return { top: `-${off}px`, left: '50%', transform: 'translateX(-50%)' } as const;
+                  if (t.x === 0) return { right: `-${off}px`, top: '50%', transform: 'translateY(-50%)' } as const;
+                  if (t.x === 10) return { left: `-${off}px`, top: '50%', transform: 'translateY(-50%)' } as const;
+                  return { bottom: `-${off}px`, left: '50%', transform: 'translateX(-50%)' } as const;
+                })();
+                const choice = code ? flagAssetOk[code] : null;
+                const circleSrc = code && choice ? `/flags/${code}.${choice}` : null;
+                return (
+                  <div className="flag-circle" style={{ position: 'absolute', width: baselineActive ? 32 : scale(32), height: baselineActive ? 32 : scale(32), borderRadius: '50%', background: 'white', border: '2px solid #333', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: baselineActive ? 16 : Math.max(10, Math.round((baselineActive ? 32 : scale(32)) * 0.5)), zIndex: 5, overflow: 'hidden', ...posStyle }}>
+                    {circleSrc ? <img src={circleSrc} alt={t.flag} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span>{t.flag}</span>}
+                  </div>
+                );
+              })() : null}
               
               {/* Property name with orientation + multi-line support for railroads/utilities & multi-word */}
               {(() => {
@@ -366,7 +563,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                   displayLines = [words[0], words.slice(1).join(' ')];
                 }
                 const singleLine = !allowTwoLine || displayLines.length === 1;
-                const tileSize = 64;
+                const tileSize = baselineActive ? 64 : tilePx;
                 const maxWidth = tileSize - 8;
                 const maxHeight = singleLine ? tileSize / 3 : tileSize / 2.2; // more vertical room for 2 lines
                 const baseContent = displayLines.join(' ');
@@ -429,10 +626,10 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               })() : null}
               
               {/* Price display when not owned - sharpened (no fade) with higher contrast */}
-              {!ownerColor && (t.price || 0) > 0 ? (
+        {!ownerColor && (t.price || 0) > 0 ? (
                 <div className="price-tag" style={{
                   position: 'absolute',
-                  fontSize: '9px',
+          fontSize: baselineActive ? '9px' : `${Math.max(8, Math.min(14, scale(9)))}px`,
                   fontWeight: 600,
                   letterSpacing: '0.25px',
                   zIndex: 8,
@@ -478,7 +675,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           );
         })}
         </div>
-          {/* Dice overlay centered, moved down by 40px */}
+          {/* Dice overlay: baseline-only positioning */}
           <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 40px)', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center' }}>
               <span className="badge badge-muted" style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{lastRoll ? lastRoll.d1 : '–'}</span>
@@ -487,7 +684,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           </div>
           {/* Unified controls layer: contains trade controls and core action controls */}
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }}>
-            {/* Players Overview — shifted left 45px and up 35px (spec) */}
+            {/* Players Overview — baseline-only */}
             <div style={{ position: 'absolute', left: 'calc(50% - 130px)', top: 'calc(50% - 235px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
                 <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, minWidth: 140, maxWidth: 200, color: 'var(--color-text)' }}>
                 <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Players Overview</div>
@@ -556,7 +753,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 </div>
               </div>
             </div>
-            {/* Game Log — shifted left 60px (was +150px) and up 35px (spec) */}
+            {/* Game Log — baseline-only */}
             <div style={{ position: 'absolute', left: 'calc(50% + 90px)', top: 'calc(50% - 235px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
               <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, width: 275, height: 225, display: 'flex', flexDirection: 'column', color: 'var(--color-text)' }}>
                 <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Game Log</div>
@@ -568,8 +765,17 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                           <span style={{ marginRight: 4 }}>
                             {e.type === 'rolled' ? '🎲' : e.type === 'buy' ? '🏠' : e.type === 'end_turn' ? '⏭' : e.type === 'bankrupt' ? '💥' : '•'}
                           </span>
-                          {e.id && /^trade_/.test(String(e.type)) ? (
-                            <button className="btn btn-link" style={{ padding: 0, fontSize: 10 }} onClick={() => window.dispatchEvent(new CustomEvent('open-trades'))} title={`Open trade ${e.id}`}>{e.text || JSON.stringify(e)}</button>
+                          {e.id && (/^trade_/.test(String(e.type)) || /^rental_/.test(String(e.type))) ? (
+                            <button className="btn btn-link" style={{ padding: 0, fontSize: 10 }} onClick={() => {
+                              // For completed trades, just show the trade details in the log text
+                              // For active trades, open the trades panel
+                              const activeTrade = snapshot?.pending_trades?.find((t: any) => t.id === e.id);
+                              if (activeTrade) {
+                                window.dispatchEvent(new CustomEvent('open-trades'));
+                              } else {
+                                alert(`Trade ${e.id}: ${e.text}\n\nThis trade has been completed and is no longer active.`);
+                              }
+                            }} title={`Trade ${e.id} details`}>{e.text || JSON.stringify(e)}</button>
                           ) : (
                             <span style={{ fontSize: 10 }}>{e.text || JSON.stringify(e)}</span>
                           )}
@@ -583,11 +789,33 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             {(() => {
               // Core roll/action buttons — now at former trade position and moved down by 30px
               const me = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
-              const myName = (getRemembered().displayName || '').trim() || me?.name || '';
-              const myTurn = me?.name === myName;
+              const myTurn = me?.name === meName;
               const rolledThisTurn = !!snapshot?.rolled_this_turn;
               const rollsLeft = snapshot?.rolls_left ?? 0;
-              const canRollC = myTurn && (!rolledThisTurn || rollsLeft > 0);
+              
+              // More permissive fallback - if meName is empty or no players matched, allow the first player to act
+              const fallbackMyTurn = !meName || (!myTurn && snapshot?.players?.length === 1);
+              const finalMyTurn = myTurn || fallbackMyTurn;
+              
+              const canRollC = finalMyTurn && (!rolledThisTurn || rollsLeft > 0);
+              
+              // Debug logging (remove after testing)
+              if (import.meta.env.DEV) {
+                console.log('Button Debug:', {
+                  me: me?.name,
+                  meName,
+                  myTurn,
+                  fallbackMyTurn,
+                  finalMyTurn,
+                  rolledThisTurn,
+                  rollsLeft,
+                  canRollC,
+                  storedName,
+                  currentTurn: snapshot?.current_turn,
+                  players: snapshot?.players?.map(p => p.name)
+                });
+              }
+              
               // compute canBuy similar to ActionPanel
               let canBuyC = false;
               {
@@ -602,15 +830,15 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                     const propsMap: any = (snapshot as any)?.properties || {};
                     const st = propsMap?.[pos];
                     const buyable = tile && ['property', 'railroad', 'utility'].includes(String(tile.type)) && (tile.price || 0) > 0 && !(st && st.owner);
-                    canBuyC = !!buyable && myTurn;
+                    canBuyC = !!buyable && finalMyTurn;
                   }
                 }
               }
-              const canEndC = myTurn && rolledThisTurn && rollsLeft === 0;
+              const canEndC = finalMyTurn && rolledThisTurn && rollsLeft === 0;
               
               // Vote kick logic - can vote kick current turn holder if not me
               const currentTurnPlayer = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
-              const canVoteKick = !myTurn && currentTurnPlayer && snapshot?.players && snapshot.players.length > 2;
+              const canVoteKick = !finalMyTurn && currentTurnPlayer && snapshot?.players && snapshot.players.length > 2;
               
               return (
                 <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 80px)', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
@@ -651,7 +879,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                   <button className="btn btn-ghost action-button" disabled={!canEndC} onClick={() => {
                     playGameSound('turn_started', { 
                       currentPlayer: snapshot?.players?.[snapshot?.current_turn ?? -1]?.name,
-                      myName: (getRemembered().displayName || '').trim()
+                      myName: meName
                     });
                     const socket = s;
                     socket.emit('game_action', { id: lobbyId, action: { type: 'end_turn' } }, (ack: any) => {
@@ -741,7 +969,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   {showPartnerPicker ? (() => {
     const cur = snapshot?.players?.[snapshot?.current_turn ?? -1];
     const myName = meName || cur?.name || '';
-    const others = (snapshot?.players || []).map(p => p.name).filter(n => n !== myName);
+                const others = (snapshot?.players || []).map(p => p.name).filter(n => n !== myName);
     const pick = (partner: string) => {
       setShowPartnerPicker(null);
       if (showPartnerPicker === 'basic') setShowTrade(true);
@@ -755,7 +983,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           <div style={{ fontWeight: 700, marginBottom: 8 }}>{showPartnerPicker === 'advanced' ? 'Choose partner for Advanced Trade' : 'Choose partner for Trade'}</div>
           <div style={{ display: 'grid', gap: 8 }}>
             {others.length === 0 ? <div style={{ opacity: 0.7 }}>No other players.</div> : others.map((n, i) => (
-              <button key={i} className="btn" onClick={() => pick(n)}>{n}</button>
+              <button key={i} className="btn" onClick={() => pick(n)} title={n}>{n}</button>
             ))}
           </div>
         </div>
@@ -837,6 +1065,12 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 gap: 8
               }}
             >
+              {chatError ? (
+                <div style={{ background: '#fff3cd', color: '#856404', border: '1px solid #ffeeba', padding: '8px 10px', borderRadius: 6, fontSize: 12 }}>
+                  {chatError}
+                  <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 12, marginLeft: 8 }} onClick={() => { setChatError(''); try { s.emit('lobby_join', { id: lobbyId, lobby_id: lobbyId }); } catch {} }}>Retry</button>
+                </div>
+              ) : null}
               {chatLog.length === 0 ? (
                 <div style={{ 
                   textAlign: 'center', 
@@ -873,17 +1107,20 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                     marginBottom: 4
                   }}>
                     <div style={bubbleStyle}>
-                      {!isMe && (
+            {!isMe && (
                         <div style={{ 
                           fontSize: 11, 
                           opacity: 0.8, 
                           marginBottom: 2,
                           fontWeight: 600
                         }}>
-                          {c.from}
+              {c.from}
                         </div>
                       )}
-                      <div>{c.message}</div>
+                      <div>
+                        {c.message}
+                        {(c as any).pending ? <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 6 }}>(sending…)</span> : null}
+                      </div>
                     </div>
                   </div>
                 );
@@ -898,16 +1135,12 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <input 
+                  ref={chatInputRef}
                   placeholder="Type a message…" 
                   value={chatMsg} 
                   onChange={(e) => setChatMsg(e.target.value)} 
                   onKeyDown={(e) => { 
-                    if (e.key === 'Enter') { 
-                      if (chatMsg.trim()) { 
-                        s.emit('chat_send', { id: lobbyId, message: chatMsg.trim() }); 
-                        setChatMsg(''); 
-                      } 
-                    } 
+                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
                   }} 
                   style={{ 
                     flex: 1, 
@@ -919,12 +1152,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                   }} 
                 />
                 <button 
-                  onClick={() => { 
-                    if (chatMsg.trim()) { 
-                      s.emit('chat_send', { id: lobbyId, message: chatMsg.trim() }); 
-                      setChatMsg(''); 
-                    } 
-                  }}
+                  onClick={() => { sendChat(); }}
                   style={{
                     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                     color: 'white',

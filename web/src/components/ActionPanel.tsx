@@ -8,14 +8,24 @@ import type { BoardTile } from '../types';
 import StockModal from './StockModal';
 import StockChartsModal from './StockChartsModal';
 import { playGameSound, initializeAudio } from '../lib/audio';
+import { normalizeName, equalNames } from '../lib/names';
 
 type Props = { lobbyId: string; snapshot: GameSnapshot };
 
 export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const s = getSocket();
   const me = snapshot.players?.[snapshot.current_turn];
-  const myName = (getRemembered().displayName || '').trim() || (me?.name || '');
-  const myPlayer = (snapshot.players || []).find(p => p.name === myName);
+  // Simple stored name - no more reactive complexity
+  const storedName = (getRemembered().displayName || '').trim();
+  
+  const myName = useMemo(() => {
+    if (!storedName) return me?.name || '';
+    
+    // Simple exact match only
+    const found = (snapshot?.players || []).find(p => p.name === storedName);
+    return found?.name || storedName || (me?.name || '');
+  }, [snapshot?.players, storedName, me?.name]);
+  const myPlayer = (snapshot.players || []).find(p => equalNames(p.name, myName));
   const [showTrade, setShowTrade] = useState(false);
   const [showTradeAdvanced, setShowTradeAdvanced] = useState(false);
   const [showLog, setShowLog] = useState(false);
@@ -146,9 +156,13 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       cacheTrade({ id: openTradeDetailId, from: base.from, to: base.to, type: base.type, stub: true });
     }
     // Fallback: attempt server fetch (Missing Data Guard)
-    (async () => {
+  (async () => {
       try {
-        const res = await fetch(`${location.origin}/trade/${encodeURIComponent(lobbyId)}/${encodeURIComponent(openTradeDetailId)}`);
+    // Prefer configured backend; otherwise use relative path (dev proxy handles /trade)
+    const be = (import.meta as any).env?.VITE_BACKEND_URL as string | undefined;
+    const prefix = be ? be.replace(/\/+$/, '') : '';
+    const url = `${prefix}/trade/${encodeURIComponent(lobbyId)}/${encodeURIComponent(openTradeDetailId)}`;
+        const res = await fetch(url);
         if (res.ok) {
           const data = await res.json();
           if (data && data.trade) {
@@ -165,10 +179,10 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     s.emit('game_action', { id: lobbyId, action: { type, ...payload } });
   }
 
-  const myTurn = snapshot.players[snapshot.current_turn]?.name === myName;
+  const myTurn = equalNames(snapshot.players[snapshot.current_turn]?.name || '', myName);
   const rolledThisTurn = !!snapshot.rolled_this_turn;
   // List of other players you can trade with
-  const otherPlayers = useMemo(() => (snapshot.players || []).filter(p => p.name !== myName), [snapshot.players, myName]);
+  const otherPlayers = useMemo(() => (snapshot.players || []).filter(p => !equalNames(p.name, myName)), [snapshot.players, myName]);
   // If no partner selected, auto-set to the first other player to avoid button lockout
   useEffect(() => {
     if (!selectedPartner && otherPlayers.length > 0) {
@@ -208,7 +222,8 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     const allow = myTurn && (!rolledThisTurn || (snapshot.rolls_left ?? 0) > 0);
     if (allow) {
       const t = setTimeout(() => {
-        playGameSound('dice');
+        // Use the correct sound key so all clients have it loaded
+        playGameSound('dice_rolled');
         act('roll_dice');
       }, 180);
       return () => clearTimeout(t);
@@ -241,7 +256,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       if (!t || t.type !== 'property' || !t.group) continue;
       const st: any = (snapshot.properties as any)?.[t.pos] || {};
       const owner = st.owner;
-      const mine = owner === myName;
+      const mine = equalNames(owner || '', myName);
       if (!byGroup[t.group]) byGroup[t.group] = { positions: [], allOwned: true, anyMortgaged: false, cost: houseCostForGroup(t.group) };
       byGroup[t.group].positions.push(t.pos);
       // Track ownership and mortgage status
@@ -295,6 +310,16 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     if (!cand) return;
     const la: any = snapshot.last_action;
     if (la && typeof la.pos === 'number' && la.pos === (cand as any).pos && String(la.type || '').includes('denied')) return;
+    // Final Keep $ override guard at execution time
+    try {
+      const pos = cand.pos;
+      const tile = tiles[pos];
+      const group = (tile as any)?.group as string | undefined;
+      const cost = group ? houseCostForGroup(group) : 0;
+      const cash = myPlayer?.cash ?? 0;
+      const keep = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
+      if (cost > 0 && (cash - cost) < keep) return; // do not execute if it violates Keep $
+    } catch {}
     act(cand.type, { pos: cand.pos });
   }, [myTurn, autoHouses, nextHouseActionCandidate, snapshot.last_action]);
   useEffect(() => {
@@ -307,7 +332,8 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       return;
     }
     if (autoEnd && (myTurn && rolledThisTurn && (snapshot.rolls_left ?? 0) === 0)) {
-      playGameSound('turn');
+      // Neutral end-turn notification sound
+      playGameSound('notification');
       act('end_turn');
     }
   }, [myTurn, autoEnd, rolledThisTurn, snapshot.rolls_left, autoHouses, nextHouseActionCandidate]);
@@ -316,7 +342,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     // Mortgage owned properties without buildings, lowest price first
     const owned = Object.entries(snapshot.properties || {})
       .map(([pos, st]: any) => ({ pos: Number(pos), st }))
-      .filter(x => x.st.owner === myName && !x.st.mortgaged && (x.st.houses || 0) === 0 && !x.st.hotel);
+      .filter(x => equalNames(x.st.owner || '', myName) && !x.st.mortgaged && (x.st.houses || 0) === 0 && !x.st.hotel);
     if (owned.length === 0) return;
     // sort by tile price ascending
     const arr = owned.sort((a, b) => (tiles[a.pos]?.price || 0) - (tiles[b.pos]?.price || 0));
@@ -359,9 +385,9 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
   return (
     <div className="actions actions-panel" style={{ position: 'relative' }}>
-      {kickStatus?.target ? (
+    {kickStatus?.target ? (
         <div className="ui-sm" style={{ position: 'absolute', right: 0, top: -20, color: '#c0392b' }}>
-          Vote-kick: {kickStatus.target} — {typeof kickStatus.remaining === 'number' ? `${Math.floor((kickStatus.remaining as number)/60)}:${String((kickStatus.remaining as number)%60).padStart(2,'0')}` : ''}
+      Vote-kick: {normalizeName(String(kickStatus.target))} — {typeof kickStatus.remaining === 'number' ? `${Math.floor((kickStatus.remaining as number)/60)}:${String((kickStatus.remaining as number)%60).padStart(2,'0')}` : ''}
         </div>
       ) : null}
 
@@ -398,16 +424,19 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
             <div style={{ display: 'grid', gap: 10, marginTop: 8 }}>
               <div>
                 <h4 style={{ margin: '6px 0' }}>Incoming</h4>
-        {(snapshot.pending_trades || []).filter(t => t.to === myName).map((t) => (
+  {(snapshot.pending_trades || []).filter(t => equalNames(t.to, myName)).map((t) => (
                   <div key={t.id} className="card" style={{ padding: 8 }}>
-                    <TradeHeader snapshot={snapshot} from={t.from} to={t.to} id={t.id} />
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                      <TradeHeader snapshot={snapshot} from={t.from} to={t.to} id={t.id} />
+                      <button className="btn btn-ghost" onClick={() => openTradeDetail(String(t.id))} title="View details" aria-label={`View trade #${t.id}`} style={{ padding: '2px 6px' }}>👁️</button>
+                    </div>
                     <TradeSummary t={t} tiles={tiles} />
                     {t.terms?.payments?.length ? (
                       <div style={{ fontSize: 12, marginTop: 6 }}>
                         <div style={{ fontWeight: 600, marginBottom: 4 }}>Recurring payments</div>
                         <ul style={{ margin: 0, paddingLeft: 16 }}>
                           {t.terms.payments.map((p: any, i: number) => (
-                            <li key={i}>{p.from} pays ${p.amount} to {p.to} for {p.turns} turns</li>
+                            <li key={i}>{normalizeName(p.from)} pays ${p.amount} to {normalizeName(p.to)} for {p.turns} turns</li>
                           ))}
                         </ul>
                       </div>
@@ -422,8 +451,8 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                               return tile?.name || `Property ${pos}`;
                             }).join(', ');
                             const direction = r.direction === 'give' ? 
-                              `${t.from} rents out to ${t.to}` : 
-                              `${t.from} rents from ${t.to}`;
+                              `${normalizeName(t.from)} rents out to ${normalizeName(t.to)}` : 
+                              `${normalizeName(t.from)} rents from ${normalizeName(t.to)}`;
                             return (
                               <li key={i}>
                                 {direction}: {r.percentage}% of rent from {propNames} for {r.turns} turns
@@ -434,25 +463,28 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                       </div>
                     ) : null}
                     <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
-                      <button className="btn" onClick={() => act('accept_trade', { trade_id: t.id })} disabled={t.to !== myName}>Accept</button>
+                      <button className="btn" onClick={() => act('accept_trade', { trade_id: t.id })} disabled={!equalNames(t.to, myName)}>Accept</button>
                       <button className="btn" onClick={() => act('decline_trade', { trade_id: t.id })}>Decline</button>
                     </div>
                   </div>
                 ))}
-                {(snapshot.pending_trades || []).filter(t => t.to === myName).length === 0 && <div style={{ opacity: 0.7 }}>No incoming trades.</div>}
+                {(snapshot.pending_trades || []).filter(t => equalNames(t.to, myName)).length === 0 && <div style={{ opacity: 0.7 }}>No incoming trades.</div>}
               </div>
               <div>
                 <h4 style={{ margin: '6px 0' }}>My Offers</h4>
-    {(snapshot.pending_trades || []).filter(t => t.from === myName).map((t) => (
+  {(snapshot.pending_trades || []).filter(t => equalNames(t.from, myName)).map((t) => (
                   <div key={t.id} className="card" style={{ padding: 8 }}>
-          <TradeHeader snapshot={snapshot} from={t.from} to={t.to} id={t.id} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+            <TradeHeader snapshot={snapshot} from={t.from} to={t.to} id={t.id} />
+            <button className="btn btn-ghost" onClick={() => openTradeDetail(String(t.id))} title="View details" aria-label={`View trade #${t.id}`} style={{ padding: '2px 6px' }}>👁️</button>
+          </div>
                     <TradeSummary t={t} tiles={tiles} />
                     {t.terms?.payments?.length ? (
                       <div style={{ fontSize: 12, marginTop: 6 }}>
                         <div style={{ fontWeight: 600, marginBottom: 4 }}>Recurring payments</div>
                         <ul style={{ margin: 0, paddingLeft: 16 }}>
                           {t.terms.payments.map((p: any, i: number) => (
-                            <li key={i}>{p.from} pays ${p.amount} to {p.to} for {p.turns} turns</li>
+                            <li key={i}>{normalizeName(p.from)} pays ${p.amount} to {normalizeName(p.to)} for {p.turns} turns</li>
                           ))}
                         </ul>
                       </div>
@@ -467,8 +499,8 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                               return tile?.name || `Property ${pos}`;
                             }).join(', ');
                             const direction = r.direction === 'give' ? 
-                              `${t.from} rents out to ${t.to}` : 
-                              `${t.from} rents from ${t.to}`;
+                              `${normalizeName(t.from)} rents out to ${normalizeName(t.to)}` : 
+                              `${normalizeName(t.from)} rents from ${normalizeName(t.to)}`;
                             return (
                               <li key={i}>
                                 {direction}: {r.percentage}% of rent from {propNames} for {r.turns} turns
@@ -483,7 +515,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                     </div>
                   </div>
                 ))}
-                {(snapshot.pending_trades || []).filter(t => t.from === myName).length === 0 && <div style={{ opacity: 0.7 }}>No outgoing trades.</div>}
+                {(snapshot.pending_trades || []).filter(t => equalNames(t.from, myName)).length === 0 && <div style={{ opacity: 0.7 }}>No outgoing trades.</div>}
               </div>
             </div>
           </div>
@@ -534,23 +566,25 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 120, overflowY: 'auto' }}>
           {allTrades.length === 0 ? <div className="ui-sm" style={{ opacity: 0.65 }}>None</div> : null}
           {allTrades.slice(-8).reverse().map((t: any) => {
-            const mineFrom = t.from === myName;
-            const mineTo = t.to === myName;
+            const mineFrom = equalNames(t.from, myName);
+            const mineTo = equalNames(t.to, myName);
             const brief = concise(t) || '—';
             const statusBadge = mineTo ? 'incoming' : (mineFrom ? 'outgoing' : 'watch');
             const badgeColor = mineTo ? '#27ae60' : (mineFrom ? '#2980b9' : '#7f8c8d');
             const [expanded, setExpanded] = [openInline.has(t.id), (val: boolean) => setOpenInline(prev => { const n = new Set(prev); if (val) n.add(t.id); else n.delete(t.id); return n; })];
             return (
               <div key={t.id} style={{ background: 'rgba(0,0,0,0.04)', border: '1px solid rgba(0,0,0,0.08)', borderRadius: 6, padding: '4px 6px', display: 'flex', flexDirection: 'column', fontSize: 11 }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto', alignItems: 'center', gap: 6 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto auto auto', alignItems: 'center', gap: 6 }}>
                   <button onClick={() => setExpanded(!expanded)} style={{ background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', fontSize: 12 }} title={expanded ? 'Collapse' : 'Expand'}>{expanded ? '▾' : '▸'}</button>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-                    <span style={{ fontWeight: 600, maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.from}</span>
+                    <span style={{ fontWeight: 600, maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.from}>{normalizeName(t.from)}</span>
                     <span style={{ opacity: 0.75 }}>→</span>
-                    <span style={{ fontWeight: 600, maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis' }}>{t.to}</span>
+                    <span style={{ fontWeight: 600, maxWidth: 70, overflow: 'hidden', textOverflow: 'ellipsis' }} title={t.to}>{normalizeName(t.to)}</span>
                   </div>
                   <span style={{ justifySelf: 'end', fontSize: 9, padding: '1px 4px', borderRadius: 4, background: badgeColor, color: '#fff' }}>{statusBadge}</span>
-                  <button onClick={() => openTradeDetail(String(t.id))} className="btn btn-ghost" style={{ padding: '2px 4px', fontSize: 9 }} title="Open detail modal">Open</button>
+                  <button className="btn btn-ghost" onClick={() => openTradeDetail(String(t.id))} title="View details" aria-label={`View trade #${t.id}`} style={{ padding: '0 6px', lineHeight: 1 }}>
+                    👁️
+                  </button>
                   <div style={{ gridColumn: '1 / -1', fontSize: 10, lineHeight: 1.2, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', opacity: 0.85 }} title={brief}>{brief}</div>
                 </div>
                 {expanded && (
@@ -560,8 +594,8 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                     ) : (
                       <>
                         <div>Cash: {(t.give?.cash || 0)} ↔ {(t.receive?.cash || 0)}</div>
-                        <div>Give: {(t.give?.properties || []).length ? (t.give?.properties || []).join(', ') : '—'}</div>
-                        <div>Receive: {(t.receive?.properties || []).length ? (t.receive?.properties || []).join(', ') : '—'}</div>
+                        <div>Give: {(t.give?.properties || []).length ? (t.give?.properties || []).map((pos: number) => tiles[pos]?.name || `#${pos}`).join(', ') : '—'}</div>
+                        <div>Receive: {(t.receive?.properties || []).length ? (t.receive?.properties || []).map((pos: number) => tiles[pos]?.name || `#${pos}`).join(', ') : '—'}</div>
                         {(t.give?.jail_card || t.receive?.jail_card) && <div>Jail Card: {t.give?.jail_card ? 'give' : ''}{t.receive?.jail_card ? (t.give?.jail_card ? ' & receive' : 'receive') : ''}</div>}
                       </>
                     )}
@@ -610,6 +644,9 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
               const relatedLogs = (snapshot.log || []).filter((e: any) => String(e.id) === openTradeDetailId);
               const latest = relatedLogs[relatedLogs.length - 1];
               const status = latest ? latest.type : (trade ? 'trade_offer' : 'unknown');
+              const isPending = (snapshot.pending_trades || []).some((p: any) => String(p.id) === String(openTradeDetailId));
+              const iAmRecipient = !!trade && equalNames(String(trade.to || ''), String(myName));
+              const iAmSender = !!trade && equalNames(String(trade.from || ''), String(myName));
         return (
                 <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }} onClick={closeTradeDetail}>
                   <div style={{ background: 'var(--color-surface)', minWidth: 460, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', borderRadius: 10, padding: 16, boxShadow: '0 4px 16px var(--color-shadow)' }} onClick={(e) => e.stopPropagation()}>
@@ -626,9 +663,9 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                     ) : (
                       <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
                         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                          <strong>{trade.from || '???'}</strong>
+                          <strong>{normalizeName(trade.from || '???')}</strong>
                           <span style={{ opacity: 0.7 }}>→</span>
-                          <strong>{trade.to || '???'}</strong>
+                          <strong>{normalizeName(trade.to || '???')}</strong>
                           <span style={{ fontSize: 12, padding: '2px 6px', background: '#eee', borderRadius: 4 }}>{status}</span>
                           {trade.stub ? <span style={{ fontSize: 11, opacity: 0.6 }}>(reconstructed)</span> : null}
                         </div>
@@ -636,15 +673,15 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                           <div className="ui-sm" style={{ lineHeight: 1.4 }}>
                             <div><strong>Rental Offer</strong></div>
                             <div>Cash: ${trade.cash_amount || 0}</div>
-                            <div>Properties: {(trade.properties || []).length}</div>
+                            <div>Properties: {(trade.properties || []).map((pos: number) => tiles[pos]?.name || `#${pos}`).join(', ') || '—'}</div>
                             <div>Percentage: {trade.percentage || 0}% • Turns: {trade.turns || 0}</div>
                           </div>
                         ) : (
                           <div style={{ display: 'grid', gap: 4, fontSize: 13 }}>
                             <div><strong>Give Cash:</strong> ${(trade.give?.cash || 0)}</div>
                             <div><strong>Receive Cash:</strong> ${(trade.receive?.cash || 0)}</div>
-                            <div><strong>Give Props:</strong> {(trade.give?.properties || []).length ? (trade.give?.properties || []).join(', ') : '—'}</div>
-                            <div><strong>Receive Props:</strong> {(trade.receive?.properties || []).length ? (trade.receive?.properties || []).join(', ') : '—'}</div>
+                            <div><strong>Give Props:</strong> {(trade.give?.properties || []).length ? (trade.give?.properties || []).map((pos: number) => tiles[pos]?.name || `#${pos}`).join(', ') : '—'}</div>
+                            <div><strong>Receive Props:</strong> {(trade.receive?.properties || []).length ? (trade.receive?.properties || []).map((pos: number) => tiles[pos]?.name || `#${pos}`).join(', ') : '—'}</div>
                             {trade.give?.jail_card ? <div>Includes: Give Get Out of Jail Free</div> : null}
                             {trade.receive?.jail_card ? <div>Includes: Receive Get Out of Jail Free</div> : null}
                           </div>
@@ -653,7 +690,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                           <div style={{ fontSize: 12 }}>
                             <div style={{ fontWeight: 600, marginBottom: 4 }}>Recurring Payments</div>
                             <ul style={{ margin: 0, paddingLeft: 16 }}>
-                              {trade.terms.payments.map((p: any, i: number) => <li key={i}>{p.from} pays ${p.amount} to {p.to} for {p.turns} turns</li>)}
+                              {trade.terms.payments.map((p: any, i: number) => <li key={i}>{normalizeName(p.from)} pays ${p.amount} to {normalizeName(p.to)} for {p.turns} turns</li>)}
                             </ul>
                           </div>
                         ) : null}
@@ -661,13 +698,28 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                           <div style={{ fontSize: 12 }}>
                             <div style={{ fontWeight: 600, marginBottom: 4 }}>Property Rentals</div>
                             <ul style={{ margin: 0, paddingLeft: 16 }}>
-                              {trade.terms.rentals.map((r: any, i: number) => <li key={i}>{r.percentage}% of rent from {(r.properties || []).length} properties ({r.turns} turns)</li>)}
+                              {trade.terms.rentals.map((r: any, i: number) => (
+                                <li key={i}>{r.percentage}% of rent from {(r.properties || []).map((pos: number) => tiles[pos]?.name || `#${pos}`).join(', ') || '—'} ({r.turns} turns)</li>
+                              ))}
                             </ul>
                           </div>
                         ) : null}
                         <div style={{ fontSize: 11, opacity: 0.65 }}>
                           {relatedLogs.length ? `${relatedLogs.length} related events` : 'No related log events in current buffer'} • {trade?.fetched ? 'fetched' : trade?.stub ? 'reconstructed' : 'cached'}
                         </div>
+                        {isPending ? (
+                          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
+                            {iAmRecipient ? (
+                              <>
+                                <button className="btn" onClick={() => act('accept_trade', { trade_id: trade.id })}>Accept</button>
+                                <button className="btn" onClick={() => act('decline_trade', { trade_id: trade.id })}>Decline</button>
+                              </>
+                            ) : null}
+                            {iAmSender ? (
+                              <button className="btn" onClick={() => act('cancel_trade', { trade_id: trade.id })}>Cancel</button>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </div>
@@ -682,11 +734,11 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
           <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseRecurring(c => !c)}>{collapseRecurring ? '➕' : '➖'}</button>
         </div>
         {!collapseRecurring && <div className="ui-sm animate-fade-in" style={{ display: 'grid', gap: 4 }}>
-          {((snapshot as any).recurring || []).length === 0 ? (
+      {((snapshot as any).recurring || []).length === 0 ? (
             <div style={{ opacity: 0.7 }}>None</div>
           ) : ((snapshot as any).recurring || []).map((r: any, idx: number) => (
             <div key={idx}>
-              {r.from} → {r.to}: ${r.amount} ({r.turns_left} turns left)
+        {normalizeName(r.from)} → {normalizeName(r.to)}: ${r.amount} ({r.turns_left} turns left)
             </div>
           ))}
         </div>}
@@ -714,12 +766,12 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
             return (
               <div key={idx} style={{ 
                 padding: '8px', 
-                border: '1px solid #ddd', 
+                border: '1px solid var(--color-border)', 
                 borderRadius: '4px',
-                backgroundColor: rental.renter === myName ? '#e8f5e8' : rental.owner === myName ? '#fff8e1' : '#f5f5f5'
+                backgroundColor: equalNames(rental.renter || '', myName) ? 'var(--color-success)' : equalNames(rental.owner || '', myName) ? 'var(--color-warning)' : 'var(--color-surface-alt)'
               }}>
                 <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
-                  {rental.renter} ←→ {rental.owner}
+                  {normalizeName(rental.renter)} ←→ {normalizeName(rental.owner)}
                 </div>
                 <div style={{ fontSize: '0.9em', marginBottom: '2px' }}>
                   <strong>{rental.percentage}%</strong> rent from: {propertyNames}
@@ -772,16 +824,16 @@ function TradeSummary({ t, tiles }: { t: any, tiles?: Record<number, any> }) {
 }
 
 function TradeHeader({ snapshot, from, to, id }: { snapshot: GameSnapshot, from: string, to: string, id: any }) {
-  const f = (snapshot.players || []).find(p => p.name === from);
-  const t = (snapshot.players || []).find(p => p.name === to);
+  const f = (snapshot.players || []).find(p => equalNames(p.name, from));
+  const t = (snapshot.players || []).find(p => equalNames(p.name, to));
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span title={from} style={{ width: 10, height: 10, borderRadius: '50%', background: f?.color || '#999', display: 'inline-block' }} />
-        <span style={{ fontWeight: 600 }}>{from}</span>
+  <span title={from} style={{ width: 10, height: 10, borderRadius: '50%', background: f?.color || '#999', display: 'inline-block' }} />
+  <span style={{ fontWeight: 600 }}>{normalizeName(from)}</span>
         <span style={{ opacity: 0.7 }}>→</span>
-        <span title={to} style={{ width: 10, height: 10, borderRadius: '50%', background: t?.color || '#999', display: 'inline-block' }} />
-        <span style={{ fontWeight: 600 }}>{to}</span>
+  <span title={to} style={{ width: 10, height: 10, borderRadius: '50%', background: t?.color || '#999', display: 'inline-block' }} />
+  <span style={{ fontWeight: 600 }}>{normalizeName(to)}</span>
       </div>
       <span style={{ opacity: 0.7 }}>#{id}</span>
     </div>
@@ -836,18 +888,18 @@ function StocksList({ lobbyId: _lobbyId, snapshot, myName, onOpen }: { lobbyId: 
         <div key={o.owner} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 8, border: '1px solid #eee', borderRadius: 6, padding: 6 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span title={o.owner} style={{ width: 10, height: 10, borderRadius: '50%', background: o.owner_color || '#999', display: 'inline-block' }} />
-            <strong>{o.owner}</strong>
+            <strong>{normalizeName(o.owner)}</strong>
           </div>
           <div className="ui-sm" style={{ opacity: 0.9 }} title="Price is owner's current cash">
             {(() => {
-              const ownerCash = (snapshot.players || []).find((p: any) => p.name === o.owner)?.cash ?? 0;
-              const mine = (o.holdings || []).find((h: any) => h.investor === myName);
+              const ownerCash = (snapshot.players || []).find((p: any) => equalNames(p.name, o.owner))?.cash ?? 0;
+              const mine = (o.holdings || []).find((h: any) => equalNames(h.investor, myName));
               const myPct = ((mine?.percent ?? 0) * 100).toFixed(2);
               return <>Price: ${ownerCash} • Mine: {myPct}%</>;
             })()}
           </div>
           <div style={{ display: 'flex', gap: 6 }}>
-            {o.owner === myName ? (
+            {equalNames(o.owner, myName) ? (
               // Owner view: Settings icon only, no Open button
               <button className="btn btn-ghost" onClick={() => onOpen(o)} title="Stock Settings">⚙️</button>
             ) : (
@@ -857,7 +909,7 @@ function StocksList({ lobbyId: _lobbyId, snapshot, myName, onOpen }: { lobbyId: 
           </div>
       {o.holdings && o.holdings.length > 0 ? (
             <div style={{ gridColumn: '1 / -1', fontSize: 12, marginTop: 4 }}>
-        Holders: {o.holdings.map((h: any) => `${h.investor}(${Number(h.shares || 0).toFixed(3)})`).join(', ')}
+        Holders: {o.holdings.map((h: any) => `${normalizeName(h.investor)}(${Number(h.shares || 0).toFixed(3)})`).join(', ')}
             </div>
           ) : null}
         </div>

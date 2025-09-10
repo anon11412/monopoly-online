@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getSocket, rememberLobby } from '../lib/socket';
 import type { LobbyInfo } from '../types';
 import { spawnBot, type BotHandle } from '../lib/bots';
+import { normalizeName } from '../lib/names';
 
 type Props = {
   lobby: LobbyInfo;
@@ -27,24 +28,32 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
     const onLobbyState = (data: any) => {
       if (data?.id === state.id) setState(data);
       if (data?.id === state.id && Array.isArray((data as any).chat)) {
-        setChat((data as any).chat.map((c: any) => `${c.from || 'anon'}: ${c.message}`));
+        setChat((data as any).chat.map((c: any) => `${normalizeName(c.from || 'anon')}: ${c.message}`));
       }
     };
-    const onChat = (payload: any) => {
-      if (payload?.id === state.id && payload?.message) {
-        setChat((c) => [...c, `${payload.from || 'anon'}: ${payload.message}`]);
-      }
-    };
+  // Stop listening to legacy lobby_chat to avoid duplicate chat messages.
     const onGameState = (payload: any) => {
       if (payload?.lobby_id === state.id) onGameStarted();
     };
+    const onChatMessage = (msg: any) => {
+      try {
+        if (!msg) return;
+        const lobbyId = msg.lobby_id || msg.id;
+        if (lobbyId !== state.id) return;
+        const from = normalizeName(msg.from || 'anon');
+        const text = String(msg.message || '');
+        if (!text) return;
+        setChat(prev => [...prev, `${from}: ${text}`]);
+      } catch {}
+    };
     s.on('lobby_state', onLobbyState);
-    s.on('lobby_chat', onChat);
     s.on('game_state', onGameState);
+    s.on('chat_message', onChatMessage);
     return () => {
       s.off('lobby_state', onLobbyState);
-      s.off('lobby_chat', onChat);
+  // legacy lobby_chat listener removed
       s.off('game_state', onGameState);
+      s.off('chat_message', onChatMessage);
     };
   }, [state.id, onGameStarted]);
 

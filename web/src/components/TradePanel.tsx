@@ -318,8 +318,12 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
         {incomingOffer ? (
           <div style={{ marginTop: 16, borderTop: '1px solid #eee', paddingTop: 12 }}>
             <div style={{ fontWeight: 600, marginBottom: 6 }}>📊 Trade Details</div>
-            <div style={{ fontSize: 12, marginBottom: 6 }}>They give: ${incomingOffer.give?.cash || 0}, properties: {(incomingOffer.give?.properties || []).join(', ')}, jail card: {incomingOffer.give?.jail_card ? 'yes' : 'no'}</div>
-            <div style={{ fontSize: 12, marginBottom: 6 }}>You give: ${incomingOffer.receive?.cash || 0}, properties: {(incomingOffer.receive?.properties || []).join(', ')}, jail card: {incomingOffer.receive?.jail_card ? 'yes' : 'no'}</div>
+            <div style={{ fontSize: 12, marginBottom: 6 }}>
+              They give: ${incomingOffer.give?.cash || 0}, properties: {(incomingOffer.give?.properties || []).map((p: number) => tiles.find(t => t.pos === p)?.name || `#${p}`).join(', ')}, jail card: {incomingOffer.give?.jail_card ? 'yes' : 'no'}
+            </div>
+            <div style={{ fontSize: 12, marginBottom: 6 }}>
+              You give: ${incomingOffer.receive?.cash || 0}, properties: {(incomingOffer.receive?.properties || []).map((p: number) => tiles.find(t => t.pos === p)?.name || `#${p}`).join(', ')}, jail card: {incomingOffer.receive?.jail_card ? 'yes' : 'no'}
+            </div>
             {incomingOffer.terms?.payments?.length ? (
               <div style={{ fontSize: 12, marginBottom: 6 }}>
                 Recurring payments:
@@ -460,7 +464,13 @@ function RentalAgreementsEditor({ agreements, setAgreements, myName, counterpart
         const renterName = agreement.direction === 'give' ? counterparty : myName;
         
         return (
-          <div key={i} style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12, marginBottom: 8, background: '#fafafa' }}>
+          <div key={i} style={{ 
+            border: '1px solid var(--color-border)', 
+            borderRadius: 6, 
+            padding: 12, 
+            marginBottom: 8, 
+            background: 'var(--color-surface)' 
+          }}>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
               <select value={agreement.direction} onChange={(e) => update(i, { direction: (e.target.value as any), properties: [] })}>
                 <option value="give">I rent out my properties to {counterparty}</option>
@@ -484,9 +494,9 @@ function RentalAgreementsEditor({ agreements, setAgreements, myName, counterpart
                       gap: 4, 
                       fontSize: 11,
                       padding: '2px 6px',
-                      border: '1px solid #ccc',
+                      border: '1px solid var(--color-border)',
                       borderRadius: 4,
-                      background: isSelected ? '#e8f5e8' : '#fff',
+                      background: isSelected ? 'var(--color-success)' : 'var(--color-surface-alt)',
                       cursor: 'pointer'
                     }}>
                       <input 

@@ -383,7 +383,9 @@ async def disconnect(sid):
             still_connected = any(v == name for v in l.sid_to_name.values())
             # If a game is not started yet, removing the player entirely is fine.
             # If a game is active, keep the name in the players list to support reconnection.
-            if not l.game and name in l.players and not still_connected:
+            # If a game is finished, we can remove the player entirely.
+            game_finished = l.game and getattr(l.game, "game_over", None)
+            if (not l.game or game_finished) and name in l.players and not still_connected:
                 l.players.remove(name)
             if sid in l.ready:
                 l.ready.remove(sid)
@@ -468,8 +470,8 @@ async def _lobby_consistency_pass(broadcast: bool = True):
             # Keep brief grace period? For now immediate exposure by clearing game reference
             l.game = None
             changed = True
-        # Schedule removal if empty pre-game lobby
-        if not l.game and len(l.players) == 0:
+        # Schedule removal if empty pre-game lobby OR empty finished-game lobby
+        if len(l.players) == 0 and (not l.game or getattr(l.game, "game_over", None)):
             to_remove.append(lobby_id)
     for lobby_id in to_remove:
         LOBBIES.pop(lobby_id, None)
@@ -704,10 +706,15 @@ async def lobby_join(sid, data):
                 pass
     if not name:
         name = f"User-{sid[:4]}"
-    # Prevent duplicate phantom entries: ensure name appears once in players
-    if name not in l.players:
-        l.players.append(name)
+    
+    # Simple solution: reject duplicate names instead of creating suffixes
+    if name in l.players:
+        return {"ok": False, "error": f"Name '{name}' is already taken. Please choose a different name."}
+    
+    # Add player with their exact name
+    l.players.append(name)
     l.sid_to_name[sid] = name
+    USERNAMES[sid] = name
     await sio.enter_room(sid, lobby_id)
     await sio.emit("lobby_joined", lobby_state(l), to=sid)
     await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
@@ -865,28 +872,39 @@ async def lobby_rematch(sid, data):
 async def game_action(sid, data):
     lobby_id = data.get("id")
     action = data.get("action") or {}
+    print(f"[GAME_ACTION] sid={sid[:6]}, lobby_id={lobby_id}, action={action}", flush=True)
     if lobby_id not in LOBBIES:
-        return
+        print(f"[GAME_ACTION] Lobby {lobby_id} not found", flush=True)
+        return {"ok": False, "error": "Lobby not found"}
     l = LOBBIES[lobby_id]
     g = l.game
     if not g:
-        return
+        print(f"[GAME_ACTION] No game in lobby {lobby_id}", flush=True)
+        return {"ok": False, "error": "No active game"}
     t = action.get("type")
     cur = g.players[g.current_turn]
 
     # Resolve actor display name from sid
     actor = USERNAMES.get(sid) or l.sid_to_name.get(sid) or f"User-{sid[:4]}"
-    is_turn_actor = (actor == cur.name)
+    is_turn_actor = actor == cur.name
+    print(f"[GAME_ACTION] actor='{actor}', cur.name='{cur.name}', is_turn_actor={is_turn_actor}, action_type={t}", flush=True)
 
     # Define which actions must be performed by the current-turn player
     turn_bound = {
         "roll_dice", "buy_property", "end_turn", "bankrupt", "use_jail_card",
         "mortgage", "unmortgage", "buy_house", "sell_house", "buy_hotel", "sell_hotel",
     }
+    
+    # TEMPORARY: Be more permissive for debugging - allow anyone to roll if it's a single player game
+    if t == "roll_dice" and len(g.players) == 1:
+        print(f"[GAME_ACTION] Single player game - allowing {actor} to roll", flush=True)
+        is_turn_actor = True
+    
     if t in turn_bound and not is_turn_actor:
+        print(f"[GAME_ACTION] Not your turn: {actor} tried {t}, expected {cur.name}", flush=True)
         g.last_action = {"type": "not_your_turn", "by": actor, "expected": cur.name, "action": t}
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-        return
+        return {"ok": False, "error": f"Not your turn. Expected: {cur.name}, Got: {actor}"}
 
     if t == "roll_dice":
         # Gate rolls by remaining moves this turn
@@ -894,7 +912,7 @@ async def game_action(sid, data):
             g.last_action = {"type": "no_rolls", "by": cur.name}
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
-        
+
         # Process recurring payments at start of turn (first roll only)
         recurring_processed = False
         if not g.rolled_this_turn:
@@ -911,7 +929,7 @@ async def game_action(sid, data):
                 g.last_action = {"type": "roll_denied", "by": cur.name, "reason": "negative_after_recurring"}
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return {"ok": False, "action": "roll_dice", "reasons": ["negative_after_recurring"]}
-        
+
         d1 = random.randint(1, 6)
         d2 = random.randint(1, 6)
         roll = d1 + d2
@@ -921,6 +939,11 @@ async def game_action(sid, data):
         g.rolled_this_turn = True
         g.last_action = {"type": "rolled", "by": cur.name, "roll": roll, "d1": d1, "d2": d2, "doubles": bool(d1 == d2)}
         g.log.append({"type": "rolled", "text": f"{cur.name} rolled {d1} + {d2} = {roll}"})
+        # Broadcast a dice rolled sound to all players in the lobby
+        try:
+            await sio.emit("sound", {"event": "dice_rolled", "by": cur.name, "d1": d1, "d2": d2, "roll": roll}, room=lobby_id)
+        except Exception:
+            pass
 
         was_in_jail = cur.in_jail
         # Jail handling (minimal)
@@ -1074,6 +1097,10 @@ async def game_action(sid, data):
             cur.cash -= price
             g.last_action = {"type": "buy", "by": cur.name, "pos": p, "price": price, "name": tile["name"]}
             g.log.append({"type": "buy", "text": f"{cur.name} bought {tile['name']} for ${price}"})
+            try:
+                await sio.emit("sound", {"event": "property_purchased", "by": cur.name, "pos": p, "price": price}, room=lobby_id)
+            except Exception:
+                pass
         else:
             reason = "not_buyable"
             if not buyable:
@@ -1112,7 +1139,7 @@ async def game_action(sid, data):
                     min_buy = 0
             except Exception:
                 min_buy = int(st.get("min_buy") or 0)
-            allow_investing = bool(payload.get("allow_investing")) if ("allow_investing" in payload) else bool(st.get("allow_investing", True))
+            allow_investing = bool(payload.get("allow_investing")) if ("allow_investing" in payload) else bool(st.get("allow_investing", False))
             enforce_min_buy = bool(payload.get("enforce_min_buy")) if ("enforce_min_buy" in payload) else bool(st.get("enforce_min_buy", False))
             try:
                 min_pool_total = int(payload.get("min_pool_total") or 0)
@@ -1379,6 +1406,13 @@ async def game_action(sid, data):
             print(f"[TURN_CHANGE] {cur.name} -> {g.players[g.current_turn].name}", flush=True)
         except Exception:
             pass
+        # Notify clients with a neutral "turn_started" sound for the next player
+        try:
+            next_player = g.players[g.current_turn].name if g.players else None
+            if next_player:
+                await sio.emit("sound", {"event": "turn_started", "currentPlayer": next_player, "prev": cur.name}, room=lobby_id)
+        except Exception:
+            pass
         await _force_sync_all_clients(lobby_id, g)
         return {"ok": True, "action": "end_turn"}
 
@@ -1439,7 +1473,16 @@ async def game_action(sid, data):
             return (max(counts) - min(counts)) <= 1 and all(0 <= c <= 5 for c in counts)
 
         if t == "mortgage":
-            if st.houses > 0 or st.hotel:
+            # Disallow mortgaging any property in a color set if any property in the set has houses/hotel
+            def group_has_buildings() -> bool:
+                if not group:
+                    return False
+                for p in _group_positions(group):
+                    ps = g.properties.get(p) or PropertyState(pos=p)
+                    if ps.houses > 0 or ps.hotel:
+                        return True
+                return False
+            if st.houses > 0 or st.hotel or group_has_buildings():
                 g.last_action = {"type": "mortgage_denied", "by": cur.name, "pos": pos, "reason": "has_buildings"}
             elif st.mortgaged:
                 g.last_action = {"type": "mortgage_denied", "by": cur.name, "pos": pos, "reason": "already_mortgaged"}
@@ -1450,6 +1493,10 @@ async def game_action(sid, data):
                 cur.cash += amt
                 g.last_action = {"type": "mortgage", "by": cur.name, "pos": pos, "amount": amt}
                 g.log.append({"type": "mortgage", "text": f"{cur.name} mortgaged {tile['name']} for ${amt}"})
+                try:
+                    await sio.emit("sound", {"event": "mortgage", "by": cur.name, "pos": pos, "amount": amt}, room=lobby_id)
+                except Exception:
+                    pass
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
         if t == "unmortgage":
@@ -1466,6 +1513,10 @@ async def game_action(sid, data):
                     g.properties[pos] = st
                     g.last_action = {"type": "unmortgage", "by": cur.name, "pos": pos, "amount": payoff}
                     g.log.append({"type": "unmortgage", "text": f"{cur.name} unmortgaged {tile['name']} paying ${payoff}"})
+                    try:
+                        await sio.emit("sound", {"event": "unmortgage", "by": cur.name, "pos": pos, "amount": payoff}, room=lobby_id)
+                    except Exception:
+                        pass
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
         if t == "buy_house":
@@ -1485,6 +1536,10 @@ async def game_action(sid, data):
                 g.properties[pos] = st
                 g.last_action = {"type": "buy_house", "by": cur.name, "pos": pos, "cost": house_cost}
                 g.log.append({"type": "buy_house", "text": f"{cur.name} bought a house on {tile['name']} for ${house_cost}"})
+                try:
+                    await sio.emit("sound", {"event": "property_purchased", "by": cur.name, "pos": pos, "house": True}, room=lobby_id)
+                except Exception:
+                    pass
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
         if t == "sell_house":
@@ -1510,6 +1565,10 @@ async def game_action(sid, data):
                 g.properties[pos] = st
                 g.last_action = {"type": "buy_hotel", "by": cur.name, "pos": pos, "cost": house_cost}
                 g.log.append({"type": "buy_hotel", "text": f"{cur.name} bought a hotel on {tile['name']} for ${house_cost}"})
+                try:
+                    await sio.emit("sound", {"event": "property_purchased", "by": cur.name, "pos": pos, "hotel": True}, room=lobby_id)
+                except Exception:
+                    pass
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
         if t == "sell_hotel":
@@ -2068,7 +2127,7 @@ def _stocks_ensure(g: Game, owner: str) -> Dict[str, Any]:
             # holdings will store percents per investor (0..1). Keep total_shares only for backward-compat snapshot base.
             "total_shares": 0.0,
             "holdings": {},
-            "allow_investing": True,
+            "allow_investing": False,
             "enforce_min_buy": False,
             "min_buy": 0,
             "enforce_min_pool": False,
@@ -2097,7 +2156,7 @@ def _stocks_ensure(g: Game, owner: str) -> Dict[str, Any]:
             st["holdings"] = new_hold
     except Exception:
         pass
-    st.setdefault("allow_investing", True)
+    st.setdefault("allow_investing", False)
     st.setdefault("enforce_min_buy", False)
     st.setdefault("min_buy", 0)
     st.setdefault("enforce_min_pool", False)
