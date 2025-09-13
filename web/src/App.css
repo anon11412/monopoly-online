@@ -29,6 +29,14 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* Fluid base type, respects small phones */
+html { font-size: clamp(14px, 1.6vw, 16px); }
+@supports (height: 100dvh) {
+  .stage-fit { height: 100dvh; }
+}
+/* Respect safe area on notched devices */
+.stage-fit { padding-top: max(6px, env(safe-area-inset-top)); padding-bottom: max(6px, env(safe-area-inset-bottom)); }
+
 .btn { transition: transform 0.05s ease, filter 0.15s ease; }
 .btn:hover { filter: brightness(1.05); }
 .btn:active { transform: translateY(1px); }
@@ -51,14 +59,16 @@ body {
   grid-template-columns: 1fr;
   gap: 12px;
   align-items: start;
+  justify-items: center; /* center children (board/panel) when stacked */
+  justify-content: center; /* center grid itself when multi-column */
   overflow-x: clip; /* guard against accidental overflow */
 }
 
 /* Switch to two columns only when there's enough space for board + panel */
-  @media (min-width: 1100px) {
+@media (min-width: 1140px) {
   .game-view {
-    /* Left: fixed board width; Right: narrower panel (≈280px max) */
-    grid-template-columns: 626px minmax(250px, 280px);
+    /* Left: fixed board width; Right: narrower panel (≈240px min, 320px max) */
+    grid-template-columns: 626px minmax(240px, 320px);
     /* Center the two-column block within the viewport */
     justify-content: center;
   }
@@ -89,7 +99,7 @@ body {
   }
 }
 
-.board { background: transparent; padding: 0; border: none; height: auto; }
+.board { background: transparent; padding: 0 10px 0 20px; border: none; height: auto; }
 
 /* Responsive board sizing */
 .board .board-wrap {
@@ -263,7 +273,7 @@ body {
 /* Make the panel content adapt: two columns when there's room, one column when narrower */
 .actions-panel { display: grid; grid-template-columns: 1fr; gap: 8px; align-content: start; }
 .actions-panel > .ui-labelframe { min-height: 0; }
-.main-menu, .lobby-room { background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%); padding: 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 8px 24px rgba(0,0,0,0.25); color: #e6edf3; }
+.main-menu, .lobby-room { background: linear-gradient(180deg, #0f172a 0%, #0b1220 100%); padding: 16px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.06); box-shadow: 0 8px 24px rgba(0,0,0,0.25); color: #e6edf3; margin: 0 auto; }
 .main-menu h1 { margin: 0 0 10px; letter-spacing: 0.5px; font-weight: 800; }
 .main-menu .connect, .lobby-room .controls { display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .main-menu .lobbies { display: flex; flex-direction: column; gap: 10px; }
@@ -548,6 +558,8 @@ body {
     padding: 12px;
     margin: 8px 0;
   }
+  /* Collapse sections by default for compact view if supported by component */
+  .actions-panel .ui-labelframe { margin-bottom: 8px; }
   
   .action-panel h3 {
     font-size: 18px;
@@ -682,7 +694,7 @@ input, select, textarea {
   padding: 20px;
   border-radius: 12px;
   max-width: 90vw;
-  max-height: 90vh;
+  max-height: 90dvh;
   overflow-y: auto;
 }
 
@@ -691,8 +703,34 @@ input, select, textarea {
     padding: 16px;
     border-radius: 8px;
     max-width: 95vw;
-    max-height: 95vh;
+    max-height: 95dvh;
   }
+}
+
+/* Improve game-view behavior alongside stage scaling */
+.game-view {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  align-items: start;
+  overflow-x: clip;
+}
+
+@media (min-width: 1140px) {
+  .game-view {
+    grid-template-columns: 626px minmax(240px, 320px);
+    justify-content: center;
+  }
+}
+
+/* Ensure modals remain readable at small scales */
+.modal-card {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 12px;
+  max-width: min(92vw, 520px);
 }
 
 /* Accessibility improvements */
@@ -800,4 +838,99 @@ textarea:focus {
     max-height: 80vh;
     overflow-y: auto;
   }
+}
+
+/* ===== Global Stage Scaling ===== */
+.stage-fit {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: block;
+  padding: 6px 0; /* vertical padding only; horizontal centering via absolute scaler */
+  box-sizing: border-box;
+}
+
+.stage-scaler {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform-origin: top center;
+  will-change: transform;
+  display: inline-block;
+  z-index: 1; /* ensure above spacer */
+}
+
+.stage-content {
+  contain: layout;
+  display: inline-block; /* shrink-wrap content for accurate measurement */
+}
+
+.stage-spacer { height: 0; pointer-events: none; }
+
+/* Mobile bottom action bar (shown by GameBoard inline via style hook if desired) */
+@media (max-width: 768px) {
+  .mobile-bottom-bar {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    padding: max(8px, env(safe-area-inset-bottom)) 12px 12px;
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: 8px;
+    justify-content: space-around;
+    align-items: center;
+    z-index: 2500;
+  }
+  .mobile-bottom-bar .btn { flex: 1; min-height: 48px; }
+}
+
+/* Mobile chat bottom sheet */
+@media (max-width: 768px) {
+  .chat-sheet {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    height: min(80dvh, 520px);
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    box-shadow: 0 -6px 18px var(--shadow-color);
+    border-top-left-radius: 12px; border-top-right-radius: 12px;
+    display: flex; flex-direction: column;
+    z-index: 2600;
+  }
+  .chat-sheet .sheet-header { padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; }
+  .chat-sheet .sheet-body { flex: 1; overflow-y: auto; padding: 12px; }
+  .chat-sheet .sheet-input { padding: 8px 12px; border-top: 1px solid var(--border-color); background: var(--bg-secondary); }
+}
+
+/* Landscape tuning for chat sheet on small screens */
+@media (max-width: 768px) and (orientation: landscape) {
+  .chat-sheet { height: min(70dvh, 420px); }
+  .chat-sheet .sheet-header { padding: 8px 10px; }
+  .chat-sheet .sheet-body { padding: 10px; }
+  .chat-sheet .sheet-input { padding: 6px 10px; }
+}
+
+/* Collapsible transition utility */
+.collapsible {
+  overflow: hidden;
+  transition: max-height 220ms ease, opacity 180ms ease;
+}
+.collapsible.closed {
+  max-height: 0;
+  opacity: 0.0;
+  pointer-events: none;
+}
+.collapsible.open {
+  max-height: 480px; /* enough to reveal most panels; content can scroll internally */
+  opacity: 1;
+}
+
+/* Removed reserved padding for mobile bottom bar (bar removed) */
+
+/* Lighten heavy shadows on mobile for perf */
+@media (max-width: 768px) {
+  .main-menu, .lobby-room { box-shadow: 0 4px 12px var(--shadow-color); }
+  .board .board-overlay { box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
 }

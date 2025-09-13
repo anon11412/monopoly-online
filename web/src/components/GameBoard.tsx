@@ -44,6 +44,19 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   const [unreadIncoming, setUnreadIncoming] = useState(0);
   const [propertyAnimations, setPropertyAnimations] = useState<Record<number, string>>({});
   const [diceAnimation, setDiceAnimation] = useState('');
+  // Responsive: simple small-screen detector
+  const [isSmall, setIsSmall] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try { return window.matchMedia('(max-width: 768px)').matches; } catch { return false; }
+  });
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia('(max-width: 768px)');
+    const onChange = () => setIsSmall(mql.matches);
+    try { mql.addEventListener('change', onChange); } catch { mql.addListener(onChange); }
+    onChange();
+    return () => { try { mql.removeEventListener('change', onChange); } catch { mql.removeListener(onChange); } };
+  }, []);
   // (err placeholder removed) 
   // Chat
   const [chatOpen, setChatOpen] = useState(false);
@@ -52,6 +65,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   const [unreadMessages, setUnreadMessages] = useState(0);
   const chatMessagesRef = useRef<HTMLDivElement | null>(null);
   const chatInputRef = useRef<HTMLInputElement | null>(null);
+  const gameLogRef = useRef<HTMLDivElement | null>(null);
   const [chatError, setChatError] = useState<string>('');
   const pendingQueueRef = useRef<Array<{ message: string; localId: string; ts: number }>>([]);
   const hasJoinedRef = useRef<boolean>(false);
@@ -356,6 +370,13 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
       chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
     }
   }, [chatLog, chatOpen]);
+
+  // Auto-scroll game log
+  useEffect(() => {
+    if (gameLogRef.current) {
+      gameLogRef.current.scrollTop = gameLogRef.current.scrollHeight;
+    }
+  }, [snapshot?.log]);
 
   // Chat send helper with offline queue/pending placeholder
   const sendChat = () => {
@@ -683,7 +704,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             </div>
           </div>
           {/* Unified controls layer: contains trade controls and core action controls */}
-          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 6 }}>
+          <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 50 }}>
             {/* Players Overview — baseline-only */}
             <div style={{ position: 'absolute', left: 'calc(50% - 130px)', top: 'calc(50% - 235px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
                 <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, minWidth: 140, maxWidth: 200, color: 'var(--color-text)' }}>
@@ -753,11 +774,11 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 </div>
               </div>
             </div>
-            {/* Game Log — baseline-only */}
+            {/* Game Log — always anchored to board */}
             <div style={{ position: 'absolute', left: 'calc(50% + 90px)', top: 'calc(50% - 235px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
               <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, width: 275, height: 225, display: 'flex', flexDirection: 'column', color: 'var(--color-text)' }}>
                 <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Game Log</div>
-                <div style={{ fontSize: 10, marginTop: 4, flex: 1, overflowY: 'auto', lineHeight: 1.25 }}>
+                <div ref={gameLogRef} style={{ fontSize: 10, marginTop: 4, flex: 1, overflowY: 'auto', lineHeight: 1.25 }}>
                   {snapshot?.log && snapshot.log.length ? (
                     <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                       {snapshot.log.slice(-80).map((e: any, i: number) => (
@@ -840,6 +861,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               const currentTurnPlayer = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
               const canVoteKick = !finalMyTurn && currentTurnPlayer && snapshot?.players && snapshot.players.length > 2;
               
+              // Always anchor roll/buy/end row relative to board
               return (
                 <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 80px)', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
                   <button 
@@ -860,8 +882,8 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                     onClick={() => { 
                       playGameSound('property_purchased'); 
                       // Add property purchase animation
-                      if (snapshot?.players?.[curIdx]?.position !== undefined) {
-                        const pos = snapshot.players[curIdx].position;
+                      if (me?.position !== undefined) {
+                        const pos = me.position;
                         setPropertyAnimations(prev => ({ ...prev, [pos]: 'animate-property-purchase' }));
                         setTimeout(() => {
                           setPropertyAnimations(prev => {
@@ -948,8 +970,10 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 </div>
               );
             })()}
+            {/* Removed mobile bottom bar; unified anchored controls */}
             {(() => {
               // Trade / Advanced / Bankruptcy row — shifted down by ~10px and reduced size by ~10%
+              if (isSmall) return null;
               const cur = snapshot?.players?.[snapshot?.current_turn ?? -1];
               const myName = meName || cur?.name || '';
               const players = (snapshot?.players || []).map(p => p.name).filter(n => n !== myName);
@@ -979,7 +1003,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     };
     return (
       <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowPartnerPicker(null)}>
-        <div style={{ background: '#fff', borderRadius: 8, padding: 12, minWidth: 320 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ background: 'var(--color-surface)', borderRadius: 8, padding: 12, minWidth: 320, color: 'var(--color-text)' }} onClick={(e) => e.stopPropagation()}>
           <div style={{ fontWeight: 700, marginBottom: 8 }}>{showPartnerPicker === 'advanced' ? 'Choose partner for Advanced Trade' : 'Choose partner for Trade'}</div>
           <div style={{ display: 'grid', gap: 8 }}>
             {others.length === 0 ? <div style={{ opacity: 0.7 }}>No other players.</div> : others.map((n, i) => (
@@ -1012,7 +1036,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   ) : null}
   
       {/* Modern chat panel - positioned on the right side */}
-      {chatOpen && (
+      {!isSmall && chatOpen && (
         <div style={{ 
           position: 'fixed', 
           top: 0, 
@@ -1131,7 +1155,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             <div style={{ 
               padding: '16px 20px', 
               borderTop: '1px solid #e9ecef',
-              background: 'white'
+              background: 'var(--color-surface)'
             }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
                 <input 
@@ -1168,6 +1192,70 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 </button>
               </div>
             </div>
+        </div>
+      )}
+      {isSmall && chatOpen && (
+        <div className="chat-sheet">
+          <div className="sheet-header">
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>💬 Game Chat</h3>
+            <button onClick={handleChatToggle} className="btn btn-ghost" style={{ padding: '6px 10px' }}>✕</button>
+          </div>
+          <div className="sheet-body" ref={chatMessagesRef}>
+            {chatError ? (
+              <div style={{ background: '#fff3cd', color: '#856404', border: '1px solid #ffeeba', padding: '8px 10px', borderRadius: 6, fontSize: 12 }}>
+                {chatError}
+                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 12, marginLeft: 8 }} onClick={() => { setChatError(''); try { s.emit('lobby_join', { id: lobbyId, lobby_id: lobbyId }); } catch {} }}>Retry</button>
+              </div>
+            ) : null}
+            {chatLog.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#666', fontStyle: 'italic', marginTop: 20 }}>No messages yet. Start the conversation!</div>
+            ) : chatLog.map((c, i) => {
+              const myName = (getRemembered().displayName || '').trim();
+              const isMe = c.from === myName;
+              const alt = i % 2 === 0;
+              const baseOtherLightA = '#e9ecef';
+              const baseOtherLightB = '#dde3e8';
+              const baseOtherDarkA = '#2a3540';
+              const baseOtherDarkB = '#323f4a';
+              const dark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark';
+              const otherBg = dark ? (alt ? baseOtherDarkA : baseOtherDarkB) : (alt ? baseOtherLightA : baseOtherLightB);
+              const bubbleStyle: any = {
+                maxWidth: '85%',
+                padding: '8px 12px',
+                borderRadius: '16px',
+                background: isMe ? 'var(--color-accent)' : otherBg,
+                color: isMe ? 'var(--color-accent-contrast)' : (dark ? 'var(--color-text)' : '#333'),
+                fontSize: 14,
+                wordBreak: 'break-word',
+              };
+              return (
+                <div key={i} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', marginBottom: 6 }}>
+                  <div style={bubbleStyle}>
+                    {!isMe && (
+                      <div style={{ fontSize: 11, opacity: 0.8, marginBottom: 2, fontWeight: 600 }}>{c.from}</div>
+                    )}
+                    <div>
+                      {c.message}
+                      {(c as any).pending ? <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 6 }}>(sending…)</span> : null}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div className="sheet-input">
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <input
+                ref={chatInputRef}
+                placeholder="Type a message…"
+                value={chatMsg}
+                onChange={(e) => setChatMsg(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+                style={{ flex: 1, padding: '12px', border: '1px solid var(--border-color)', borderRadius: 12, fontSize: 16 }}
+              />
+              <button className="btn btn-primary" onClick={() => sendChat()}>Send</button>
+            </div>
+          </div>
         </div>
       )}
   {openPropPos != null ? (() => {
@@ -1311,7 +1399,8 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   {negativeBalanceError ? (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500 }} onClick={() => setNegativeBalanceError(null)}>
           <div style={{ 
-            background: 'white', 
+            background: 'var(--color-surface)', 
+            color: 'var(--color-text)',
             padding: '24px', 
             borderRadius: '8px', 
             maxWidth: '500px', 

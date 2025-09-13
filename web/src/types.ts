@@ -29,6 +29,7 @@ export type GamePlayer = {
   in_jail?: boolean;
   jail_cards?: number;
   color?: string;
+  auto_mortgage?: boolean;
 };
 
 export type TradeSide = {

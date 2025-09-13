@@ -6,7 +6,7 @@ services:
     rootDir: .
     dockerCommand: ""
     autoDeploy: true
-    healthCheckPath: /board_meta
+  healthCheckPath: /healthz
     envVars:
       - key: ALLOWED_ORIGINS
         value: "*"

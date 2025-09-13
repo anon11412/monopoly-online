@@ -1,0 +1,30 @@
+# VCS
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+.pytest_cache/
+.venv/
+.env
+
+# Node / Web
+node_modules/
+web/node_modules/
+web/dist/
+web/.parcel-cache/
+web/.vite/
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Docker
+**/.dockerignore
+**/Dockerfile*

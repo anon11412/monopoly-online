@@ -78,6 +78,28 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const [collapseAuto, setCollapseAuto] = useState(false);
   const [collapseRecurring, setCollapseRecurring] = useState(false);
   const [collapseRentals, setCollapseRentals] = useState(false);
+  // Mobile-first: collapse heavy sections by default on small screens
+  const [isSmall, setIsSmall] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    try { return window.matchMedia('(max-width: 768px)').matches; } catch { return false; }
+  });
+  const autoCollapsedRef = useRef(false);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia('(max-width: 768px)');
+    const onChange = () => setIsSmall(mql.matches);
+    try { mql.addEventListener('change', onChange); } catch { mql.addListener(onChange); }
+    onChange();
+    return () => { try { mql.removeEventListener('change', onChange); } catch { mql.removeListener(onChange); } };
+  }, []);
+  useEffect(() => {
+    if (isSmall && !autoCollapsedRef.current) {
+      setCollapseAuto(true);
+      setCollapseRecurring(true);
+      setCollapseRentals(true);
+      autoCollapsedRef.current = true;
+    }
+  }, [isSmall]);
   // Inline expanded pending trades
   const [openInline, setOpenInline] = useState<Set<number | string>>(new Set());
 
@@ -215,6 +237,19 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   useEffect(() => { localStorage.setItem('auto.costValue', String(Number.isFinite(costValue) ? costValue : 0)); }, [costValue]);
   useEffect(() => { localStorage.setItem('auto.spread', autoSpread ? '1' : '0'); }, [autoSpread]);
 
+  // Sync client auto-mortgage state with server player state (one-way: server -> client)
+  useEffect(() => {
+    if (myPlayer?.auto_mortgage !== undefined && myPlayer.auto_mortgage !== autoMortgage) {
+      setAutoMortgage(myPlayer.auto_mortgage);
+    }
+  }, [myPlayer?.auto_mortgage]);
+
+  // Handle auto-mortgage toggle and sync with server
+  const handleAutoMortgageChange = (checked: boolean) => {
+    setAutoMortgage(checked);
+    act('toggle_auto_mortgage');
+  };
+
   // Basic automation behaviors
   useEffect(() => {
     if (!myTurn || !autoRoll) return;
@@ -248,27 +283,51 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
   // Helper to find next house/hotel action candidate based on settings
   const nextHouseActionCandidate = useMemo(() => {
-    if (!autoHouses || !myTurn) return null as null | { type: 'buy_house' | 'buy_hotel', pos: number };
+    if (!autoHouses || !myTurn) return null as null | { type: 'buy_house' | 'buy_hotel' | 'unmortgage', pos: number };
     // Build groups -> property positions I own (and group completeness)
     const allTiles: BoardTile[] = Object.values(tiles) as BoardTile[];
-    const byGroup: Record<string, { positions: number[], allOwned: boolean, anyMortgaged: boolean, cost: number }> = {};
+    const byGroup: Record<string, { positions: number[], allOwned: boolean, anyMortgaged: boolean, cost: number, mortgagedPositions: number[] }> = {};
     for (const t of allTiles) {
       if (!t || t.type !== 'property' || !t.group) continue;
       const st: any = (snapshot.properties as any)?.[t.pos] || {};
       const owner = st.owner;
       const mine = equalNames(owner || '', myName);
-      if (!byGroup[t.group]) byGroup[t.group] = { positions: [], allOwned: true, anyMortgaged: false, cost: houseCostForGroup(t.group) };
+      if (!byGroup[t.group]) byGroup[t.group] = { positions: [], allOwned: true, anyMortgaged: false, cost: houseCostForGroup(t.group), mortgagedPositions: [] };
       byGroup[t.group].positions.push(t.pos);
       // Track ownership and mortgage status
       if (!mine) byGroup[t.group].allOwned = false;
-      if (st.mortgaged) byGroup[t.group].anyMortgaged = true;
+      if (st.mortgaged) {
+        byGroup[t.group].anyMortgaged = true;
+        byGroup[t.group].mortgagedPositions.push(t.pos);
+      }
     }
-    // Evaluate groups for next build
+    
+    // First priority: Check if we need to unmortgage properties in complete color sets
+    for (const [group, info] of Object.entries(byGroup)) {
+      if (!info.allOwned) continue;
+      if (info.anyMortgaged && info.mortgagedPositions.length > 0) {
+        // We own the complete set but some properties are mortgaged
+        // Try to unmortgage the first one we can afford
+        const budget = (myPlayer?.cash ?? 0);
+        const keeps = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
+        
+        for (const pos of info.mortgagedPositions) {
+          const tile = tiles[pos];
+          const unmortgageCost = Math.floor((tile?.price || 0) * 0.55); // 110% of mortgage value
+          if ((budget - unmortgageCost) >= keeps) {
+            console.log(`Auto-unmortgaging ${tile?.name} in ${group} for $${unmortgageCost} to enable house building`);
+            return { type: 'unmortgage', pos: pos };
+          }
+        }
+      }
+    }
+    
+    // Second priority: Build houses on complete unmortgaged color sets
     const budget = (myPlayer?.cash ?? 0);
     const keeps = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
-  for (const [_group, info] of Object.entries(byGroup)) {
+    for (const [_group, info] of Object.entries(byGroup)) {
       if (!info.allOwned) continue;
-      if (info.anyMortgaged) continue; // cannot build if any mortgaged in set
+      if (info.anyMortgaged) continue; // Skip if any are still mortgaged
       const hc = info.cost || 0;
       if (hc <= 0) continue;
       // Apply cost rule against house cost
@@ -315,39 +374,153 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       const pos = cand.pos;
       const tile = tiles[pos];
       const group = (tile as any)?.group as string | undefined;
-      const cost = group ? houseCostForGroup(group) : 0;
+      
+      let cost = 0;
+      if (cand.type === 'unmortgage') {
+        // Unmortgage cost is 110% of mortgage value
+        cost = Math.floor((tile?.price || 0) * 0.55);
+      } else {
+        // House/hotel cost
+        cost = group ? houseCostForGroup(group) : 0;
+      }
+      
       const cash = myPlayer?.cash ?? 0;
       const keep = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
       if (cost > 0 && (cash - cost) < keep) return; // do not execute if it violates Keep $
     } catch {}
     act(cand.type, { pos: cand.pos });
   }, [myTurn, autoHouses, nextHouseActionCandidate, snapshot.last_action]);
+  // Auto-mortgage retry state
+  const autoMortgageRetryRef = useRef<number>(0);
+  const lastCashRef = useRef<number>(0);
+  const autoEndTimerRef = useRef<number | null>(null);
+
   useEffect(() => {
+    const currentCash = myPlayer?.cash ?? 0;
+    lastCashRef.current = currentCash;
+    
+    // Reset retry counter if cash becomes positive
+    if (currentCash >= 0) {
+      autoMortgageRetryRef.current = 0;
+    }
+  }, [myPlayer?.cash]);
+
+  useEffect(() => {
+    // Check for negative cash regardless of turn (important for lag situations)
+    const currentCash = myPlayer?.cash ?? 0;
+    if (currentCash < 0 && autoMortgage && autoMortgageRetryRef.current < 3) { // Reduced from 5 to 3 retries
+      const timeoutDelay = 500 + (autoMortgageRetryRef.current * 500); // Increased delays: 500ms, 1000ms, 1500ms
+      const timer = setTimeout(() => {
+        autoMortgageRetryRef.current++;
+        console.log(`Client-side auto-mortgage retry ${autoMortgageRetryRef.current}: debt $${Math.abs(currentCash)}`);
+        tryAutoMortgage();
+      }, timeoutDelay);
+      return () => clearTimeout(timer);
+    }
+  }, [myPlayer?.cash, autoMortgage, snapshot.last_action]);
+
+  useEffect(() => {
+    // Clear any existing auto-end timer
+    if (autoEndTimerRef.current) {
+      clearTimeout(autoEndTimerRef.current);
+      autoEndTimerRef.current = null;
+    }
+    
     if (!myTurn) return;
     // If auto-houses has an action pending, let it run first
     if (autoHouses && nextHouseActionCandidate) return;
-    // If negative cash, try auto-mortgage first if enabled
-    if ((myPlayer?.cash ?? 0) < 0 && autoMortgage) {
-      tryAutoMortgage();
+    
+    // Don't auto-end turn if player has negative cash (let auto-mortgage work)
+    const currentCash = myPlayer?.cash ?? 0;
+    if (currentCash < 0 && autoMortgage) {
+      console.log('Skipping auto-end turn: negative cash, waiting for auto-mortgage');
       return;
     }
-    if (autoEnd && (myTurn && rolledThisTurn && (snapshot.rolls_left ?? 0) === 0)) {
-      // Neutral end-turn notification sound
-      playGameSound('notification');
-      act('end_turn');
+    
+    if (autoEnd && myTurn && rolledThisTurn && (snapshot.rolls_left ?? 0) === 0) {
+      // Add a small delay to ensure server state has fully synchronized
+      autoEndTimerRef.current = setTimeout(() => {
+        // Double-check conditions after delay to ensure sync
+        const finalCash = myPlayer?.cash ?? 0;
+        if (myTurn && rolledThisTurn && (snapshot.rolls_left ?? 0) === 0 && (finalCash >= 0 || !autoMortgage)) {
+          console.log('Auto-ending turn after sync delay');
+          playGameSound('notification');
+          act('end_turn');
+        }
+        autoEndTimerRef.current = null;
+      }, 300); // 300ms delay for sync
+      
+      return () => {
+        if (autoEndTimerRef.current) {
+          clearTimeout(autoEndTimerRef.current);
+          autoEndTimerRef.current = null;
+        }
+      };
     }
-  }, [myTurn, autoEnd, rolledThisTurn, snapshot.rolls_left, autoHouses, nextHouseActionCandidate]);
+  }, [myTurn, autoEnd, rolledThisTurn, snapshot.rolls_left, autoHouses, nextHouseActionCandidate, snapshot.last_action, myPlayer?.cash, autoMortgage]);
 
   function tryAutoMortgage() {
-    // Mortgage owned properties without buildings, lowest price first
-    const owned = Object.entries(snapshot.properties || {})
-      .map(([pos, st]: any) => ({ pos: Number(pos), st }))
-      .filter(x => equalNames(x.st.owner || '', myName) && !x.st.mortgaged && (x.st.houses || 0) === 0 && !x.st.hotel);
-    if (owned.length === 0) return;
-    // sort by tile price ascending
-    const arr = owned.sort((a, b) => (tiles[a.pos]?.price || 0) - (tiles[b.pos]?.price || 0));
-    // fire one mortgage per tick
-    act('mortgage', { pos: arr[0].pos });
+    const currentCash = myPlayer?.cash ?? 0;
+    const deficit = Math.abs(currentCash);
+    if (currentCash >= 0) return; // No debt
+
+    console.log(`Client auto-mortgage attempt ${autoMortgageRetryRef.current + 1}: need $${deficit}`);
+
+    // First try to sell houses (highest value first)
+    const ownedWithHouses = Object.entries(snapshot.properties || {})
+      .map(([pos, st]: any) => ({ pos: Number(pos), st, tile: tiles[Number(pos)] }))
+      .filter(x => equalNames(x.st.owner || '', myName) && (x.st.houses || 0) > 0 && !x.st.hotel)
+      .sort((a, b) => {
+        const costA = a.tile?.group ? houseCostForGroup(a.tile.group) : 0;
+        const costB = b.tile?.group ? houseCostForGroup(b.tile.group) : 0;
+        return costB - costA;
+      });
+    
+    if (ownedWithHouses.length > 0) {
+      const prop = ownedWithHouses[0];
+      const houseCost = prop.tile?.group ? houseCostForGroup(prop.tile.group) : 0;
+      console.log(`Client auto-selling house on ${prop.tile?.name} for $${houseCost / 2}`);
+      act('sell_house', { pos: prop.pos });
+      return;
+    }
+
+    // Then try to mortgage properties (highest value first, but must have no houses)
+    const mortgageableProps = Object.entries(snapshot.properties || {})
+      .map(([pos, st]: any) => ({ pos: Number(pos), st, tile: tiles[Number(pos)] }))
+      .filter(x => {
+        if (!equalNames(x.st.owner || '', myName)) return false;
+        if (x.st.mortgaged) return false;
+        if ((x.st.houses || 0) > 0 || x.st.hotel) return false;
+        
+        // Additional check: ensure the entire color group has no houses
+        const group = x.tile?.group;
+        if (group) {
+          const groupProps = Object.entries(snapshot.properties || {})
+            .map(([p, s]: any) => ({ pos: Number(p), st: s, tile: tiles[Number(p)] }))
+            .filter(gp => gp.tile?.group === group);
+          
+          const hasHousesInGroup = groupProps.some(gp => (gp.st.houses || 0) > 0 || gp.st.hotel);
+          if (hasHousesInGroup) {
+            console.log(`Skipping ${x.tile?.name} - color group ${group} has houses`);
+            return false;
+          }
+        }
+        return true;
+      })
+      .sort((a, b) => (b.tile?.price || 0) - (a.tile?.price || 0));
+    
+    if (mortgageableProps.length > 0) {
+      const prop = mortgageableProps[0];
+      const mortgageValue = Math.floor((prop.tile?.price || 0) / 2);
+      console.log(`Client auto-mortgaging ${prop.tile?.name} for $${mortgageValue}`);
+      act('mortgage', { pos: prop.pos });
+      return;
+    }
+
+    console.log('Client auto-mortgage: No houses to sell or properties to mortgage');
+    console.log('Properties owned:', Object.entries(snapshot.properties || {})
+      .filter(([_, st]: any) => equalNames(st.owner || '', myName))
+      .map(([pos, st]: any) => `${tiles[Number(pos)]?.name}: houses=${st.houses || 0}, mortgaged=${st.mortgaged}`));
   }
 
   // lastDice removed from UI
@@ -556,7 +729,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
       {/* Compact Pending Trades (panel height reduced, inline metadata, overflow guard) */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="ui-title ui-h3" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             📬 Pending
             {allTrades.length > 0 && <span className="badge badge-info" style={{ fontSize: 10 }}>{allTrades.length}</span>}
@@ -611,17 +784,16 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
       {/* Automation toggles — trimmed vertical length */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="ui-title ui-h3" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>⚙️ Auto Actions {autoRoll || autoBuy || autoEnd || autoHouses || autoMortgage ? <span style={{ fontSize: 10, padding: '2px 6px', background: '#3498db', color: '#fff', borderRadius: 4 }}>ON</span> : null}</div>
-          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseAuto(c => !c)}>{collapseAuto ? '➕' : '➖'}</button>
+    <button className="btn btn-ghost" style={{ padding: '2px 8px' }} aria-expanded={!collapseAuto} aria-controls="auto-section" onClick={() => setCollapseAuto(c => !c)}>{collapseAuto ? '➕' : '➖'}</button>
         </div>
-        {!collapseAuto && (
-          <div className="animate-fade-in" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 6, maxHeight: 150, overflowY: 'auto', paddingRight: 2 }}>
+  <div id="auto-section" aria-hidden={collapseAuto} className={`animate-fade-in collapsible ${collapseAuto ? 'closed' : 'open'}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 6, overflowY: 'auto', paddingRight: 2 }}>
             <label style={{ fontSize: 11 }}><input type="checkbox" checked={autoRoll} onChange={(e) => setAutoRoll(e.target.checked)} /> Roll</label>
             <label style={{ fontSize: 11 }}><input type="checkbox" checked={autoBuy} onChange={(e) => setAutoBuy(e.target.checked)} /> Buy Props</label>
             <label style={{ fontSize: 11 }}><input type="checkbox" checked={autoEnd} onChange={(e) => setAutoEnd(e.target.checked)} /> End Turn</label>
             <label style={{ fontSize: 11 }} title="Buy houses/hotels automatically"><input type="checkbox" checked={autoHouses} onChange={(e) => setAutoHouses(e.target.checked)} /> Houses/Hotels</label>
-            <label style={{ fontSize: 11 }} title="Mortgage when cash below 0"><input type="checkbox" checked={autoMortgage} onChange={(e) => setAutoMortgage(e.target.checked)} /> Mortgage Neg.</label>
+            <label style={{ fontSize: 11 }} title="Auto-mortgage properties when needed for purchases"><input type="checkbox" checked={autoMortgage} onChange={(e) => handleAutoMortgageChange(e.target.checked)} /> Auto Mortgage</label>
             <label style={{ fontSize: 11 }}>Keep $<input type="number" min={0} value={minKeep} onChange={(e) => setMinKeep(parseInt(e.target.value || '0', 10))} style={{ width: 60, marginLeft: 2 }} /></label>
             <label style={{ fontSize: 11 }}>Cost <select value={costRule} onChange={(e) => setCostRule(e.target.value as any)} style={{ marginLeft: 2 }}>
               <option value="any">any</option>
@@ -629,8 +801,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
               <option value="below">≤</option>
             </select> <input type="number" min={0} value={costValue} onChange={(e) => setCostValue(parseInt(e.target.value || '0', 10))} style={{ width: 60 }} /></label>
             <label style={{ fontSize: 11 }} title="Evenly distribute houses"><input type="checkbox" checked={autoSpread} onChange={(e) => setAutoSpread(e.target.checked)} /> Spread Houses</label>
-          </div>
-        )}
+        </div>
       </div>
 
             {openTradeDetailId ? (() => {
@@ -729,11 +900,11 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
       {/* Recurring obligations summary */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="ui-title ui-h3">📆 Recurring Payments</div>
-          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseRecurring(c => !c)}>{collapseRecurring ? '➕' : '➖'}</button>
+    <button className="btn btn-ghost" style={{ padding: '2px 8px' }} aria-expanded={!collapseRecurring} aria-controls="recurring-section" onClick={() => setCollapseRecurring(c => !c)}>{collapseRecurring ? '➕' : '➖'}</button>
         </div>
-        {!collapseRecurring && <div className="ui-sm animate-fade-in" style={{ display: 'grid', gap: 4 }}>
+  <div id="recurring-section" aria-hidden={collapseRecurring} className={`ui-sm animate-fade-in collapsible ${collapseRecurring ? 'closed' : 'open'}`} style={{ display: 'grid', gap: 4 }}>
       {((snapshot as any).recurring || []).length === 0 ? (
             <div style={{ opacity: 0.7 }}>None</div>
           ) : ((snapshot as any).recurring || []).map((r: any, idx: number) => (
@@ -741,16 +912,16 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
         {normalizeName(r.from)} → {normalizeName(r.to)}: ${r.amount} ({r.turns_left} turns left)
             </div>
           ))}
-        </div>}
+        </div>
       </div>
 
       {/* Property Rental Agreements */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="ui-title ui-h3">🏠 Property Rentals</div>
-          <button className="btn btn-ghost" style={{ padding: '2px 8px' }} onClick={() => setCollapseRentals(c => !c)}>{collapseRentals ? '➕' : '➖'}</button>
+    <button className="btn btn-ghost" style={{ padding: '2px 8px' }} aria-expanded={!collapseRentals} aria-controls="rentals-section" onClick={() => setCollapseRentals(c => !c)}>{collapseRentals ? '➕' : '➖'}</button>
         </div>
-        {!collapseRentals && <div className="ui-sm animate-fade-in" style={{ display: 'grid', gap: 4 }}>
+  <div id="rentals-section" aria-hidden={collapseRentals} className={`ui-sm animate-fade-in collapsible ${collapseRentals ? 'closed' : 'open'}`} style={{ display: 'grid', gap: 4 }}>
           {((snapshot as any).property_rentals || []).length === 0 ? (
             <div style={{ opacity: 0.7 }}>None</div>
           ) : ((snapshot as any).property_rentals || []).map((rental: any, idx: number) => {
@@ -761,36 +932,19 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
             
             const totalReceived = rental.total_received || 0;
             const lastPayment = rental.last_payment || 0;
-            const lastPaymentTurn = rental.last_payment_turn || 0;
-            
             return (
               <div key={idx} style={{ 
-                padding: '8px', 
-                border: '1px solid var(--color-border)', 
-                borderRadius: '4px',
-                backgroundColor: equalNames(rental.renter || '', myName) ? 'var(--color-success)' : equalNames(rental.owner || '', myName) ? 'var(--color-warning)' : 'var(--color-surface-alt)'
+                fontSize: '1em',
+                fontWeight: 'bold',
+                color: 'var(--color-text)'
               }}>
-                <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>
-                  {normalizeName(rental.renter)} ←→ {normalizeName(rental.owner)}
-                </div>
-                <div style={{ fontSize: '0.9em', marginBottom: '2px' }}>
-                  <strong>{rental.percentage}%</strong> rent from: {propertyNames}
-                </div>
-                <div style={{ fontSize: '0.8em', marginBottom: '2px' }}>
-                  <strong>Total received:</strong> ${totalReceived}
-                  {lastPayment > 0 && (
-                    <span style={{ marginLeft: '8px', opacity: 0.8 }}>
-                      (last: ${lastPayment} on turn {lastPaymentTurn})
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: '0.8em', opacity: 0.8 }}>
-                  Initial payment: ${rental.cash_paid} • {rental.turns_left} turns left
+                <div>
+                  {normalizeName(rental.renter)} → {normalizeName(rental.owner)}: {rental.percentage}% rent from {propertyNames} (${totalReceived} received, {rental.turns_left} turns left)
                 </div>
               </div>
             );
           })}
-        </div>}
+        </div>
       </div>
 
       {/* Stocks (per-player) */}

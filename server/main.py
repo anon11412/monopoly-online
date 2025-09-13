@@ -28,6 +28,7 @@ class Player:
     doubles_count: int = 0  # consecutive doubles in this turn
     jail_cards: int = 0  # Get Out of Jail Free cards held
     color: Optional[str] = None
+    auto_mortgage: bool = False  # automatically mortgage properties when needed for purchases
 
 
 @dataclass
@@ -255,6 +256,196 @@ def _mortgage_value(pos: int) -> int:
     return price // 2
 
 
+def _auto_mortgage_for_cash(game: Game, player: Player, needed_amount: int) -> int:
+    """
+    Auto-mortgage player's properties to raise cash for a purchase or debt payment.
+    Returns the amount of cash raised through mortgaging.
+    Mortgages properties without buildings, including color sets if no buildings exist.
+    """
+    if not player.auto_mortgage:
+        return 0
+    
+    cash_raised = 0
+    # Get all properties owned by this player that can be mortgaged
+    owned_properties = []
+    for pos, prop_state in game.properties.items():
+        if prop_state.owner == player.name and not prop_state.mortgaged:
+            tile = monopoly_tiles()[pos]
+            group = tile.get("group")
+            
+            # Can mortgage if this property has no buildings AND no buildings in the group
+            can_mortgage = prop_state.houses == 0 and not prop_state.hotel
+            if can_mortgage and group:
+                # Check if any property in the group has buildings
+                for p in _group_positions(group):
+                    ps = game.properties.get(p) or PropertyState(pos=p)
+                    if ps.houses > 0 or ps.hotel:
+                        can_mortgage = False
+                        break
+            
+            if can_mortgage:
+                mortgage_value = _mortgage_value(pos)
+                owned_properties.append((pos, mortgage_value, tile.get("name", f"Property {pos}")))
+    
+    # Sort by mortgage value (lowest first) to mortgage least valuable properties first
+    owned_properties.sort(key=lambda x: x[1])
+    
+    # Mortgage properties until we have enough cash or run out of properties
+    for pos, mortgage_value, prop_name in owned_properties:
+        if player.cash + cash_raised >= needed_amount:
+            break
+            
+        # Mortgage this property
+        prop_state = game.properties[pos]
+        prop_state.mortgaged = True
+        player.cash += mortgage_value
+        cash_raised += mortgage_value
+        
+        # Add to game log
+        game.log.append({
+            "type": "auto_mortgage", 
+            "text": f"{player.name} auto-mortgaged {prop_name} for ${mortgage_value}"
+        })
+    
+    return cash_raised
+
+
+def _auto_sell_houses_for_cash(game: Game, player: Player, needed_amount: int) -> int:
+    """
+    Auto-sell houses/hotels to raise cash for debt payments.
+    Sells buildings evenly across color groups to maintain property development balance.
+    Returns the amount of cash raised through selling buildings.
+    """
+    if not player.auto_mortgage:
+        return 0
+    
+    cash_raised = 0
+    
+    # Continue selling buildings until we have enough cash or no more buildings
+    while player.cash + cash_raised < needed_amount:
+        # Get all properties with buildings, grouped by color group
+        groups_with_buildings = {}
+        for pos, prop_state in game.properties.items():
+            if prop_state.owner == player.name and (prop_state.houses > 0 or prop_state.hotel):
+                tile = monopoly_tiles()[pos]
+                group = tile.get("group", "unknown")
+                if group not in groups_with_buildings:
+                    groups_with_buildings[group] = []
+                groups_with_buildings[group].append((pos, prop_state, tile))
+        
+        if not groups_with_buildings:
+            break  # No more buildings to sell
+        
+        # For each color group, find the property with the most buildings and sell one
+        sold_something = False
+        for group, properties in groups_with_buildings.items():
+            # Sort properties in this group by building count (hotels count as 5, houses as actual count)
+            properties.sort(key=lambda x: (5 if x[1].hotel else x[1].houses), reverse=True)
+            
+            # Sell one building from the property with the most buildings in this group
+            pos, prop_state, tile = properties[0]
+            house_cost = HOUSE_COST_BY_GROUP.get(group, 50)
+            
+            if prop_state.hotel:
+                # Sell hotel, convert to 4 houses
+                sell_value = house_cost * 5 // 2
+                prop_state.hotel = False
+                prop_state.houses = 4
+                building_type = "hotel"
+            elif prop_state.houses > 0:
+                # Sell one house
+                sell_value = house_cost // 2
+                prop_state.houses -= 1
+                building_type = "house"
+            else:
+                continue  # No buildings on this property
+            
+            player.cash += sell_value
+            cash_raised += sell_value
+            sold_something = True
+            
+            # Add to game log
+            game.log.append({
+                "type": "auto_sell_building", 
+                "text": f"{player.name} auto-sold {building_type} on {tile.get('name', f'Property {pos}')} for ${sell_value}"
+            })
+            
+            # Check if we have enough cash now
+            if player.cash + cash_raised >= needed_amount:
+                break
+        
+        if not sold_something:
+            break  # No buildings were sold this round, avoid infinite loop
+    
+    return cash_raised
+
+
+def _auto_unmortgage_for_houses(game: Game, player: Player, group: str) -> int:
+    """
+    Auto-unmortgage properties in a color group to allow house building.
+    Returns the amount of cash spent on unmortgaging.
+    """
+    if not player.auto_mortgage or not group:
+        return 0
+    
+    cash_spent = 0
+    group_positions = _group_positions(group)
+    
+    for pos in group_positions:
+        prop_state = game.properties.get(pos) or PropertyState(pos=pos)
+        if prop_state.owner == player.name and prop_state.mortgaged:
+            principal = _mortgage_value(pos)
+            payoff = principal + math.ceil(principal * 0.1)
+            
+            if player.cash >= payoff:
+                player.cash -= payoff
+                prop_state.mortgaged = False
+                game.properties[pos] = prop_state
+                cash_spent += payoff
+                
+                tile = monopoly_tiles()[pos]
+                game.log.append({
+                    "type": "auto_unmortgage",
+                    "text": f"{player.name} auto-unmortgaged {tile.get('name', f'Property {pos}')} for ${payoff}"
+                })
+    
+    return cash_spent
+
+
+def _handle_negative_cash(game: Game, player: Player) -> bool:
+    """
+    Handle negative cash by automatically mortgaging properties first, then selling buildings if still negative.
+    Returns True if the debt was resolved, False if bankruptcy is required.
+    """
+    if not player.auto_mortgage or player.cash >= 0:
+        return True
+    
+    original_debt = -player.cash
+    
+    # First, try to mortgage properties
+    mortgage_cash_raised = _auto_mortgage_for_cash(game, player, -player.cash)
+    
+    # If still negative after mortgaging, sell houses evenly
+    houses_cash_raised = 0
+    if player.cash < 0:
+        houses_cash_raised = _auto_sell_houses_for_cash(game, player, -player.cash)
+    
+    total_raised = houses_cash_raised + mortgage_cash_raised
+    if total_raised > 0:
+        actions = []
+        if mortgage_cash_raised > 0:
+            actions.append(f"mortgaged: ${mortgage_cash_raised}")
+        if houses_cash_raised > 0:
+            actions.append(f"sold buildings: ${houses_cash_raised}")
+        
+        game.log.append({
+            "type": "auto_debt_payment",
+            "text": f"{player.name} auto-resolved ${original_debt} debt ({', '.join(actions)})"
+        })
+    
+    return player.cash >= 0
+
+
 def build_board_meta() -> List[Dict[str, Any]]:
     tiles = []
     for t in monopoly_tiles():
@@ -294,6 +485,10 @@ def pos_to_xy(pos: int) -> tuple[int, int]:
 @app.get("/board_meta")
 async def board_meta():
     return JSONResponse({"tiles": build_board_meta()})
+
+@app.get("/healthz")
+async def healthz():
+    return JSONResponse({"ok": True})
 
 @app.get("/trade/{lobby_id}/{trade_id}")
 async def get_trade(lobby_id: str, trade_id: str):
@@ -891,7 +1086,7 @@ async def game_action(sid, data):
 
     # Define which actions must be performed by the current-turn player
     turn_bound = {
-        "roll_dice", "buy_property", "end_turn", "bankrupt", "use_jail_card",
+        "roll_dice", "buy_property", "end_turn", "use_jail_card",
         "mortgage", "unmortgage", "buy_house", "sell_house", "buy_hotel", "sell_hotel",
     }
     
@@ -905,6 +1100,22 @@ async def game_action(sid, data):
         g.last_action = {"type": "not_your_turn", "by": actor, "expected": cur.name, "action": t}
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
         return {"ok": False, "error": f"Not your turn. Expected: {cur.name}, Got: {actor}"}
+
+    # Toggle auto-mortgage setting (available to any player at any time)
+    if t == "toggle_auto_mortgage":
+        # Find the player by actor name
+        player = None
+        for p in g.players:
+            if p.name == actor:
+                player = p
+                break
+        
+        if player:
+            player.auto_mortgage = not player.auto_mortgage
+            g.last_action = {"type": "auto_mortgage_toggled", "by": actor, "enabled": player.auto_mortgage}
+            g.log.append({"type": "auto_mortgage", "text": f"{actor} {'enabled' if player.auto_mortgage else 'disabled'} auto-mortgage"})
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+        return {"ok": True}
 
     if t == "roll_dice":
         # Gate rolls by remaining moves this turn
@@ -961,6 +1172,8 @@ async def game_action(sid, data):
                     return
                 # On 3rd attempt, pay $50 and leave
                 cur.cash -= 50
+                if cur.cash < 0:
+                    _handle_negative_cash(g, cur)
                 g.log.append({"type": "jail", "text": f"{cur.name} paid $50 to leave jail on the 3rd attempt"})
                 cur.in_jail = False
                 cur.jail_turns = 0
@@ -1091,7 +1304,44 @@ async def game_action(sid, data):
         buyable = tile["type"] in {"property", "railroad", "utility"}
         price = int(tile.get("price") or 0)
         st = g.properties.get(p) or PropertyState(pos=p)
-        if buyable and st.owner is None and price > 0 and cur.cash >= price:
+        
+        # Check basic conditions first
+        if not buyable:
+            reason = "not_buyable"
+        elif st.owner is not None:
+            reason = "owned"
+        elif price <= 0:
+            reason = "no_price"
+        elif cur.cash < price:
+            # Try auto-sell houses first, then auto-mortgage if enabled and player doesn't have enough cash
+            houses_cash_raised = _auto_sell_houses_for_cash(g, cur, price)
+            mortgage_cash_raised = _auto_mortgage_for_cash(g, cur, price)
+            total_cash_raised = houses_cash_raised + mortgage_cash_raised
+            
+            if cur.cash >= price:
+                # Success! Purchase the property
+                st.owner = cur.name
+                g.properties[p] = st
+                cur.cash -= price
+                auto_actions = []
+                if houses_cash_raised > 0:
+                    auto_actions.append(f"auto-sold buildings for ${houses_cash_raised}")
+                if mortgage_cash_raised > 0:
+                    auto_actions.append(f"auto-mortgaged for ${mortgage_cash_raised}")
+                auto_text = f" ({', '.join(auto_actions)})" if auto_actions else ""
+                
+                g.last_action = {"type": "buy", "by": cur.name, "pos": p, "price": price, "name": tile["name"], "auto_actions": total_cash_raised > 0}
+                g.log.append({"type": "buy", "text": f"{cur.name} bought {tile['name']} for ${price}{auto_text}"})
+                try:
+                    await sio.emit("sound", {"event": "property_purchased", "by": cur.name, "pos": p, "price": price}, room=lobby_id)
+                except Exception:
+                    pass
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            else:
+                reason = "insufficient_cash"
+        else:
+            # Player has enough cash, purchase normally
             st.owner = cur.name
             g.properties[p] = st
             cur.cash -= price
@@ -1101,17 +1351,11 @@ async def game_action(sid, data):
                 await sio.emit("sound", {"event": "property_purchased", "by": cur.name, "pos": p, "price": price}, room=lobby_id)
             except Exception:
                 pass
-        else:
-            reason = "not_buyable"
-            if not buyable:
-                reason = "not_buyable"
-            elif st.owner is not None:
-                reason = "owned"
-            elif price <= 0:
-                reason = "no_price"
-            elif cur.cash < price:
-                reason = "insufficient_cash"
-            g.last_action = {"type": "buy_failed", "by": cur.name, "pos": p, "reason": reason}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
+        
+        # Purchase failed
+        g.last_action = {"type": "buy_failed", "by": cur.name, "pos": p, "reason": reason}
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
         return
 
@@ -1417,11 +1661,20 @@ async def game_action(sid, data):
         return {"ok": True, "action": "end_turn"}
 
     if t == "bankrupt":
-        _handle_bankruptcy(g, cur.name)
-        # Advance turn if necessary (only if game not ended and current player still exists index-wise)
-        if g.game_over is None and len(g.players) > 0:
+        # Find the player who is declaring bankruptcy (could be any player, not just current turn)
+        bankrupt_player = _find_player(g, actor)
+        if not bankrupt_player:
+            g.last_action = {"type": "bankrupt_failed", "by": actor, "reason": "player_not_found"}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
+        
+        _handle_bankruptcy(g, actor)
+        
+        # If the current turn player went bankrupt, advance the turn
+        if actor == cur.name and g.game_over is None and len(g.players) > 0:
             g.current_turn = g.current_turn % len(g.players)
             g.rolls_left = 1
+            
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
         return
 
@@ -1520,6 +1773,10 @@ async def game_action(sid, data):
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
         if t == "buy_house":
+            # Try auto-unmortgage first if some properties in the group are mortgaged
+            if group and group_mortgaged():
+                _auto_unmortgage_for_houses(g, cur, group)
+            
             if tile.get("type") != "property" or not group or not owns_group() or group_mortgaged():
                 g.last_action = {"type": "buy_house_denied", "by": cur.name, "pos": pos, "reason": "group_or_mortgage"}
             elif st.hotel:
@@ -2027,8 +2284,16 @@ def _handle_rent(g: Game, cur: Player, pos: int, last_roll: int) -> bool:
     if remaining_rent > 0:
         owner.cash += remaining_rent
 
-    # Player pays full rent
+    # Player pays full rent - use auto-mortgage/auto-sell if needed
+    if cur.cash < rent:
+        houses_cash_raised = _auto_sell_houses_for_cash(g, cur, rent)
+        mortgage_cash_raised = _auto_mortgage_for_cash(g, cur, rent)
+    
     cur.cash -= rent
+    
+    # Handle any remaining negative cash after payment
+    if cur.cash < 0:
+        _handle_negative_cash(g, cur)
     
     if rental_redirected > 0:
         g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} rent (${remaining_rent} to {owner.name}, ${rental_redirected} to renters) for {tile.get('name')}"})
@@ -2364,12 +2629,12 @@ def _draw_card(deck: str) -> Dict[str, Any]:
     # Minimal deck sampling; expand later
     if deck == "chance":
         cards = [
-            {"kind": "advance_to", "target": "GO"},
-            {"kind": "advance_to", "target": "Illinois Avenue"},
-            {"kind": "advance_to", "target": "St. Charles Place"},
-            {"kind": "nearest", "target": "railroad", "special_rent": "double"},
-            {"kind": "nearest", "target": "utility", "special_rent": "ten_x"},
-            {"kind": "goto_jail"},
+            {"kind": "advance_to", "target": "GO", "text": "Advance to GO (Collect $200)"},
+            {"kind": "advance_to", "target": "Illinois Avenue", "text": "Advance to Illinois Avenue"},
+            {"kind": "advance_to", "target": "St. Charles Place", "text": "Advance to St. Charles Place"},
+            {"kind": "nearest", "target": "railroad", "special_rent": "double", "text": "Advance to the nearest Railroad (pay double rent)"},
+            {"kind": "nearest", "target": "utility", "special_rent": "ten_x", "text": "Advance to the nearest Utility (pay 10x dice roll)"},
+            {"kind": "goto_jail", "text": "Go to Jail (Do not pass GO, do not collect $200)"},
             {"kind": "collect", "amount": 50, "text": "Bank pays you dividend of $50"},
             {"kind": "pay", "amount": 15, "text": "Pay poor tax of $15"},
             {"kind": "repairs", "house": 25, "hotel": 100, "text": "Make general repairs: $25 per house, $100 per hotel"},
@@ -2377,12 +2642,12 @@ def _draw_card(deck: str) -> Dict[str, Any]:
         ]
     else:
         cards = [
-            {"kind": "advance_to", "target": "GO"},
-            {"kind": "goto_jail"},
+            {"kind": "advance_to", "target": "GO", "text": "Advance to GO (Collect $200)"},
+            {"kind": "goto_jail", "text": "Go to Jail (Do not pass GO, do not collect $200)"},
             {"kind": "collect", "amount": 200, "text": "You inherit $200"},
             {"kind": "pay", "amount": 50, "text": "Doctor's fees $50"},
             {"kind": "repairs", "house": 40, "hotel": 115, "text": "Street repairs: $40 per house, $115 per hotel"},
-            {"kind": "jail_free", "text": "Get Out of Jail Free (Chest)"},
+            {"kind": "jail_free", "text": "Get Out of Jail Free (Community Chest)"},
         ]
     return random.choice(cards)
 
@@ -2667,14 +2932,26 @@ async def _bot_take_simple_turn(l: Lobby):
         if amount:
             cur.cash -= amount
             g.log.append({"type": "tax", "text": f"{cur.name} paid ${amount} in taxes"})
+            # Check for negative cash after tax
+            if cur.cash < 0:
+                _handle_negative_cash(g, cur)
+            # Force sync after tax payment to ensure client gets updated state
+            await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
 
     # Chance/Chest
     if tile.get("type") in {"chance", "chest"}:
         card = _draw_card(tile.get("type"))
+        card_name = "Chance" if tile.get("type") == "chance" else "Community Chest"
+        card_text = card.get("text", f"Unknown {card_name} card")
+        g.log.append({"type": "card_draw", "text": f"{cur.name} drew {card_name}: {card_text}"})
         _apply_card(g, cur, card, last_roll=roll)
         new_pos = cur.position
         tile = tiles[new_pos]
         _record_land(g, new_pos)
+        
+        # Force sync after card application to ensure client gets updated state
+        await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
+        
         if cur.in_jail:
             g.rolls_left = 0
             await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
@@ -2690,6 +2967,11 @@ async def _bot_take_simple_turn(l: Lobby):
             if amount:
                 cur.cash -= amount
                 g.log.append({"type": "tax", "text": f"{cur.name} paid ${amount} in taxes (card move)"})
+                # Check for negative cash after tax
+                if cur.cash < 0:
+                    _handle_negative_cash(g, cur)
+                # Force sync after card-triggered tax payment
+                await sio.emit("game_state", {"lobby_id": l.id, "snapshot": g.snapshot()}, room=l.id)
 
     # Rent
     try:

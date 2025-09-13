@@ -1,5 +1,12 @@
 # Monopoly Online - Feature Implementation Status
 
+## 📌 Current TODOs — 2025-09-12
+- [ ] Global RWD: scale entire UI (stage wrapper) so every element (board, panels, overlays) scales uniformly; preserve desktop baseline.
+- [ ] Safe duplicate display names: allow same visible names; use unique internal names for turns/actions; keep UI showing display names.
+- [ ] Render deploy + GitHub push: verify health checks and push main; trigger Render build.
+- [ ] Cross-device QA sweep: iPhone/Android tablets and odd desktop sizes; verify touch targets, scroll, zoom, audio.
+- [ ] Post-deploy monitoring & quick fixes.
+
 ## ✅ COMPLET### 🗳️ Vote Kick System (4/4 - ✅ COMPLETED)
 - [x] **Turn Holder Targeting**: Vote kick button only appears for non-current players to target current turn holder  
 - [x] **Majority Requirements**: Backend already implements majority vote logic with 5-minute timer

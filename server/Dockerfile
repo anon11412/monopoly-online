@@ -43,4 +43,4 @@ ENV WORKERS=1 \
     SERVE_STATIC_DIR=/app/static
 
 # Run with gunicorn and uvicorn workers
-CMD ["bash", "-lc", "exec gunicorn server.main:asgi -k uvicorn.workers.UvicornWorker --bind ${HOST}:${PORT} --workers ${WORKERS} --timeout 120"]
+CMD ["sh", "-lc", "exec gunicorn server.main:asgi -k uvicorn.workers.UvicornWorker --bind ${HOST}:${PORT} --workers ${WORKERS} --timeout 120"]
