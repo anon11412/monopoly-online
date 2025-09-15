@@ -1,3 +1,41 @@
+.git
+.gitignore
+
+# Node
+**/node_modules
+**/.pnpm-store
+**/.yarn
+**/.yarn/cache
+**/.yarnrc
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+
+# Build outputs
+**/dist
+**/build
+**/.vite
+
+# Python
+**/__pycache__
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.coverage
+**/.tox
+**/.venv
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+**/.dockerignore
+
+# IDE
+.vscode
+.idea
 # VCS
 .git
 .gitignore

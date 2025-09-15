@@ -105,6 +105,8 @@ class Game:
             "property_rentals": list(self.property_rentals),
             # Include bonds settings snapshot for UI
             "bonds": _bonds_snapshot(self),
+            # Include computed bond payouts summary for UI
+            "bond_payouts": _bond_payouts_snapshot(self),
             # Provide list of recent trade ids for clients to prime caches
             "recent_trade_ids": list(self.recent_trades.keys())[-100:],
         }
@@ -1283,6 +1285,7 @@ async def game_action(sid, data):
         if not merged:
             g.bond_investments.append({"owner": owner, "investor": investor, "principal": amount})
         g.last_action = {"type": "bond_invest", "by": investor, "owner": owner, "amount": amount}
+        g.log.append({"type": "bond_invest", "text": f"{investor} invested ${amount} in {owner} bonds"})
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
         return {"ok": True}
 
@@ -2694,6 +2697,45 @@ def _bonds_snapshot(g: Game) -> List[Dict[str, Any]]:
             "period_turns": int(st.get("period_turns", 1)),
             "history": list(st.get("history") or [])[-300:],
         })
+    return out
+
+
+def _bond_payouts_snapshot(g: Game) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    # Build quick map: owner -> { rate_percent, period_turns }
+    cfg: Dict[str, Dict[str, Any]] = {}
+    for p in g.players:
+        st = _bonds_ensure(g, p.name)
+        cfg[p.name] = {
+            "rate_percent": float(st.get("rate_percent") or 0.0),
+            "period_turns": int(st.get("period_turns") or 1),
+        }
+    # Compute coupons for each investment entry
+    for inv in g.bond_investments:
+        owner = inv.get("owner")
+        investor = inv.get("investor")
+        principal = int(inv.get("principal") or 0)
+        if not owner or not investor or principal <= 0:
+            continue
+        st = cfg.get(owner) or {"rate_percent": 0.0, "period_turns": 1}
+        rate = float(st.get("rate_percent") or 0.0)
+        period = max(1, int(st.get("period_turns") or 1))
+        coupon = int(round(principal * (rate / 100.0) * period)) if rate > 0 else 0
+        # Estimate next due in turns using owner's turn count modulo period
+        cnt = int(g.turn_counts.get(owner) or 0)
+        rem = (period - (cnt % period)) % period
+        next_in = rem if rem != 0 else 0
+        out.append({
+            "owner": owner,
+            "investor": investor,
+            "principal": principal,
+            "coupon": coupon,
+            "period_turns": period,
+            "rate_percent": rate,
+            "next_due_in_turns": next_in,
+        })
+    # Stable sort by owner then investor for consistent UI
+    out.sort(key=lambda x: (str(x.get("owner") or "").lower(), str(x.get("investor") or "").lower()))
     return out
 
 

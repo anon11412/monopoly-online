@@ -32,7 +32,7 @@ export default function MainMenu({ onEnterLobby }: Props) {
   const [showAccessibilitySettings, setShowAccessibilitySettings] = useState(false);
   const lastLobbyId = (saved.lastLobbyId || '').trim();
   const { theme, toggleTheme } = useTheme();
-  const { user, ready: authReady, signIn, signOut, registerLocal, loginLocal } = useAuth();
+  const { user, ready: authReady, signOut, registerLocal, loginLocal } = useAuth();
   const handleLoginLocal = async () => {
     const id = prompt('Username or Email');
     if (!id) return;
@@ -234,7 +234,7 @@ export default function MainMenu({ onEnterLobby }: Props) {
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <button className="btn btn-ghost" onClick={handleLoginLocal} title="Log in">Log in</button>
               <button className="btn btn-ghost" onClick={handleRegisterLocal} title="Sign up">Sign up</button>
-              <button className="btn" onClick={signIn} title="Sign in with Google">Google</button>
+              {/* OAuth sign-in not available; remove Google button */}
             </div>
           )
         )}

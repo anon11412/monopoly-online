@@ -4,6 +4,7 @@ import { BACKEND_URL, BOARD_META_PATH } from '../config';
 import { buildDefaultBoardTiles } from '../lib/boardFallback';
 import { playGameSound } from '../lib/audio';
 import type { BoardTile, GameSnapshot, PropertyStateLike } from '../types';
+import Portal from './Portal';
 
 type Props = {
   lobbyId: string;
@@ -210,7 +211,8 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
   );
 
   return (
-    <div className="trade-panel" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={onClose}>
+    <Portal>
+  <div className="trade-panel" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500 }} onClick={onClose}>
   <div style={{ background: 'var(--color-surface)', minWidth: 720, maxWidth: '90vw', maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 16, boxShadow: '0 8px 24px var(--color-shadow)' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0 }}>{variant === 'advanced' ? '⚡ Advanced Combined Trade' : '🤝 Trade Properties'}</h3>
@@ -391,6 +393,7 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
         </div>
       </div>
     </div>
+    </Portal>
   );
 }
 

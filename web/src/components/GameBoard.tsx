@@ -7,6 +7,8 @@ import { getSocket, getRemembered } from '../lib/socket';
 import { equalNames } from '../lib/names';
 import { getStreetRent, houseCostForGroup, mortgageValue, RAILROAD_RENTS } from '../lib/rentData';
 import { playGameSound } from '../lib/audio';
+import Portal from './Portal';
+import ChatPanel from './ChatPanel';
 
 type Props = { snapshot: GameSnapshot; lobbyId: string };
 
@@ -42,7 +44,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   const [negativeBalanceError, setNegativeBalanceError] = useState<string | null>(null);
   // Keep a setter for money animations (UI no longer renders them here, but effects may update)
   const [, setMoneyAnimations] = useState<Record<string, string>>({});
-  const [turnChangeAnimation, setTurnChangeAnimation] = useState(false);
+  const [, setTurnChangeAnimation] = useState(false);
   const [propertyAnimations, setPropertyAnimations] = useState<Record<number, string>>({});
   const [diceAnimation, setDiceAnimation] = useState('');
   // Responsive: simple small-screen detector
@@ -61,15 +63,8 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   // (err placeholder removed) 
   // Chat
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatLog, setChatLog] = useState<Array<{ from: string; message: string; ts?: number; pending?: boolean; localId?: string }>>([]);
-  const [chatMsg, setChatMsg] = useState('');
   const [unreadMessages, setUnreadMessages] = useState(0);
-  const chatMessagesRef = useRef<HTMLDivElement | null>(null);
-  const chatInputRef = useRef<HTMLInputElement | null>(null);
   const gameLogRef = useRef<HTMLDivElement | null>(null);
-  const [chatError, setChatError] = useState<string>('');
-  const pendingQueueRef = useRef<Array<{ message: string; localId: string; ts: number }>>([]);
-  const hasJoinedRef = useRef<boolean>(false);
   // Responsive: measure tile size to scale elements when not at baseline
   const gridRef = useRef<HTMLDivElement | null>(null);
   const [tilePx, setTilePx] = useState<number>(64);
@@ -232,117 +227,16 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     prevLastActionRef.current = laType;
   }, [snapshot?.pending_trades, snapshot?.last_action]);
 
-  // Chat socket listener + hydrate from lobby events
+  // Chat: only track unread counts when closed; ChatPanel handles UI and history
   useEffect(() => {
-    // Track seen messages to avoid duplicates when listening to multiple events
-    const seenRef: { current: Set<string> } = (window as any).__chatSeenRef || { current: new Set() };
-    (window as any).__chatSeenRef = seenRef;
-    const register = (msg: any) => {
-      if (!msg) return;
-      const ts = msg.ts || Date.now();
-      const from = msg.from || '???';
-      const text = msg.message || '';
-      const key = `${ts}-${from}-${text}`;
-      // If this event was already processed, ignore (handles duplicate events like lobby_chat + chat_message)
-      if (seenRef.current.has(key)) return; // duplicate (likely from second event)
-      // Try to match/resolve a pending local message from me; if merged, mark seen and skip append
-    // Check both meName and stored name to handle name resolution edge cases
-    const isFromMe = from === meName || from === storedName || from === (meName || 'me');
-    if (isFromMe) {
-        let merged = false;
-        setChatLog(prev => {
-      const idx = prev.findIndex(p => p.pending && p.message === text && (p.from === meName || p.from === storedName || p.from === 'me'));
-          if (idx >= 0) {
-            merged = true;
-            const copy = prev.slice();
-            copy[idx] = { ...copy[idx], pending: false, ts, from }; // Use server's from name
-            return copy;
-          }
-          return prev;
-        });
-        if (merged) {
-          seenRef.current.add(key);
-          if (seenRef.current.size > 600) {
-            const arr = Array.from(seenRef.current).slice(-400);
-            seenRef.current.clear();
-            arr.forEach(k => seenRef.current.add(k));
-          }
-          if (!chatOpen) setUnreadMessages(u => u + 1);
-          return;
-        }
-      }
-      // Record and append new incoming chat line
-      seenRef.current.add(key);
-      if (seenRef.current.size > 600) { // trim occasionally
-        const arr = Array.from(seenRef.current).slice(-400);
-        seenRef.current.clear();
-        arr.forEach(k => seenRef.current.add(k));
-      }
-      setChatLog(prev => [...prev, { from, message: text, ts }]);
+    const onChat = () => {
       if (!chatOpen) setUnreadMessages(u => u + 1);
     };
-    const onChat = (msg: any) => register(msg);
-  // Stop listening to legacy lobby_chat to avoid duplicate messages
-  // Legacy lobby_chat removed
-    const onLobbyJoined = (data: any) => {
-      if (!data || (data.id && data.id !== lobbyId)) return;
-      
-      // Don't update stored name - keep original for consistency
-      // The meName resolution will handle the mapping to actual game names
-      
-      // Hydrate recent history
-      const hist = Array.isArray((data as any).chat) ? (data as any).chat : [];
-      const mapped = hist.map((c: any) => ({ from: c.from || 'anon', message: c.message || '', ts: c.ts ? Number(c.ts) : undefined }));
-      // Preserve any local pending
-      setChatLog(prev => {
-        const pending = prev.filter(p => p.pending);
-        return [...mapped, ...pending];
-      });
-      // Seed seen set to avoid double-inserting hydrated messages
-      try {
-        for (const c of mapped) {
-          const k = `${c.ts || 0}-${c.from}-${c.message}`;
-          seenRef.current.add(k);
-        }
-      } catch {}
-      setChatError('');
-      hasJoinedRef.current = true;
-      // Flush any queued messages
-      const q = pendingQueueRef.current.slice();
-      pendingQueueRef.current = [];
-      for (const item of q) {
-        s.emit('chat_send', { id: lobbyId, message: item.message });
-      }
-      // Focus chat input if open
-      if (chatOpen && chatInputRef.current) {
-        try { chatInputRef.current.focus(); } catch {}
-      }
-    };
-  s.on('chat_message', onChat);
-  s.on('lobby_joined', onLobbyJoined);
-  return () => { s.off('chat_message', onChat); s.off('lobby_joined', onLobbyJoined); };
-  }, [s, chatOpen, lobbyId, meName]);
+    s.on('chat_message', onChat);
+    return () => { s.off('chat_message', onChat); };
+  }, [s, chatOpen]);
 
-  // Rejoin lobby on reconnect/connect to hydrate chat and resume
-  useEffect(() => {
-    const onConnect = () => {
-      try {
-        s.emit('lobby_join', { id: lobbyId, lobby_id: lobbyId }, (ack: any) => {
-          if (!ack || ack.ok === false) {
-            setChatError(ack?.error || 'Rejoin failed');
-          } else {
-            setChatError('');
-          }
-        });
-      } catch (e) {
-        setChatError('Rejoin failed');
-      }
-    };
-    s.on('connect', onConnect);
-    // If already connected and not yet joined in this session, attempt once
-    if (s.connected && !hasJoinedRef.current) onConnect();
-    return () => { s.off('connect', onConnect); };
-  }, [s, lobbyId]);
+  // Rejoin for chat history handled by ChatPanel when opened
 
   // Lobby updates: vote kick banner
   useEffect(() => {
@@ -365,19 +259,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     });
   };
 
-  // Focus chat input when opening panel
-  useEffect(() => {
-    if (chatOpen && chatInputRef.current) {
-      try { chatInputRef.current.focus(); } catch {}
-    }
-  }, [chatOpen]);
-
-  // Auto-scroll chat
-  useEffect(() => {
-    if (chatOpen && chatMessagesRef.current) {
-      chatMessagesRef.current.scrollTop = chatMessagesRef.current.scrollHeight;
-    }
-  }, [chatLog, chatOpen]);
+  // Input focus/scroll handled within shared panel. We keep unread only.
 
   // Auto-scroll game log
   useEffect(() => {
@@ -386,21 +268,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     }
   }, [snapshot?.log]);
 
-  // Chat send helper with offline queue/pending placeholder
-  const sendChat = () => {
-    const text = chatMsg.trim();
-    if (!text) return;
-    const localId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const entry = { from: meName || 'me', message: text, ts: Date.now(), pending: true as const, localId };
-    setChatLog(prev => [...prev, entry]);
-    setChatMsg('');
-    if (s.connected) {
-      s.emit('chat_send', { id: lobbyId, message: text });
-    } else {
-      pendingQueueRef.current.push({ message: text, localId, ts: entry.ts! });
-      setChatError('Offline: message queued');
-    }
-  };
+  // Chat sending moved into shared panel; we only track unread and hydrate here.
 
   // Local countdown for kick banner
   useEffect(() => {
@@ -488,47 +356,6 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   {/* error banner removed (no err state) */}
   <div style={{ padding: '4px 6px', fontSize: 12, fontWeight: 600, marginBottom: 6 }}>Turn: {curName || '—'}</div>
       <div className="board-wrap" style={{ position: 'relative' }}>
-        {kickBanner?.target ? (
-          <div style={{ 
-            position: 'absolute', 
-            left: '50%', 
-            top: -48, 
-            transform: 'translateX(-50%)', 
-            background: 'linear-gradient(135deg, rgba(231, 76, 60, 0.95), rgba(192, 57, 43, 0.95))', 
-            color: '#fff', 
-            padding: '8px 16px', 
-            borderRadius: '12px', 
-            fontSize: '13px', 
-            fontWeight: '600',
-            zIndex: 10,
-            boxShadow: '0 4px 12px rgba(231, 76, 60, 0.4)',
-            border: '2px solid rgba(255, 255, 255, 0.2)',
-            minWidth: '220px',
-            textAlign: 'center'
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              <span>🚫</span>
-              <div>
-                <div style={{ fontSize: '14px', fontWeight: '700' }}>VOTE KICK ACTIVE</div>
-                <div style={{ fontSize: '12px', opacity: 0.9, marginTop: 2 }}>
-                  Target: <strong>{kickBanner.target}</strong>
-                </div>
-                <div style={{ fontSize: '12px', opacity: 0.9, marginTop: 2 }}>
-                  Votes: <strong>{kickBanner.votes || 0}/{kickBanner.required || 1}</strong>
-                  {(kickBanner.votes || 0) >= (kickBanner.required || 1) ? ' ✓' : ''}
-                </div>
-                <div style={{ fontSize: '11px', opacity: 0.8, marginTop: 2 }}>
-                  {typeof kickBanner.remaining === 'number' ? (
-                    <>Time: <strong>{Math.floor((kickBanner.remaining as number)/60)}:{String((kickBanner.remaining as number)%60).padStart(2,'0')}</strong></>
-                  ) : (
-                    'Pending...'
-                  )}
-                </div>
-              </div>
-              <span>⏰</span>
-            </div>
-          </div>
-        ) : null}
   <div className="grid" ref={gridRef}>
         {tiles.length === 0 ? (
           <div style={{ gridColumn: 6, gridRow: 6, alignSelf: 'center', justifySelf: 'center', fontSize: 12, opacity: 0.8 }}>No board to display</div>
@@ -540,14 +367,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           const mortgaged = !!p?.mortgaged;
           const isCurrent = snapshot?.players?.[curIdx]?.position === t.pos;
           const clickable = (t.type === 'property' || t.type === 'railroad' || t.type === 'utility' || t.type === 'jail');
-          const edge = (() => {
-            // Determine board edge to place owner marker toward center
-            if (t.y === 10) return 'top'; // bottom row on grid -> owner above
-            if (t.y === 0) return 'bottom'; // top row -> owner below
-            if (t.x === 0) return 'right'; // left col -> owner to right
-            if (t.x === 10) return 'left'; // right col -> owner to left
-            return 'top';
-          })();
+          // owner marker edge hint was unused; removed to prevent overlay issues
           
           return (
             <div 
@@ -797,9 +617,6 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               }
               const canEndC = finalMyTurn && rolledThisTurn && rollsLeft === 0;
               
-              // Vote kick logic - can vote kick current turn holder if not me
-              const currentTurnPlayer = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
-              
               // Always anchor roll/buy/end row relative to board
               return (
                 <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 80px)', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
@@ -949,16 +766,18 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
       try { (window as any).__initialPartner = partner; } catch {}
     };
     return (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowPartnerPicker(null)}>
-        <div style={{ background: 'var(--color-surface)', borderRadius: 8, padding: 12, minWidth: 320, color: 'var(--color-text)' }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ fontWeight: 700, marginBottom: 8 }}>{showPartnerPicker === 'advanced' ? 'Choose partner for Advanced Trade' : 'Choose partner for Trade'}</div>
-          <div style={{ display: 'grid', gap: 8 }}>
-            {others.length === 0 ? <div style={{ opacity: 0.7 }}>No other players.</div> : others.map((n, i) => (
-              <button key={i} className="btn" onClick={() => pick(n)} title={n}>{n}</button>
-            ))}
+      <Portal>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500 }} onClick={() => setShowPartnerPicker(null)}>
+          <div style={{ background: 'var(--color-surface)', borderRadius: 8, padding: 12, minWidth: 320, color: 'var(--color-text)' }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>{showPartnerPicker === 'advanced' ? 'Choose partner for Advanced Trade' : 'Choose partner for Trade'}</div>
+            <div style={{ display: 'grid', gap: 8 }}>
+              {others.length === 0 ? <div style={{ opacity: 0.7 }}>No other players.</div> : others.map((n, i) => (
+                <button key={i} className="btn" onClick={() => pick(n)} title={n}>{n}</button>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      </Portal>
     );
   })() : null}
 
@@ -984,226 +803,30 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   
       {/* Modern chat panel - positioned on the right side */}
       {!isSmall && chatOpen && (
-        <div style={{ 
-          position: 'fixed', 
-          top: 0, 
-          right: 0, 
-          width: 'min(400px, 40vw)', 
-          height: '100vh', 
-          background: 'var(--color-surface)', 
-          boxShadow: '-4px 0 20px var(--color-shadow)', 
-          display: 'flex', 
-          flexDirection: 'column',
-          zIndex: 2000,
-          borderLeft: '1px solid var(--color-border)'
-        }}>
-          {/* Header */}
-          <div style={{ 
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 
-            color: 'white', 
-            padding: '16px 20px', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'space-between'
-          }}>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>💬 Game Chat</h3>
-            <button 
-              onClick={handleChatToggle} 
-              style={{ 
-                background: 'rgba(255,255,255,0.2)', 
-                border: 'none', 
-                color: 'white', 
-                borderRadius: 6, 
-                padding: '6px 8px', 
-                cursor: 'pointer',
-                fontSize: 14
-              }}
-            >
-              ✕
-            </button>
+        <Portal>
+          <div style={{ position: 'fixed', top: 0, right: 0, width: 'min(400px, 40vw)', height: '100vh', background: 'var(--color-surface)', boxShadow: '-4px 0 20px var(--color-shadow)', display: 'flex', flexDirection: 'column', zIndex: 2500, borderLeft: '1px solid var(--color-border)' }}>
+            <div style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>💬 Game Chat</h3>
+              <button onClick={handleChatToggle} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', borderRadius: 6, padding: '4px 6px', cursor: 'pointer', fontSize: 13 }}>✕</button>
+            </div>
+            <div style={{ flex: 1, minHeight: 0, padding: 8 }}>
+              <ChatPanel lobbyId={lobbyId} />
+            </div>
           </div>
-            
-            {/* Messages area */}
-            <div 
-              ref={chatMessagesRef}
-              style={{ 
-                flex: 1, 
-                padding: '16px 20px', 
-                overflowY: 'auto', 
-                background: '#f8f9fa',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 8
-              }}
-            >
-              {chatError ? (
-                <div style={{ background: '#fff3cd', color: '#856404', border: '1px solid #ffeeba', padding: '8px 10px', borderRadius: 6, fontSize: 12 }}>
-                  {chatError}
-                  <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 12, marginLeft: 8 }} onClick={() => { setChatError(''); try { s.emit('lobby_join', { id: lobbyId, lobby_id: lobbyId }); } catch {} }}>Retry</button>
-                </div>
-              ) : null}
-              {chatLog.length === 0 ? (
-                <div style={{ 
-                  textAlign: 'center', 
-                  color: '#666', 
-                  fontStyle: 'italic', 
-                  marginTop: 40 
-                }}>
-                  No messages yet. Start the conversation!
-                </div>
-              ) : chatLog.map((c, i) => {
-                const myName = (getRemembered().displayName || '').trim();
-                const isMe = c.from === myName;
-                const alt = i % 2 === 0;
-                const baseOtherLightA = '#e9ecef';
-                const baseOtherLightB = '#dde3e8';
-                const baseOtherDarkA = '#2a3540';
-                const baseOtherDarkB = '#323f4a';
-                const dark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark';
-                const otherBg = dark ? (alt ? baseOtherDarkA : baseOtherDarkB) : (alt ? baseOtherLightA : baseOtherLightB);
-                const bubbleStyle: any = {
-                  maxWidth: '75%',
-                  padding: '8px 12px',
-                  borderRadius: '16px',
-                  background: isMe ? 'var(--color-accent)' : otherBg,
-                  color: isMe ? 'var(--color-accent-contrast)' : (dark ? 'var(--color-text)' : '#333'),
-                  fontSize: 14,
-                  wordBreak: 'break-word',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.15)'
-                };
-                return (
-                  <div key={i} style={{ 
-                    display: 'flex', 
-                    justifyContent: isMe ? 'flex-end' : 'flex-start',
-                    marginBottom: 4
-                  }}>
-                    <div style={bubbleStyle}>
-            {!isMe && (
-                        <div style={{ 
-                          fontSize: 11, 
-                          opacity: 0.8, 
-                          marginBottom: 2,
-                          fontWeight: 600
-                        }}>
-              {c.from}
-                        </div>
-                      )}
-                      <div>
-                        {c.message}
-                        {(c as any).pending ? <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 6 }}>(sending…)</span> : null}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            
-            {/* Input area */}
-            <div style={{ 
-              padding: '16px 20px', 
-              borderTop: '1px solid #e9ecef',
-              background: 'var(--color-surface)'
-            }}>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <input 
-                  ref={chatInputRef}
-                  placeholder="Type a message…" 
-                  value={chatMsg} 
-                  onChange={(e) => setChatMsg(e.target.value)} 
-                  onKeyDown={(e) => { 
-                    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
-                  }} 
-                  style={{ 
-                    flex: 1, 
-                    padding: '10px 12px', 
-                    border: '1px solid #ddd', 
-                    borderRadius: 20, 
-                    fontSize: 14,
-                    outline: 'none'
-                  }} 
-                />
-                <button 
-                  onClick={() => { sendChat(); }}
-                  style={{
-                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: 20,
-                    padding: '10px 16px',
-                    cursor: 'pointer',
-                    fontSize: 14,
-                    fontWeight: 600
-                  }}
-                >
-                  Send
-                </button>
-              </div>
-            </div>
-        </div>
+        </Portal>
       )}
       {isSmall && chatOpen && (
-        <div className="chat-sheet">
-          <div className="sheet-header">
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>💬 Game Chat</h3>
-            <button onClick={handleChatToggle} className="btn btn-ghost" style={{ padding: '6px 10px' }}>✕</button>
-          </div>
-          <div className="sheet-body" ref={chatMessagesRef}>
-            {chatError ? (
-              <div style={{ background: '#fff3cd', color: '#856404', border: '1px solid #ffeeba', padding: '8px 10px', borderRadius: 6, fontSize: 12 }}>
-                {chatError}
-                <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 12, marginLeft: 8 }} onClick={() => { setChatError(''); try { s.emit('lobby_join', { id: lobbyId, lobby_id: lobbyId }); } catch {} }}>Retry</button>
-              </div>
-            ) : null}
-            {chatLog.length === 0 ? (
-              <div style={{ textAlign: 'center', color: '#666', fontStyle: 'italic', marginTop: 20 }}>No messages yet. Start the conversation!</div>
-            ) : chatLog.map((c, i) => {
-              const myName = (getRemembered().displayName || '').trim();
-              const isMe = c.from === myName;
-              const alt = i % 2 === 0;
-              const baseOtherLightA = '#e9ecef';
-              const baseOtherLightB = '#dde3e8';
-              const baseOtherDarkA = '#2a3540';
-              const baseOtherDarkB = '#323f4a';
-              const dark = typeof document !== 'undefined' && document.documentElement.getAttribute('data-theme') === 'dark';
-              const otherBg = dark ? (alt ? baseOtherDarkA : baseOtherDarkB) : (alt ? baseOtherLightA : baseOtherLightB);
-              const bubbleStyle: any = {
-                maxWidth: '85%',
-                padding: '8px 12px',
-                borderRadius: '16px',
-                background: isMe ? 'var(--color-accent)' : otherBg,
-                color: isMe ? 'var(--color-accent-contrast)' : (dark ? 'var(--color-text)' : '#333'),
-                fontSize: 14,
-                wordBreak: 'break-word',
-              };
-              return (
-                <div key={i} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', marginBottom: 6 }}>
-                  <div style={bubbleStyle}>
-                    {!isMe && (
-                      <div style={{ fontSize: 11, opacity: 0.8, marginBottom: 2, fontWeight: 600 }}>{c.from}</div>
-                    )}
-                    <div>
-                      {c.message}
-                      {(c as any).pending ? <span style={{ fontSize: 11, opacity: 0.7, marginLeft: 6 }}>(sending…)</span> : null}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="sheet-input">
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input
-                ref={chatInputRef}
-                placeholder="Type a message…"
-                value={chatMsg}
-                onChange={(e) => setChatMsg(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-                style={{ flex: 1, padding: '12px', border: '1px solid var(--border-color)', borderRadius: 12, fontSize: 16 }}
-              />
-              <button className="btn btn-primary" onClick={() => sendChat()}>Send</button>
+        <Portal>
+          <div className="chat-sheet" style={{ zIndex: 2500 }}>
+            <div className="sheet-header">
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>💬 Game Chat</h3>
+              <button onClick={handleChatToggle} className="btn btn-ghost" style={{ padding: '6px 10px' }}>✕</button>
+            </div>
+            <div className="sheet-body" style={{ padding: 8 }}>
+              <ChatPanel lobbyId={lobbyId} />
             </div>
           </div>
-        </div>
+        </Portal>
       )}
   {openPropPos != null ? (() => {
         const t = tileByPos[openPropPos!];
@@ -1212,8 +835,9 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   const price = (t as any)?.price ?? 0;
   // Buy button moved to central action bar; evaluate there
         return (
-          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setOpenPropPos(null)}>
-            <div style={{ background: 'var(--color-surface)', minWidth: 320, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
+          <Portal>
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500 }} onClick={() => setOpenPropPos(null)}>
+              <div style={{ background: 'var(--color-surface)', minWidth: 320, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <h3 style={{ margin: 0 }}>{t?.name || `Tile ${openPropPos}`}</h3>
                 <button className="btn btn-ghost" onClick={() => setOpenPropPos(null)}>❌ Close</button>
@@ -1337,15 +961,17 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                   );
                 })()}
               </div>
+              </div>
             </div>
-          </div>
+          </Portal>
         );
       })() : null}
 
       {/* Negative Balance Error Modal */}
   {negativeBalanceError ? (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500 }} onClick={() => setNegativeBalanceError(null)}>
-          <div style={{ 
+    <Portal>
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2600 }} onClick={() => setNegativeBalanceError(null)}>
+        <div style={{ 
             background: 'var(--color-surface)', 
             color: 'var(--color-text)',
             padding: '24px', 
@@ -1367,9 +993,10 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 Got it
               </button>
             </div>
-          </div>
         </div>
-      ) : null}
+      </div>
+    </Portal>
+  ) : null}
     </div>
   );
 }

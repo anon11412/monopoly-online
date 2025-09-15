@@ -52,7 +52,7 @@ Proxy (Nginx):
 Render can build this repo using the Dockerfile at `server/Dockerfile` and serve both API and the built web on a single service.
 
 - Service type: Web Service (env: docker)
-- Health check path: `/board_meta`
+- Health check path: `/healthz`
 - Dockerfile path: `server/Dockerfile`
 - Important env vars:
   - `ALLOWED_ORIGINS`: `*` (or your domain)

@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import { LineChart as RCLineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import type { GameSnapshot } from '../types';
 import { getSocket, getRemembered } from '../lib/socket';
 import { normalizeName, equalNames } from '../lib/names';
+import ChatPanel from './ChatPanel';
 
 type Props = {
   open: boolean;
@@ -60,43 +62,96 @@ export default function DashboardModal({ open, onClose, lobbyId, snapshot }: Pro
 function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameSnapshot }) {
   // Resolve my name for spending/transactions context
   const storedName = (getRemembered().displayName || '').trim();
-  const myName = useMemo(() => {
-    const found = (snapshot?.players || []).find(p => equalNames(p.name, storedName));
-    return found?.name || storedName || '';
-  }, [snapshot?.players, storedName]);
+  const myName = storedName;
+  const [selectedPlayer, setSelectedPlayer] = useState<string>(() => (
+    (snapshot.players?.[snapshot.current_turn]?.name) || (snapshot.players?.[0]?.name) || ''
+  ));
+  const [showStockSettings, setShowStockSettings] = useState<boolean>(false);
+  const [showBondSettings, setShowBondSettings] = useState<boolean>(false);
+  const [showBondBuy, setShowBondBuy] = useState<null | { owner: string }>(null);
+  const [showStockInvest, setShowStockInvest] = useState<null | { owner: string }>(null);
+  const [showStockSell, setShowStockSell] = useState<null | { owner: string }>(null);
 
-  // Transactions list is not currently displayed; compute on demand when adding UI
-
-  // Simple spending aggregation by category from log text
+  // Keep selected player valid when roster changes
+  useEffect(() => {
+    const list = snapshot.players || [];
+    if (!list.find(p => equalNames(p.name, selectedPlayer))) {
+      const fallback = (list?.[snapshot.current_turn]?.name) || (list?.[0]?.name) || '';
+      setSelectedPlayer(fallback);
+    }
+  }, [snapshot.players, snapshot.current_turn]);
   const spendingAgg = useMemo(() => {
-    const agg: Record<string, number> = { Rent: 0, Properties: 0, Fees: 0, Trades: 0 };
-    const me = myName || '';
+    const order = ["Fees", "Rent", "Properties", "Trades"] as const;
+    const agg: Record<string, number> = { Fees: 0, Rent: 0, Properties: 0, Trades: 0 };
+    const me = selectedPlayer || '';
+
+    const isName = (a?: string, b?: string) => !!a && !!b && equalNames(a, b);
+    const parseActorTarget = (txtRaw: string): { actor?: string; target?: string } => {
+      const txt = txtRaw.trim();
+      // Patterns that commonly appear in logs
+      // 1) "Alice paid $123 rent to Bob ..." or "Alice paid $123 rent (...) to Bob ..."
+      let m = txt.match(/^([^:]+?)\s+paid\s+\$[\d,]+\s+.*?\s+to\s+([^:]+?)(?:\s|$)/i);
+      if (m) return { actor: m[1], target: m[2] };
+      // 2) "Alice paid $123 in taxes" (no explicit recipient)
+      m = txt.match(/^([^:]+?)\s+paid\s+\$[\d,]+\b/i);
+      if (m) return { actor: m[1] };
+      // 3) "Alice bought ... for $123"
+      m = txt.match(/^([^:]+?)\s+bought\b/i);
+      if (m) return { actor: m[1] };
+      // 3b) "Alice unmortgaged ... for $123"
+      m = txt.match(/^([^:]+?)\s+unmortgag(?:e|ed)\b/i);
+      if (m) return { actor: m[1] };
+      // 4) "Property rental: Alice paid $123 for ..."
+      m = txt.match(/^Property rental:\s+([^:]+?)\s+paid\s+\$[\d,]+\b/i);
+      if (m) return { actor: m[1] };
+      return {};
+    };
+
     for (const e of (snapshot.log || []) as any[]) {
-      const t = String(e.type || '');
-      const txt = String(e.text || '').toLowerCase();
-      const isMe = txt.includes(normalizeName(me).toLowerCase());
-      if (!isMe) continue;
-      const amt = extractAmount(txt);
+      const t = String(e.type || '').toLowerCase();
+      const txt = String(e.text || '');
+  const { actor } = parseActorTarget(txt);
+      if (!isName(actor, me)) {
+        // Only count spending when the selected player is the payer/actor
+        continue;
+      }
+      const amt = extractAmount(txt.toLowerCase());
       if (!amt) continue;
-      if (t.includes('rent') || /rent/.test(txt)) agg.Rent += Math.abs(amt);
-      else if (/buy|house|hotel|property/.test(txt)) agg.Properties += Math.abs(amt);
-      else if (/tax|fee|fine|income\s+tax|luxury/.test(txt)) agg.Fees += Math.abs(amt);
-      else if (/trade/.test(txt)) agg.Trades += Math.abs(amt);
+
+      // Map event to spending category. Only count outflows.
+      if (t === 'rent' || /\brent\b/i.test(txt)) {
+        agg.Rent += Math.abs(amt);
+        continue;
+      }
+      if (t === 'tax' || /\b(tax|fee|fine|luxury)\b/i.test(txt) || (t === 'jail' && /\bpaid\b/i.test(txt))) {
+        agg.Fees += Math.abs(amt);
+        continue;
+      }
+      if (t === 'buy' || t === 'buy_house' || t === 'buy_hotel' || t === 'unmortgage' || t === 'auto_unmortgage' || /\b(bought|buy\b|house|hotel|unmortgage|property)\b/i.test(txt)) {
+        // Exclude obvious income events like "sold a house" from spending
+        if (/\bsold\b/i.test(txt)) {
+          // Selling is income; skip as spending
+        } else {
+          agg.Properties += Math.abs(amt);
+        }
+        continue;
+      }
+      if (t.startsWith('trade') || t === 'rental_created' || t === 'recurring_pay' || t === 'stock_invest' || t === 'bond_invest' || t === 'bond_coupon' || /\btrade\b/i.test(txt)) {
+        agg.Trades += Math.abs(amt);
+        continue;
+      }
     }
     const total = Object.values(agg).reduce((a, b) => a + b, 0) || 1;
-    const entries = Object.entries(agg).map(([k, v]) => ({ label: k, value: v, pct: v / total }));
-    // Sort by value desc for bars
-    entries.sort((a, b) => b.value - a.value);
-    return entries;
-  }, [snapshot.log, myName]);
+    return order.map((k) => ({ label: k as string, value: agg[k], pct: agg[k] / total }));
+  }, [snapshot.log, selectedPlayer]);
 
   // Live balance series (client-side) for the current player; use snapshot.turns when available for x
   const balanceSeriesRef = useRef<Array<{ x: number; value: number }>>([]);
-  const curCash = (snapshot.players || []).find(p => equalNames(p.name, myName))?.cash ?? 0;
+  const curCash = (snapshot.players || []).find(p => equalNames(p.name, selectedPlayer))?.cash ?? 0;
   useEffect(() => {
     // Reset history when player identity changes
     balanceSeriesRef.current = [];
-  }, [myName]);
+  }, [selectedPlayer]);
   useEffect(() => {
     const series = balanceSeriesRef.current;
     const last = series.length ? series[series.length - 1].value : undefined;
@@ -111,6 +166,78 @@ function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameS
       if (series.length > 120) series.splice(0, series.length - 120); // keep last 120 points
     }
   }, [curCash, snapshot.turns, snapshot.last_action]);
+
+  // Income/Spending tracking per turn (x-axis = total turns advanced)
+  const incomeSeriesRef = useRef<Array<{ x: number; value: number }>>([]);
+  const spendingSeriesRef = useRef<Array<{ x: number; value: number }>>([]);
+  const turnAccumRef = useRef<{ income: number; spend: number }>({ income: 0, spend: 0 });
+  const lastTurnRef = useRef<number>(typeof (snapshot as any)?.turns === 'number' ? Number((snapshot as any).turns) : 0);
+  const prevCashRef = useRef<number | null>(null);
+  const baselinePushedRef = useRef<boolean>(false);
+  const withinTurnTickRef = useRef<number>(0);
+  // rafRef removed; not used
+
+  // Reset tracking when identity changes
+  useEffect(() => {
+    incomeSeriesRef.current = [];
+    spendingSeriesRef.current = [];
+    turnAccumRef.current = { income: 0, spend: 0 };
+    lastTurnRef.current = typeof (snapshot as any)?.turns === 'number' ? Number((snapshot as any).turns) : 0;
+    prevCashRef.current = (snapshot.players || []).find(p => equalNames(p.name, selectedPlayer))?.cash ?? 0;
+    baselinePushedRef.current = false;
+    withinTurnTickRef.current = 0;
+  }, [selectedPlayer]);
+
+  // Aggregate income/spend using cash deltas for selected player, roll-up per turn
+  useEffect(() => {
+    const currentCash = (snapshot.players || []).find(p => equalNames(p.name, selectedPlayer))?.cash ?? 0;
+    if (prevCashRef.current == null) {
+      prevCashRef.current = currentCash;
+    } else if (currentCash !== prevCashRef.current) {
+      const delta = currentCash - prevCashRef.current;
+      if (delta > 0) turnAccumRef.current.income += delta;
+      else if (delta < 0) turnAccumRef.current.spend += -delta;
+      prevCashRef.current = currentCash;
+    }
+    const curTurn = typeof (snapshot as any)?.turns === 'number' ? Number((snapshot as any).turns) : 0;
+    // Push an initial baseline at current turn so chart starts anchored
+    if (!baselinePushedRef.current) {
+      incomeSeriesRef.current.push({ x: curTurn, value: 0 });
+      spendingSeriesRef.current.push({ x: curTurn, value: 0 });
+      baselinePushedRef.current = true;
+    }
+    // If turn advanced, finalize previous turn and reset accumulators
+    if (curTurn > lastTurnRef.current) {
+      const x = curTurn;
+      const acc = turnAccumRef.current;
+      incomeSeriesRef.current.push({ x, value: acc.income });
+      spendingSeriesRef.current.push({ x, value: acc.spend });
+      const MAX = 240; // keep last ~240 data points
+      if (incomeSeriesRef.current.length > MAX) incomeSeriesRef.current.splice(0, incomeSeriesRef.current.length - MAX);
+      if (spendingSeriesRef.current.length > MAX) spendingSeriesRef.current.splice(0, spendingSeriesRef.current.length - MAX);
+      turnAccumRef.current = { income: 0, spend: 0 };
+      lastTurnRef.current = curTurn;
+      withinTurnTickRef.current = 0;
+    } else {
+      // While still in the same turn, emit an in-progress point so users see updates immediately
+      withinTurnTickRef.current += 1;
+      const xLive = curTurn + withinTurnTickRef.current / 1000; // fractional offset within the same turn
+      const acc = turnAccumRef.current;
+      const pushOrUpdate = (arr: Array<{ x: number; value: number }>, val: number) => {
+        const last = arr[arr.length - 1];
+        if (last && Math.abs(last.x - xLive) < 1e-9) {
+          last.value = val;
+        } else {
+          arr.push({ x: xLive, value: val });
+        }
+      };
+      pushOrUpdate(incomeSeriesRef.current, acc.income);
+      pushOrUpdate(spendingSeriesRef.current, acc.spend);
+      const MAX = 240;
+      if (incomeSeriesRef.current.length > MAX) incomeSeriesRef.current.splice(0, incomeSeriesRef.current.length - MAX);
+      if (spendingSeriesRef.current.length > MAX) spendingSeriesRef.current.splice(0, spendingSeriesRef.current.length - MAX);
+    }
+  }, [curCash, snapshot.turns, snapshot.last_action, selectedPlayer]);
 
   // Stocks and bonds data (fallback to empty arrays)
   const rawStocks = ((snapshot as any)?.stocks as any[] | undefined) || [];
@@ -147,96 +274,112 @@ function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameS
         </div>
       </div>
 
-      {/* Column 2: Top 70% (Balance + Spending in one container), Bottom 30% (Payments + Rentals) */}
-      <div style={{ display: 'grid', gap: 12, gridTemplateRows: '70% 30%', height: '100%', minWidth: 0, minHeight: 0 }}>
-        {/* Combined container */}
-        <div className="ui-labelframe" style={{ display: 'grid', gridTemplateRows: '3fr 2fr', minHeight: 0 }}>
-          {/* Balance Summary */}
+      {/* Column 2: Balance & Summary with Spending beneath; Bottom: Payments + Rentals */}
+      <div style={{ display: 'grid', gap: 12, gridTemplateRows: '65% 35%', height: '100%', minWidth: 0, minHeight: 0 }}>
+        {/* Balance & Summary (with Spending inside) */}
+        <div className="ui-labelframe" style={{ display: 'grid', gridTemplateRows: 'auto 1fr auto 1fr', minHeight: 0, position: 'relative', paddingBottom: 8 }}>
           <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-            <div className="ui-h3" style={{ marginBottom: 6 }}>Balance Summary</div>
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', minHeight: 0 }}>
+            <div className="ui-h3" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span>Balance Summary</span>
+              <select className="input" value={selectedPlayer} onChange={(e) => setSelectedPlayer(e.target.value)} style={{ height: 28, fontSize: 12 }}>
+                {(snapshot.players || []).map(p => (
+                  <option key={p.name} value={p.name}>{normalizeName(p.name)}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', justifyContent: 'space-between', minHeight: 0, position: 'relative' }}>
               <div>
                 <div className="ui-sm" style={{ opacity: 0.8 }}>Player</div>
-                <div style={{ fontWeight: 700 }}>{normalizeName(myName || (snapshot.players?.[snapshot.current_turn]?.name || '—'))}</div>
+                <div style={{ fontWeight: 700 }}>{normalizeName(selectedPlayer || (snapshot.players?.[snapshot.current_turn]?.name || '—'))}</div>
                 <div className="ui-sm" style={{ opacity: 0.8 }}>Balance</div>
-                <div style={{ fontSize: 22, fontWeight: 800 }}>${(snapshot.players || []).find(p => equalNames(p.name, myName))?.cash ?? '—'}</div>
+                <div style={{ fontSize: 22, fontWeight: 800 }}>${(snapshot.players || []).find(p => equalNames(p.name, selectedPlayer))?.cash ?? '—'}</div>
               </div>
               <div style={{ flex: 1, minWidth: 0, minHeight: 0 }}>
-                {balanceSeriesRef.current.length > 1 ? (
-                  <LineChart data={balanceSeriesRef.current as any[]} xKey="x" yKey="value" height={160} showAxes />
-                ) : (
-                  <Sparkline height={160} showAxes />
-                )}
+                <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px dashed var(--color-border)', borderRadius: 6, color: 'var(--muted)', pointerEvents: 'none' }}>
+                  <span className="ui-sm">Balance & Summary chart coming later</span>
+                </div>
+              </div>
+            </div>
+            {/* Spending inside same container */}
+            <div className="ui-h3" style={{ marginTop: 6, marginBottom: 6 }}>Spending</div>
+            <div style={{ position: 'relative', minHeight: 0, paddingRight: 180, paddingBottom: 12 }}>
+              <SpendingLegend entries={spendingAgg} />
+              <div style={{ position: 'absolute', right: 6, bottom: -22, width: 160, height: 160, pointerEvents: 'none' }}>
+                <PieChart entries={spendingAgg} size={140} inner={50} legend={false} />
               </div>
             </div>
           </div>
-          {/* Spending */}
-          <div style={{ minHeight: 0 }}>
-            <div className="ui-h3" style={{ marginBottom: 6 }}>Spending</div>
-            <div style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 12, minHeight: 0 }}>
-              <div style={{ display: 'grid', placeItems: 'center' }}>
-                {/* Donut with inner radius (live from log) */}
-                <PieChart entries={spendingAgg} size={180} inner={60} legend={false} />
+        </div>
+        {/* Bottom: Payments + Rentals summary */}
+        <div className="ui-labelframe" style={{ display: 'grid', gridTemplateRows: '1fr 1fr', gap: 8, minHeight: 0 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div className="ui-h3" style={{ marginBottom: 6 }}>Per Turn Payments</div>
+              <div className="ui-sm" style={{ flex: 1, overflowY: 'auto' }}>
+                {((snapshot as any).recurring || []).length === 0 ? (
+                  <div style={{ opacity: 0.7 }}>None</div>
+                ) : ((snapshot as any).recurring || []).map((r: any, idx: number) => (
+                  <div key={idx}>{normalizeName(r.from)} → {normalizeName(r.to)}: ${r.amount} ({r.turns_left} left)</div>
+                ))}
               </div>
-              <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-                {spendingAgg.slice(0, 3).map((e, i) => (
-                  <div key={i}>
-                    <div className="ui-sm" style={{ marginBottom: 2 }}>{e.label} — ${e.value.toFixed(0)}</div>
-                    <div style={{ height: 10, background: 'var(--color-border)', borderRadius: 6, overflow: 'hidden' }}>
-                      <div style={{ width: `${Math.min(100, Math.round(e.pct * 100))}%`, height: '100%', background: 'var(--color-accent)' }} />
-                    </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+              <div className="ui-h3" style={{ marginBottom: 6 }}>Rentals</div>
+              <div className="ui-sm" style={{ flex: 1, overflowY: 'auto' }}>
+                {((snapshot as any).property_rentals || []).length === 0 ? (
+                  <div style={{ opacity: 0.7 }}>Empty</div>
+                ) : ((snapshot as any).property_rentals || []).map((r: any, idx: number) => (
+                  <div key={idx} style={{ overflowWrap: 'anywhere' }}>
+                    {normalizeName(r.renter)} → {normalizeName(r.owner)}: {r.percentage}% of rent from {(r.properties || []).join(', ')} ({r.turns_left} left)
                   </div>
                 ))}
               </div>
             </div>
           </div>
-        </div>
-        {/* Payments + Rentals summary */}
-        <div className="ui-labelframe" style={{ display: 'grid', gridTemplateRows: '1fr 1fr', gap: 8, minHeight: 0 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div className="ui-h3" style={{ marginBottom: 6 }}>Per Turn Payments</div>
-            <div className="ui-sm" style={{ flex: 1, overflowY: 'auto' }}>
-              {((snapshot as any).recurring || []).length === 0 ? (
-                <div style={{ opacity: 0.7 }}>None</div>
-              ) : ((snapshot as any).recurring || []).map((r: any, idx: number) => (
-                <div key={idx}>{normalizeName(r.from)} → {normalizeName(r.to)}: ${r.amount} ({r.turns_left} left)</div>
-              ))}
-            </div>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <div className="ui-h3" style={{ marginBottom: 6 }}>Rentals</div>
-            <div className="ui-sm" style={{ flex: 1, overflowY: 'auto' }}>
-              {((snapshot as any).property_rentals || []).length === 0 ? (
-                <div style={{ opacity: 0.7 }}>Empty</div>
-              ) : ((snapshot as any).property_rentals || []).map((r: any, idx: number) => (
-                <div key={idx} style={{ overflowWrap: 'anywhere' }}>
-                  {normalizeName(r.renter)} → {normalizeName(r.owner)}: {r.percentage}% of rent from {(r.properties || []).join(', ')} ({r.turns_left} left)
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
       </div>
 
       {/* Column 3: All Stocks */}
       <div className="ui-labelframe" style={{ display: 'flex', flexDirection: 'column', minWidth: 0, minHeight: 0 }}>
-        <div className="ui-h3" style={{ marginBottom: 6 }}>Stocks</div>
+        <div className="ui-h3" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <span>Stocks</span>
+          {myName ? (
+            <button className="btn btn-ghost" onClick={() => setShowStockSettings(true)} style={{ padding: '2px 8px', fontSize: 12 }}>Settings</button>
+          ) : null}
+        </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridAutoRows: 'minmax(200px, 1fr)', gap: 10, minHeight: 0, overflowY: 'auto' }}>
           {stocksByOwner.map((row: any, i: number) => {
+            const isMine = row?.owner && myName && equalNames(row.owner, myName);
+            const allowInvest = !!row?.allow_investing;
+            const myHolding = (row?.holdings || []).find((h: any) => myName && equalNames(h.investor, myName));
             return (
               <div key={i} style={{ border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row ? normalizeName(row.owner) : `Stock ${i + 1}`}</div>
                 <div style={{ flex: 1, minHeight: 0 }}>
                   {row?.history && row.history.length ? (
-                    <LineChart data={row.history as any[]} xKey="turn" yKey="pool" height={140} showAxes />
+                    <ResponsiveContainer width="100%" height={140}>
+                      <RCLineChart data={row.history} margin={{ top: 6, right: 6, left: 6, bottom: 6 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e6e6e6" />
+                        <XAxis dataKey="turn" tick={{ fontSize: 10 }} />
+                        <YAxis tickFormatter={(v:number)=>`$${Number(v).toLocaleString()}`} tick={{ fontSize: 10 }} width={52} />
+                        <Tooltip formatter={(v:any)=>`$${Number(v).toLocaleString()}`} labelFormatter={(l:any)=>`Round ${l}`} />
+                        <Line type="monotone" dataKey="pool" stroke="#2980b9" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      </RCLineChart>
+                    </ResponsiveContainer>
                   ) : (
                     <Sparkline height={140} showAxes />
                   )}
                 </div>
-                <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 6 }}>
-                  <button className="btn btn-ghost">Buy</button>
-                  <button className="btn btn-ghost">Sell</button>
-                </div>
+                {!isMine ? (
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 6, alignItems: 'center' }}>
+                    {allowInvest ? (
+                      <button className="btn btn-ghost" onClick={() => setShowStockInvest({ owner: row.owner })}>Buy</button>
+                    ) : (
+                      <span className="ui-xs" style={{ opacity: 0.7 }}>Disabled</span>
+                    )}
+                    {(myHolding && myHolding.shares > 0) ? (
+                      <button className="btn btn-ghost" onClick={() => setShowStockSell({ owner: row.owner })}>Sell</button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -247,15 +390,29 @@ function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameS
       <div className="ui-labelframe" style={{ display: 'grid', gridTemplateRows: '9fr 1fr', gap: 8, minWidth: 0, minHeight: 0 }}>
         {/* Bonds charts area */}
         <div style={{ minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <div className="ui-h3" style={{ marginBottom: 6 }}>Bonds Charts</div>
+          <div className="ui-h3" style={{ marginBottom: 6, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+            <span>Bonds Charts</span>
+            {myName ? (
+              <button className="btn btn-ghost" onClick={() => setShowBondSettings(true)} style={{ padding: '2px 8px', fontSize: 12 }}>Settings</button>
+            ) : null}
+          </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gridAutoRows: 'minmax(200px, 1fr)', gap: 10, minHeight: 0, overflowY: 'auto' }}>
             {bondsByOwner.map((row: any, i: number) => {
+              const isMine = row?.owner && myName && equalNames(row.owner, myName);
               return (
                 <div key={i} style={{ border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
                   <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row ? normalizeName(row.owner) : `Bond ${i + 1}`}</div>
                   <div style={{ flex: 1, minHeight: 0 }}>
                     {row?.history && row.history.length ? (
-                      <LineChart data={row.history as any[]} xKey="turn" yKey="rate" height={140} showAxes />
+                      <ResponsiveContainer width="100%" height={140}>
+                        <RCLineChart data={row.history} margin={{ top: 6, right: 6, left: 6, bottom: 6 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e6e6e6" />
+                          <XAxis dataKey="turn" tick={{ fontSize: 10 }} />
+                          <YAxis domain={[0, 100]} tickFormatter={(v:number)=>`${v}%`} tick={{ fontSize: 10 }} width={40} />
+                          <Tooltip formatter={(v:any)=>`${Number(v).toFixed(2)}%`} labelFormatter={(l:any)=>`Round ${l}`} />
+                          <Line type="monotone" dataKey="rate" stroke="#8e44ad" strokeWidth={2} dot={false} isAnimationActive={false} />
+                        </RCLineChart>
+                      </ResponsiveContainer>
                     ) : (
                       <Sparkline height={140} showAxes />
                     )}
@@ -263,6 +420,17 @@ function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameS
                   {row ? (
                     <div className="ui-xs" style={{ marginTop: 6, opacity: 0.8 }}>Rate {row.rate_percent || 0}% • Every {row.period_turns || 1}t</div>
                   ) : null}
+                  <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginTop: 6 }}>
+                    {isMine ? (
+                      <button className="btn btn-ghost" onClick={() => setShowBondSettings(true)} style={{ padding: '2px 8px', fontSize: 12 }}>Settings</button>
+                    ) : (
+                      row?.allow_bonds ? (
+                        <button className="btn btn-ghost" onClick={() => setShowBondBuy({ owner: row.owner })}>Invest</button>
+                      ) : (
+                        <span className="ui-xs" style={{ opacity: 0.7 }}>Disabled</span>
+                      )
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -272,94 +440,96 @@ function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameS
         <div style={{ minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <div className="ui-h3" style={{ marginBottom: 4 }}>Payouts</div>
           <div className="ui-sm" style={{ flex: 1, overflowY: 'auto' }}>
-            {(!bondsByOwner || bondsByOwner.length === 0) ? (
-              <div style={{ opacity: 0.7 }}>None</div>
-            ) : bondsByOwner.map((row: any, idx: number) => (
-              <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '2px 0' }}>
-                <span title={row.owner} style={{ width: 8, height: 8, borderRadius: '50%', background: row.owner_color || '#999', display: 'inline-block' }} />
-                <span style={{ fontWeight: 600 }}>{normalizeName(row.owner)}</span>
-                <span style={{ opacity: 0.8 }}>• {row.rate_percent || 0}% every {row.period_turns || 1}t</span>
-              </div>
-            ))}
+            {(!((snapshot as any).bond_payouts) || ((snapshot as any).bond_payouts || []).length === 0) ? (
+              <div style={{ opacity: 0.7 }}>Empty</div>
+            ) : (
+              <>
+                {((snapshot as any).bond_payouts || []).map((bp: any, idx: number) => (
+                  <div key={idx} style={{ overflowWrap: 'anywhere' }}>
+                    {normalizeName(bp.owner)} → {normalizeName(bp.investor)}: ${bp.coupon || 0} every {bp.period_turns || 1}t
+                    {bp.principal ? (
+                      <span style={{ opacity: 0.8 }}> (principal ${bp.principal}{(() => {
+                        const n = bp.next_due_in_turns;
+                        if (typeof n === 'number') return n === 0 ? ' • due now' : ` • next in ${n}t`;
+                        return '';
+                      })()}{(() => {
+                        const paid = ((snapshot.log||[]) as any[]).filter(e => String(e.type||'') === 'bond_coupon' &&
+                          String(e.text||'').toLowerCase().includes(String(bp.owner||'').toLowerCase()) &&
+                          String(e.text||'').toLowerCase().includes(String(bp.investor||'').toLowerCase())
+                        ).reduce((a, e) => {
+                          const m = String(e.text||'').match(/\$([\d,]+)/);
+                          const v = m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
+                          return a + (Number.isFinite(v) ? v : 0);
+                        }, 0);
+                        return paid ? ` • paid so far $${paid}` : '';
+                      })()})</span>
+                    ) : null}
+                  </div>
+                ))}
+                {(() => {
+                  const totalPaid = ((snapshot.log||[]) as any[])
+                    .filter(e => String(e.type||'') === 'bond_coupon')
+                    .reduce((a, e) => {
+                      const m = String(e.text||'').match(/\$([\d,]+)/);
+                      const v = m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
+                      return a + (Number.isFinite(v) ? v : 0);
+                    }, 0);
+                  return totalPaid > 0 ? (
+                    <div className="ui-xs" style={{ marginTop: 6, opacity: 0.85 }}>Total paid so far: ${totalPaid}</div>
+                  ) : null;
+                })()}
+              </>
+            )}
           </div>
         </div>
       </div>
-    </div>
-  );
-}
 
-function ChatPanel({ lobbyId }: { lobbyId: string }) {
-  const s = getSocket();
-  const [chatLog, setChatLog] = useState<Array<{ from: string; message: string; ts?: number }>>([]);
-  const [chatMsg, setChatMsg] = useState('');
-  const messagesRef = useRef<HTMLDivElement | null>(null);
-  const storedName = (getRemembered().displayName || '').trim();
-
-  useEffect(() => {
-    const onChat = (msg: any) => {
-      if (!msg) return;
-      const from = msg.from || 'anon';
-      const text = msg.message || '';
-      const ts = msg.ts || Date.now();
-      setChatLog(prev => [...prev, { from, message: text, ts }]);
-    };
-    const onJoined = (data: any) => {
-      if (!data || (data.id && data.id !== lobbyId)) return;
-      const hist = Array.isArray((data as any).chat) ? (data as any).chat : [];
-      const mapped = hist.map((c: any) => ({ from: c.from || 'anon', message: c.message || '', ts: c.ts ? Number(c.ts) : undefined }));
-      setChatLog(mapped);
-    };
-    s.on('chat_message', onChat);
-    s.on('lobby_joined', onJoined);
-    // hydrate if connected
-    try { s.emit('lobby_join', { id: lobbyId, lobby_id: lobbyId }); } catch {}
-    return () => { s.off('chat_message', onChat); s.off('lobby_joined', onJoined); };
-  }, [s, lobbyId]);
-
-  useEffect(() => {
-    if (messagesRef.current) {
-      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-    }
-  }, [chatLog]);
-
-  const sendChat = () => {
-    const text = chatMsg.trim();
-    if (!text) return;
-    setChatMsg('');
-    try { s.emit('chat_send', { id: lobbyId, message: text }); } catch {}
-  };
-
-  return (
-    <div style={{ display: 'grid', gridTemplateRows: '1fr auto', height: '100%', border: '1px solid var(--color-border)', borderRadius: 8, minWidth: 0, position: 'relative', background: 'var(--color-surface)' }}>
-      <div ref={messagesRef} style={{ overflowY: 'auto', padding: 8 }}>
-        {chatLog.length === 0 ? (
-          <div className="ui-sm" style={{ opacity: 0.7 }}>No messages</div>
-        ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'grid', gap: 6 }}>
-            {chatLog.map((c, i) => (
-              <li key={i} style={{ fontSize: 12, lineHeight: 1.3, overflowWrap: 'anywhere' }}>
-                <strong>{normalizeName(c.from)}</strong>
-                <span style={{ opacity: 0.65 }}>:</span> {c.message}
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      <div style={{ borderTop: '1px solid var(--color-border)', padding: 6, display: 'flex', gap: 6 }}>
-        <input
-          type="text"
-          value={chatMsg}
-          onChange={e => setChatMsg(e.target.value)}
-          placeholder={`Message as ${storedName || 'me'}`}
-          className="input"
-          style={{ flex: 1, fontSize: 12, padding: '6px 8px', height: 28, lineHeight: 1.2, borderRadius: 6 }}
-          onKeyDown={(e) => { if (e.key === 'Enter') sendChat(); }}
+      {/* Settings Modals */}
+      {showStockSettings ? (
+        <StockSettingsModal
+          onClose={() => setShowStockSettings(false)}
+          lobbyId={lobbyId}
+          snapshot={snapshot}
+          owner={myName}
         />
-        <button className="btn" onClick={sendChat} style={{ height: 28, padding: '0 10px', fontSize: 12 }}>Send</button>
-      </div>
+      ) : null}
+      {showBondSettings ? (
+        <BondSettingsModal
+          onClose={() => setShowBondSettings(false)}
+          lobbyId={lobbyId}
+          snapshot={snapshot}
+          owner={myName}
+        />
+      ) : null}
+      {showBondBuy ? (
+        <BondInvestModal
+          onClose={() => setShowBondBuy(null)}
+          lobbyId={lobbyId}
+          snapshot={snapshot}
+          owner={showBondBuy.owner}
+        />
+      ) : null}
+      {showStockInvest ? (
+        <StockQuickInvestModal
+          onClose={() => setShowStockInvest(null)}
+          lobbyId={lobbyId}
+          snapshot={snapshot}
+          owner={showStockInvest.owner}
+        />
+      ) : null}
+      {showStockSell ? (
+        <StockQuickSellModal
+          onClose={() => setShowStockSell(null)}
+          lobbyId={lobbyId}
+          snapshot={snapshot}
+          owner={showStockSell.owner}
+        />
+      ) : null}
     </div>
   );
 }
+
+// ChatPanel now shared in ./ChatPanel
 
 function GameLogPanel({ snapshot }: { snapshot: GameSnapshot }) {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -367,7 +537,47 @@ function GameLogPanel({ snapshot }: { snapshot: GameSnapshot }) {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [snapshot?.log]);
   const items = (snapshot?.log || []).slice(-80);
-  const icon = (t: string) => (t === 'rolled' ? '🎲' : t === 'buy' ? '🏠' : t === 'end_turn' ? '⏭' : t === 'bankrupt' ? '💥' : '•');
+  const icon = (t: string) => {
+    const m: Record<string, string> = {
+      rolled: '🎲',
+      buy: '�',
+      buy_house: '🏚️',
+      sell_house: '🏚️',
+      buy_hotel: '🏨',
+      sell_hotel: '🏨',
+      mortgage: '🏦',
+      unmortgage: '�',
+      rent: '💸',
+      tax: '🧾',
+      pass_go: '🚏',
+      jail: '🚓',
+      gotojail: '🚔',
+      end_turn: '⏭',
+      trade_created: '🤝',
+      trade_accepted: '✅',
+      trade_declined: '❌',
+      trade_canceled: '🗑️',
+      recurring_created: '🔁',
+      recurring_pay: '💱',
+      recurring_done: '✔️',
+      rental_offered: '🏷️',
+      rental_created: '📄',
+      rental_declined: '🚫',
+      rental_canceled: '🗑️',
+      stock_invest: '📈',
+      stock_sell: '📉',
+      bond_invest: '💰',
+      bond_coupon: '💵',
+      auto_mortgage: '⚙️',
+      card: '🎴',
+      card_draw: '🃏',
+      game_over: '🏁',
+      bankrupt: '💥',
+      disconnect_kick: '�',
+      debt_unpaid: '❗',
+    };
+    return m[t] || '•';
+  };
   return (
     <div ref={ref} style={{ fontSize: 11, flex: 1, overflowY: 'auto', minHeight: 0 }}>
       {items.length === 0 ? (
@@ -447,42 +657,81 @@ function Sparkline({ height = 100, showAxes = false }: { height?: number; showAx
 }
 
 function PieChart({ entries, size = 140, legend = true, inner = 0 }: { entries: Array<{ label: string; value: number; pct: number }>; size?: number; legend?: boolean; inner?: number }) {
-  const total = entries.reduce((a, b) => a + b.value, 0) || 1;
-  let acc = 0;
-  const colors = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#E91E63'];
+  const sum = entries.reduce((a, b) => a + b.value, 0);
+  const total = sum || 1;
+  const colors = PIE_COLORS;
   const r = size / 2;
   const innerR = Math.max(0, Math.min(r - 2, inner));
   const cx = r, cy = r;
-  const segs = entries.map((e, i) => {
-    const start = (acc / total) * Math.PI * 2;
-    acc += e.value;
-    const end = (acc / total) * Math.PI * 2;
-    const [x1, y1] = [cx + r * Math.cos(start), cy + r * Math.sin(start)];
-    const [x2, y2] = [cx + r * Math.cos(end), cy + r * Math.sin(end)];
-    const largeArc = end - start > Math.PI ? 1 : 0;
+  const svgParts: ReactElement[] = [];
+  // Special case: one non-zero segment should render as a full ring
+  const nonZero = entries.filter(e => e.value > 0);
+  if (sum === 0) {
     if (innerR > 0) {
-      // Donut segment: outer arc + inner arc back
-      const [ix2, iy2] = [cx + innerR * Math.cos(end), cy + innerR * Math.sin(end)];
-      const [ix1, iy1] = [cx + innerR * Math.cos(start), cy + innerR * Math.sin(start)];
-      const d = `M ${x1} ${y1}
-                 A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}
-                 L ${ix2} ${iy2}
-                 A ${innerR} ${innerR} 0 ${largeArc} 0 ${ix1} ${iy1}
-                 Z`;
-      return <path key={i} d={d} fill={colors[i % colors.length]} stroke="white" strokeWidth={1} />;
+      const d = `M ${cx + r} ${cy}
+                 A ${r} ${r} 0 1 1 ${cx - r} ${cy}
+                 A ${r} ${r} 0 1 1 ${cx + r} ${cy}
+                 M ${cx + innerR} ${cy}
+                 A ${innerR} ${innerR} 0 1 0 ${cx - innerR} ${cy}
+                 A ${innerR} ${innerR} 0 1 0 ${cx + innerR} ${cy} Z`;
+      svgParts.push(<path key="empty" d={d} fill="var(--color-border)" />);
     } else {
-      const d = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`;
-      return <path key={i} d={d} fill={colors[i % colors.length]} stroke="white" strokeWidth={1} />;
+      const d = `M ${cx} ${cy} m -${r}, 0 a ${r},${r} 0 1,0 ${r * 2},0 a ${r},${r} 0 1,0 -${r * 2},0`;
+      svgParts.push(<path key="empty" d={d} fill="var(--color-border)" />);
     }
-  });
+  } else if (nonZero.length === 1) {
+    const fill = colors[0 % colors.length];
+    if (innerR > 0) {
+      const d = `M ${cx + r} ${cy}
+                 A ${r} ${r} 0 1 1 ${cx - r} ${cy}
+                 A ${r} ${r} 0 1 1 ${cx + r} ${cy}
+                 M ${cx + innerR} ${cy}
+                 A ${innerR} ${innerR} 0 1 0 ${cx - innerR} ${cy}
+                 A ${innerR} ${innerR} 0 1 0 ${cx + innerR} ${cy} Z`;
+      svgParts.push(<path key="full" d={d} fill={fill} />);
+    } else {
+      const d = `M ${cx} ${cy} m -${r}, 0 a ${r},${r} 0 1,0 ${r * 2},0 a ${r},${r} 0 1,0 -${r * 2},0`;
+      svgParts.push(<path key="full" d={d} fill={fill} />);
+    }
+  } else {
+    let acc = 0;
+    const data = entries;
+    data.forEach((e, i) => {
+      const start = (acc / total) * Math.PI * 2;
+      acc += e.value;
+      const end = (acc / total) * Math.PI * 2;
+      const [x1, y1] = [cx + r * Math.cos(start), cy + r * Math.sin(start)];
+      const [x2, y2] = [cx + r * Math.cos(end), cy + r * Math.sin(end)];
+      const largeArc = end - start > Math.PI ? 1 : 0;
+      const fill = colors[i % colors.length];
+      if (innerR > 0) {
+        const [ix2, iy2] = [cx + innerR * Math.cos(end), cy + innerR * Math.sin(end)];
+        const [ix1, iy1] = [cx + innerR * Math.cos(start), cy + innerR * Math.sin(start)];
+        const d = `M ${x1} ${y1}
+                   A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2}
+                   L ${ix2} ${iy2}
+                   A ${innerR} ${innerR} 0 ${largeArc} 0 ${ix1} ${iy1}
+                   Z`;
+        svgParts.push(<path key={i} d={d} fill={fill} stroke="white" strokeWidth={1} />);
+      } else {
+        const d = `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+        svgParts.push(<path key={i} d={d} fill={fill} stroke="white" strokeWidth={1} />);
+      }
+    });
+  }
   return (
-    <div>
-      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>{segs}</svg>
+    <div style={{ position: 'relative', width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>{svgParts}</svg>
+      {innerR > 0 ? (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none' }}>
+          <div className="ui-sm" style={{ fontWeight: 800 }}>${sum.toFixed(0)}</div>
+        </div>
+      ) : null}
       {legend && (
         <div className="ui-sm" style={{ display: 'grid', gap: 4, marginTop: 6 }}>
           {entries.map((e, i) => (
             <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <span style={{ width: 10, height: 10, background: ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#E91E63'][i % 5], display: 'inline-block', borderRadius: 2 }} />
+              <span style={{ width: 10, height: 10, background: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block', borderRadius: 2 }} />
               <span>{e.label}</span>
               <span style={{ marginLeft: 'auto' }}>${e.value.toFixed(0)}</span>
             </div>
@@ -493,51 +742,35 @@ function PieChart({ entries, size = 140, legend = true, inner = 0 }: { entries: 
   );
 }
 
-// Generic line chart that accepts x/y keys and data arrays
-function LineChart({ data, xKey, yKey, color = 'var(--color-accent)', height = 120, showAxes = true }:
-  { data: Array<Record<string, number>>; xKey: string; yKey: string; color?: string; height?: number; showAxes?: boolean }) {
-  const baseW = 300;
-  const pad = showAxes ? Math.max(12, Math.min(20, Math.round(height * 0.14))) : 6;
-  const innerW = baseW - pad * 2;
-  const innerH = height - pad * 2;
-  const xs = data.map(d => d[xKey]);
-  const ys = data.map(d => d[yKey]);
-  const minX = Math.min(...xs, 0);
-  const maxX = Math.max(...xs, 1);
-  const minY = Math.min(...ys, 0);
-  const maxY = Math.max(...ys, 1);
-  const x = (v: number) => pad + ((v - minX) / Math.max(1e-6, (maxX - minX))) * innerW;
-  const y = (v: number) => pad + innerH - ((v - minY) / Math.max(1e-6, (maxY - minY))) * innerH;
-  const path = data.map((d, i) => `${i === 0 ? 'M' : 'L'} ${x(d[xKey])} ${y(d[yKey])}`).join(' ');
-  const xticks = showAxes ? 5 : 0;
-  const yticks = showAxes ? 4 : 0;
-  const xTickVals = Array.from({ length: xticks + 1 }, (_, i) => minX + (i / Math.max(1, xticks)) * (maxX - minX));
-  const yTickVals = Array.from({ length: yticks + 1 }, (_, i) => minY + (i / Math.max(1, yticks)) * (maxY - minY));
+const PIE_COLORS = ['#4CAF50', '#2196F3', '#FF9800', '#9C27B0', '#E91E63'];
+
+function SpendingLegend({ entries }: { entries: Array<{ label: string; value: number; pct: number }> }) {
   return (
-    <svg viewBox={`0 0 ${baseW} ${height}`} width="100%" height="100%" preserveAspectRatio="none" style={{ display: 'block' }}>
-      {showAxes && (
-        <>
-          <line x1={pad} y1={height - pad} x2={baseW - pad} y2={height - pad} stroke="#ccc" strokeWidth={1} />
-          <line x1={pad} y1={pad} x2={pad} y2={height - pad} stroke="#ccc" strokeWidth={1} />
-          {xTickVals.map((v, i) => (
-            <g key={`x-${i}`}>
-              <line x1={x(v)} y1={pad} x2={x(v)} y2={height - pad} stroke="#f2f2f2" strokeWidth={1} />
-              <text x={x(v)} y={height - pad + 12} fontSize={9} textAnchor="middle" fill="#666">{Math.round(v)}</text>
-            </g>
-          ))}
-          {yTickVals.map((v, i) => (
-            <g key={`y-${i}`}>
-              <line x1={pad} y1={y(v)} x2={baseW - pad} y2={y(v)} stroke="#f2f2f2" strokeWidth={1} />
-              <text x={pad - 6} y={y(v)} fontSize={9} textAnchor="end" dominantBaseline="middle" fill="#666">{Math.round(v)}</text>
-            </g>
-          ))}
-        </>
-      )}
-      <path d={path} fill="none" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
-      {data.map((d, i) => <circle key={i} cx={x(d[xKey])} cy={y(d[yKey])} r={2} fill={color} />)}
-    </svg>
+    <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
+      {entries.map((e, i) => (
+        <div key={i}>
+          <div className="ui-sm" style={{ marginBottom: 2, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ width: 10, height: 10, background: PIE_COLORS[i % PIE_COLORS.length], display: 'inline-block', borderRadius: 2 }} />
+            <span>{e.label} — ${Number(e.value).toLocaleString()}</span>
+          </div>
+          <div style={{ height: 10, background: 'var(--color-border)', borderRadius: 6, overflow: 'hidden' }}>
+            <div style={{ width: `${Math.round((e.pct || 0) * 100)}%`, height: '100%', background: PIE_COLORS[i % PIE_COLORS.length] }} />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
+
+// Generic line chart that accepts x/y keys and data arrays
+// Removed standalone LineChart for now (unused after placeholder)
+
+// MultiLineChart removed (unused)
+
+// Classify money flow for a given player name from a log entry
+// Old text-based classifier removed; aggregation now uses cash deltas per round
+
+// Removed mergeIncomeSpending for now (unused after placeholder)
 
 function extractAmount(txt: string): number {
   const m = txt.match(/\$([\d,]+)/);
@@ -546,3 +779,237 @@ function extractAmount(txt: string): number {
 }
 
 // Players Overview intentionally not rendered inside the dashboard drawer per design
+
+type StockSettingsProps = { onClose: () => void; lobbyId: string; snapshot: GameSnapshot; owner: string };
+function StockSettingsModal({ onClose, lobbyId, snapshot, owner }: StockSettingsProps) {
+  const s = getSocket();
+  const row = useMemo(() => (snapshot.stocks || []).find(st => equalNames(st.owner, owner)), [snapshot.stocks, owner]);
+  const [allowInvesting, setAllowInvesting] = useState<boolean>(!!row?.allow_investing);
+  const [enforceMinBuy, setEnforceMinBuy] = useState<boolean>(!!row?.enforce_min_buy);
+  const [minBuy, setMinBuy] = useState<number>(Math.max(0, Number(row?.min_buy || 0)));
+  const [enforceMinPoolTotal, setEnforceMinPoolTotal] = useState<boolean>(!!(row?.enforce_min_pool_total ?? row?.enforce_min_pool));
+  const [enforceMinPoolOwner, setEnforceMinPoolOwner] = useState<boolean>(!!(row?.enforce_min_pool_owner ?? row?.enforce_min_pool));
+  const [minPoolTotal, setMinPoolTotal] = useState<number>(Math.max(0, Number(row?.min_pool_total || 0)));
+  const [minPoolOwner, setMinPoolOwner] = useState<number>(Math.max(0, Number(row?.min_pool_owner || 0)));
+
+  const save = () => {
+    const payload = {
+      type: 'stock_settings',
+      owner,
+      allow_investing: allowInvesting,
+      enforce_min_buy: enforceMinBuy,
+      min_buy: Math.max(0, Math.floor(minBuy || 0)),
+      // keep legacy flag in sync when either specific pool rules are enabled
+      enforce_min_pool: (enforceMinPoolTotal || enforceMinPoolOwner),
+      enforce_min_pool_total: enforceMinPoolTotal,
+      enforce_min_pool_owner: enforceMinPoolOwner,
+      min_pool_total: Math.max(0, Math.floor(minPoolTotal || 0)),
+      min_pool_owner: Math.max(0, Math.floor(minPoolOwner || 0)),
+    } as any;
+    try { s.emit('game_action', { id: lobbyId, action: payload }); } catch {}
+    onClose();
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 3100 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '10%', left: '50%', transform: 'translateX(-50%)', width: 420, background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, boxShadow: 'var(--elev-4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div className="ui-h3">Stock Settings — {normalizeName(owner)}</div>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <label className="ui-sm" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" checked={allowInvesting} onChange={(e) => setAllowInvesting(e.target.checked)} /> Allow others to invest
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8 }}>
+            <label className="ui-sm" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" checked={enforceMinBuy} onChange={(e) => setEnforceMinBuy(e.target.checked)} /> Enforce min buy
+            </label>
+            <input type="number" className="input" min={0} step={25} value={minBuy} onChange={(e) => setMinBuy(parseInt(e.target.value || '0', 10))} style={{ width: 100 }} />
+          </div>
+          <div style={{ display: 'grid', gap: 6 }}>
+            <div className="ui-sm" style={{ fontWeight: 700 }}>Pool Minimums</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8 }}>
+              <label className="ui-sm" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={enforceMinPoolTotal} onChange={(e) => setEnforceMinPoolTotal(e.target.checked)} /> Enforce pool total ≥
+              </label>
+              <input type="number" className="input" min={0} step={50} value={minPoolTotal} onChange={(e) => setMinPoolTotal(parseInt(e.target.value || '0', 10))} style={{ width: 120 }} />
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8 }}>
+              <label className="ui-sm" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" checked={enforceMinPoolOwner} onChange={(e) => setEnforceMinPoolOwner(e.target.checked)} /> Enforce owner stake ≥
+              </label>
+              <input type="number" className="input" min={0} step={50} value={minPoolOwner} onChange={(e) => setMinPoolOwner(parseInt(e.target.value || '0', 10))} style={{ width: 120 }} />
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn" onClick={save}>Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type BondSettingsProps = { onClose: () => void; lobbyId: string; snapshot: GameSnapshot; owner: string };
+function BondSettingsModal({ onClose, lobbyId, snapshot, owner }: BondSettingsProps) {
+  const s = getSocket();
+  const row = useMemo(() => (snapshot.bonds || []).find(st => equalNames(st.owner, owner)), [snapshot.bonds, owner]);
+  const [allow, setAllow] = useState<boolean>(!!row?.allow_bonds);
+  const [rate, setRate] = useState<number>(Math.max(0, Math.min(100, Number(row?.rate_percent || 0))));
+  const [period, setPeriod] = useState<number>(Math.max(1, Math.min(20, Number(row?.period_turns || 1))));
+
+  const save = () => {
+    const payload = {
+      type: 'bond_settings',
+      allow_bonds: allow,
+      rate_percent: Math.max(0, Math.min(100, rate)),
+      period_turns: Math.max(1, Math.min(20, Math.floor(period || 1))),
+    } as any;
+    try { s.emit('game_action', { id: lobbyId, action: payload }); } catch {}
+    onClose();
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 3100 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '12%', left: '50%', transform: 'translateX(-50%)', width: 420, background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, boxShadow: 'var(--elev-4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div className="ui-h3">Bond Settings — {normalizeName(owner)}</div>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <label className="ui-sm" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <input type="checkbox" checked={allow} onChange={(e) => setAllow(e.target.checked)} /> Allow bond investments
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8 }}>
+            <label className="ui-sm">Rate %</label>
+            <input type="number" className="input" min={0} max={100} step={0.5} value={rate} onChange={(e) => setRate(parseFloat(e.target.value || '0'))} style={{ width: 120 }} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8 }}>
+            <label className="ui-sm">Period (turns)</label>
+            <input type="number" className="input" min={1} max={20} step={1} value={period} onChange={(e) => setPeriod(parseInt(e.target.value || '1', 10))} style={{ width: 120 }} />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 8 }}>
+            <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
+            <button className="btn" onClick={save}>Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type BondInvestProps = { onClose: () => void; lobbyId: string; snapshot: GameSnapshot; owner: string };
+function BondInvestModal({ onClose, lobbyId, snapshot, owner }: BondInvestProps) {
+  const s = getSocket();
+  const me = (getRemembered().displayName || '').trim();
+  const bonds = snapshot.bonds || [];
+  const row = bonds.find(b => equalNames(b.owner, owner));
+  const allow = !!row?.allow_bonds;
+  const rate = row?.rate_percent || 0;
+  const period = row?.period_turns || 1;
+  const [amount, setAmount] = useState<number>(50);
+  const presets = [25, 50, 100, 250, 500];
+
+  const doInvest = (amt: number) => {
+    if (!allow) return;
+    try { s.emit('game_action', { id: lobbyId, action: { type: 'bond_invest', owner, amount: Math.max(1, Math.floor(amt || 0)) } }); } catch {}
+    onClose();
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 3200 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '14%', left: '50%', transform: 'translateX(-50%)', width: 420, background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, boxShadow: 'var(--elev-4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div className="ui-h3">Invest in {normalizeName(owner)}’s Bonds</div>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+        <div style={{ display: 'grid', gap: 10 }}>
+          <div className="ui-sm" style={{ opacity: 0.9 }}>Terms: {rate}% coupon every {period} turn(s)</div>
+          {!allow && (
+            <div className="ui-sm" style={{ color: 'var(--color-danger)' }}>Investing is disabled. Ask owner to enable in Settings.</div>
+          )}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {presets.map(p => (
+              <button key={p} className="btn btn-ghost" disabled={!allow} onClick={() => doInvest(p)}>${p}</button>
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8 }}>
+            <input type="number" className="input" min={1} step={25} value={amount} onChange={(e) => setAmount(parseInt(e.target.value || '1', 10))} />
+            <button className="btn" disabled={!allow} onClick={() => doInvest(amount)}>Buy</button>
+          </div>
+          <div className="ui-xs" style={{ opacity: 0.8 }}>Projected return next coupon: ${Math.max(0, Math.floor((amount || 0) * (rate / 100)))} (if invested before owner’s next payout)</div>
+          <div className="ui-xs" style={{ opacity: 0.7 }}>You: {normalizeName(me)}. Owner receives your principal immediately; coupons paid by owner every {period} turn(s).</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type StockQuickProps = { onClose: () => void; lobbyId: string; snapshot: GameSnapshot; owner: string };
+function StockQuickInvestModal({ onClose, lobbyId, snapshot, owner }: StockQuickProps) {
+  const s = getSocket();
+  const row = (snapshot.stocks || []).find(st => equalNames(st.owner, owner));
+  const allow = !!row?.allow_investing;
+  const [amount, setAmount] = useState<number>(50);
+  const presets = [25, 50, 100, 250, 500];
+  const doInvest = (amt: number) => {
+    if (!allow) return;
+    try { s.emit('game_action', { id: lobbyId, action: { type: 'stock_invest', owner, amount: Math.max(1, Math.floor(amt || 0)) } }); } catch {}
+    onClose();
+  };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 3200 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '14%', left: '50%', transform: 'translateX(-50%)', width: 420, background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, boxShadow: 'var(--elev-4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div className="ui-h3">Invest in {normalizeName(owner)}’s Stock</div>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+        {!allow && <div className="ui-sm" style={{ color: 'var(--color-danger)' }}>Investing is disabled by the owner.</div>}
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+          {presets.map(p => (
+            <button key={p} className="btn btn-ghost" disabled={!allow} onClick={() => doInvest(p)}>${p}</button>
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8, marginTop: 8 }}>
+          <input type="number" className="input" min={1} step={25} value={amount} onChange={(e) => setAmount(parseInt(e.target.value || '1', 10))} />
+          <button className="btn" disabled={!allow} onClick={() => doInvest(amount)}>Buy</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StockQuickSellModal({ onClose, lobbyId, snapshot, owner }: StockQuickProps) {
+  const s = getSocket();
+  const me = (getRemembered().displayName || '').trim();
+  const row = (snapshot.stocks || []).find(st => equalNames(st.owner, owner));
+  const myStake = (row?.holdings || []).find(h => equalNames(h.investor, me));
+  const [amount, setAmount] = useState<number>(50);
+  const presets = [25, 50, 100, 250, 500];
+  const doSell = (amt: number) => {
+    try { s.emit('game_action', { id: lobbyId, action: { type: 'stock_sell', owner, amount: Math.max(1, Math.floor(amt || 0)) } }); } catch {}
+    onClose();
+  };
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 3200 }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '14%', left: '50%', transform: 'translateX(-50%)', width: 420, background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, boxShadow: 'var(--elev-4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <div className="ui-h3">Sell {normalizeName(owner)}’s Stock</div>
+          <button className="btn" onClick={onClose}>Close</button>
+        </div>
+        <div className="ui-sm" style={{ opacity: 0.85 }}>Your stake: ${Math.max(0, Math.floor((myStake as any)?.shares || 0))}</div>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+          {presets.map(p => (
+            <button key={p} className="btn btn-ghost" onClick={() => doSell(p)}>${p}</button>
+          ))}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8, marginTop: 8 }}>
+          <input type="number" className="input" min={1} step={25} value={amount} onChange={(e) => setAmount(parseInt(e.target.value || '1', 10))} />
+          <button className="btn" onClick={() => doSell(amount)}>Sell</button>
+        </div>
+      </div>
+    </div>
+  );
+}

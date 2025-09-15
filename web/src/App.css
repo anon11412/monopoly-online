@@ -86,7 +86,7 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   }
   /* Restore sticky positioning but ensure it stays within viewport */
   .actions-panel { 
-    margin-left: 0; 
+    margin-left: 30px; 
     margin-top: 20px; 
     width: min(260px, 100%); 
     max-width: 260px; 

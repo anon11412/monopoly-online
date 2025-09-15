@@ -67,6 +67,7 @@ export type GameSnapshot = {
   recurring?: Array<{ id: string; from: string; to: string; amount: number; turns_left: number }>;
   // Stats & end state
   turns?: number;
+  round?: number; // number of full cycles completed
   game_over?: { winner?: string | null; turns?: number; most_landed?: { pos?: number | null; name?: string | null; count?: number } | null } | null;
   // Markets
   stocks?: Array<{
@@ -77,7 +78,9 @@ export type GameSnapshot = {
     allow_investing?: boolean;
     enforce_min_buy?: boolean;
     min_buy?: number;
-    enforce_min_pool?: boolean;
+    enforce_min_pool?: boolean; // legacy combined flag
+    enforce_min_pool_total?: boolean;
+    enforce_min_pool_owner?: boolean;
     min_pool_total?: number;
     min_pool_owner?: number;
     base?: number;
@@ -92,6 +95,15 @@ export type GameSnapshot = {
     rate_percent?: number;
     period_turns?: number;
     history?: Array<{ turn: number; rate: number }>;
+  }>;
+  bond_payouts?: Array<{
+    owner: string;
+    investor: string;
+    principal: number;
+    coupon: number;
+    period_turns: number;
+    rate_percent: number;
+    next_due_in_turns?: number;
   }>;
 };
 

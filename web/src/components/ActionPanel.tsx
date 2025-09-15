@@ -695,7 +695,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   ) : null}
 
   {showTrades ? (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowTrades(false)}>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1800 }} onClick={() => setShowTrades(false)}>
           <div style={{ background: 'var(--color-surface)', minWidth: 420, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>📬 Pending Trades</h3>
@@ -803,7 +803,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       ) : null}
 
       {showLog ? (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }} onClick={() => setShowLog(false)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1800 }} onClick={() => setShowLog(false)}>
           <div style={{ background: 'var(--color-surface)', minWidth: 420, maxWidth: '85vw', borderRadius: 8, padding: 12 }} onClick={(e) => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ margin: 0 }}>📜 Game Log</h3>
@@ -896,8 +896,32 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
             ⚙️ Auto Actions {autoRoll || autoBuy || autoEnd || autoHouses || autoMortgage ? <span style={{ fontSize: 10, padding: '2px 6px', background: '#3498db', color: '#fff', borderRadius: 4 }}>ON</span> : null}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 11 }} title="Turn all auto settings on" onClick={() => { setAutoRoll(true); setAutoBuy(true); setAutoEnd(true); setAutoHouses(true); setAutoMortgage(true); setAutoSpread(true); }}>All On</button>
-            <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 11 }} title="Turn all auto settings off" onClick={() => { setAutoRoll(false); setAutoBuy(false); setAutoEnd(false); setAutoHouses(false); setAutoMortgage(false); setAutoSpread(false); }}>All Off</button>
+            <button
+              className="btn btn-ghost"
+              style={{ padding: '2px 6px', fontSize: 11 }}
+              title="Turn all auto settings on"
+              onClick={() => {
+                setAutoRoll(true); setAutoBuy(true); setAutoEnd(true); setAutoHouses(true); setAutoSpread(true);
+                if (!(myPlayer as any)?.auto_mortgage) {
+                  handleAutoMortgageChange(true);
+                } else {
+                  setAutoMortgage(true);
+                }
+              }}
+            >All On</button>
+            <button
+              className="btn btn-ghost"
+              style={{ padding: '2px 6px', fontSize: 11 }}
+              title="Turn all auto settings off"
+              onClick={() => {
+                setAutoRoll(false); setAutoBuy(false); setAutoEnd(false); setAutoHouses(false); setAutoSpread(false);
+                if ((myPlayer as any)?.auto_mortgage) {
+                  handleAutoMortgageChange(false);
+                } else {
+                  setAutoMortgage(false);
+                }
+              }}
+            >All Off</button>
             <button className="btn btn-ghost" style={{ padding: '2px 8px' }} aria-expanded={!collapseAuto} aria-controls="auto-section" onClick={() => setCollapseAuto(c => !c)}>{collapseAuto ? '➕' : '➖'}</button>
           </div>
         </div>
@@ -932,7 +956,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
               const iAmRecipient = !!trade && equalNames(String(trade.to || ''), String(myName));
               const iAmSender = !!trade && equalNames(String(trade.from || ''), String(myName));
         return (
-                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }} onClick={closeTradeDetail}>
+                <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1900 }} onClick={closeTradeDetail}>
                   <div style={{ background: 'var(--color-surface)', minWidth: 460, maxWidth: '90vw', maxHeight: '80vh', overflow: 'auto', borderRadius: 10, padding: 16, boxShadow: '0 4px 16px var(--color-shadow)' }} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <h3 style={{ margin: 0 }}>📄 Trade #{openTradeDetailId}</h3>
@@ -1044,7 +1068,6 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
             }).join(', ') || 'Properties';
             
             const totalReceived = rental.total_received || 0;
-            const lastPayment = rental.last_payment || 0;
             return (
               <div key={idx} style={{ 
                 fontSize: '1em',
