@@ -435,7 +435,7 @@ function RentalAgreementsEditor({ agreements, setAgreements, myName, counterpart
   setAgreements: (r: Array<{ properties: number[], percentage: number, turns: number, direction: 'give' | 'receive' }>) => void;
   myName: string;
   counterparty: string;
-  tiles: any[];
+  tiles: Array<{ pos: number; name: string; type?: string }>;
   mineOwned: Set<number>;
   theirOwned: Set<number>;
 }) {
@@ -481,14 +481,15 @@ function RentalAgreementsEditor({ agreements, setAgreements, myName, counterpart
             
             <div style={{ marginBottom: 8 }}>
               <div style={{ fontSize: 12, fontWeight: 'bold', marginBottom: 4 }}>
-                Properties owned by {ownerName}:
+                Select properties (showing all; only {ownerName}'s are eligible):
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                {Array.from(availableProperties).map(pos => {
-                  const tile = tiles.find(t => t.position === pos) || tiles[pos];
+                {(tiles || []).filter(t => t.type === 'property').map((t) => {
+                  const pos = t.pos;
+                  const eligible = availableProperties.has(pos);
                   const isSelected = agreement.properties.includes(pos);
                   return (
-                    <label key={pos} style={{ 
+                    <label key={pos} title={eligible ? '' : `Not owned by ${ownerName}`} style={{ 
                       display: 'flex', 
                       alignItems: 'center', 
                       gap: 4, 
@@ -497,21 +498,20 @@ function RentalAgreementsEditor({ agreements, setAgreements, myName, counterpart
                       border: '1px solid var(--color-border)',
                       borderRadius: 4,
                       background: isSelected ? 'var(--color-success)' : 'var(--color-surface-alt)',
-                      cursor: 'pointer'
+                      opacity: eligible ? 1 : 0.5,
+                      cursor: eligible ? 'pointer' : 'not-allowed'
                     }}>
                       <input 
                         type="checkbox" 
                         checked={isSelected}
-                        onChange={() => toggleProperty(i, pos)}
+                        onChange={() => eligible ? toggleProperty(i, pos) : null}
+                        disabled={!eligible}
                         style={{ margin: 0 }}
                       />
-                      {tile?.name || `Property ${pos}`}
+                      {t?.name || `Property ${pos}`}
                     </label>
                   );
                 })}
-                {availableProperties.size === 0 && (
-                  <div style={{ fontSize: 11, opacity: 0.7 }}>No properties owned by {ownerName}</div>
-                )}
               </div>
             </div>
 

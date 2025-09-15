@@ -18,8 +18,7 @@ export type BoardTile = {
   type?: string;
   price?: number;
   group?: string;
-  flag?: string;
-  country?: string;
+  flag?: string; // optional emoji/flag code used by UI
 };
 
 export type GamePlayer = {
@@ -44,27 +43,11 @@ export type TradeOffer = {
   to: string;   // player name
   give?: TradeSide;
   receive?: TradeSide;
-  terms?: { 
+  // Optional extended terms used by advanced trading UI
+  terms?: {
     payments?: Array<{ from: string; to: string; amount: number; turns: number }>;
-    rentals?: Array<{ properties: number[]; percentage: number; turns: number; direction: 'give' | 'receive' }>;
+    rentals?: Array<{ direction: 'give' | 'receive'; percentage: number; properties: number[]; turns: number; last_payment?: number }>;
   };
-  type?: string; // "trade_offer" or "rental_offer"
-  // Rental-specific fields
-  cash_amount?: number;
-  properties?: number[];
-  percentage?: number;
-  turns?: number;
-};
-
-export type PropertyRental = {
-  id: string;
-  renter: string;
-  owner: string;
-  properties: number[];
-  percentage: number;
-  turns_left: number;
-  cash_paid: number;
-  created?: number;
 };
 
 export type GameSnapshot = {
@@ -78,8 +61,6 @@ export type GameSnapshot = {
   rolled_this_turn?: boolean;
   rolls_left?: number;
   pending_trades?: TradeOffer[];
-  // Property rental agreements
-  property_rentals?: PropertyRental[];
   // Optional tiles metadata included by server snapshot to avoid extra fetches
   tiles?: BoardTile[];
   // Advanced recurring obligations (if server includes them)
@@ -87,8 +68,31 @@ export type GameSnapshot = {
   // Stats & end state
   turns?: number;
   game_over?: { winner?: string | null; turns?: number; most_landed?: { pos?: number | null; name?: string | null; count?: number } | null } | null;
-  // Stocks (optional)
-  stocks?: Array<{ owner: string; owner_color?: string | null; price: number; total_shares: number; allow_investing?: boolean; enforce_min_buy?: boolean; min_buy: number; enforce_min_pool?: boolean; min_pool_total?: number; min_pool_owner?: number; base?: number; owner_percent?: number; holdings: Array<{ investor: string; shares: number; percent?: number }>; history?: Array<{ turn: number; pool: number }> }>;
+  // Markets
+  stocks?: Array<{
+    owner: string;
+    owner_color?: string;
+    price: number;
+    total_shares: number; // always 100 (pseudo-shares)
+    allow_investing?: boolean;
+    enforce_min_buy?: boolean;
+    min_buy?: number;
+    enforce_min_pool?: boolean;
+    min_pool_total?: number;
+    min_pool_owner?: number;
+    base?: number;
+    owner_percent?: number;
+    holdings?: Array<{ investor: string; shares: number; percent: number }>;
+    history?: Array<{ turn: number; pool: number }>;
+  }>;
+  bonds?: Array<{
+    owner: string;
+    owner_color?: string;
+    allow_bonds?: boolean;
+    rate_percent?: number;
+    period_turns?: number;
+    history?: Array<{ turn: number; rate: number }>;
+  }>;
 };
 
 // Server may send variants; normalize into PropertyState

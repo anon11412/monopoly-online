@@ -34,7 +34,7 @@ export default function App() {
       const cw = content.scrollWidth || content.clientWidth || 1;
   const ch = content.scrollHeight || content.clientHeight || 1;
   const fw = fit.clientWidth || window.innerWidth;
-      const margin = 12;
+      const margin = 40; // larger safe space to avoid edge clipping on wide screens
   // Lock scaling to width only to keep board size stable regardless of panel height.
   const sWidthFit = Math.min(1, (fw - margin) / cw);
   const s = sWidthFit;
@@ -91,6 +91,21 @@ export default function App() {
     s.on('connect', onConn);
     s.on('disconnect', onConn);
     s.on('sound', onSound);
+    const onKicked = (evt: any) => {
+      try {
+        // If this event pertains to our current lobby, take the user back to the main menu
+        const kickedLobby = evt?.id;
+        if (!kickedLobby || (lobby && kickedLobby !== lobby.id)) return;
+        // Clear any stored references so resume does not offer this lobby
+        try { localStorage.removeItem('last.active.lobbyId'); localStorage.removeItem('lastLobbyId'); } catch {}
+        // Simple user feedback; replace with toast if desired
+        alert('You have been removed from the game by a vote.');
+        // Reset UI to main menu
+        setGame(null);
+        setLobby(null);
+      } catch {}
+    };
+    s.on('kicked', onKicked);
     
     // Initialize audio system
     initializeAudio().catch(err => {
@@ -112,7 +127,8 @@ export default function App() {
       s.off('game_state', onGameState);
       s.off('connect', onConn);
       s.off('disconnect', onConn);
-  s.off('sound', onSound);
+      s.off('sound', onSound);
+      s.off('kicked', onKicked);
       clearInterval(refreshInterval);
       cleanupKeyboard();
     };
@@ -129,7 +145,7 @@ export default function App() {
           {/* Stage fit wrapper scales entire app content including game view */}
           <div className="stage-fit" ref={stageFitRef}>
             <div className="stage-scaler" style={{ transform: `translateX(-50%) scale(${stageScale})`, left: '50%', position: 'absolute', ['--stage-scale' as any]: stageScale }}>
-              <div className="stage-content" ref={stageContentRef}>
+              <div className="stage-content" ref={stageContentRef} style={{ padding: '0 8px' }}>
                 {!lobby ? (
                   <MainMenu onEnterLobby={(l) => { setLobby(l); try { localStorage.setItem('last.active.lobbyId', l.id); } catch {} }} />
                 ) : !game ? (
@@ -143,8 +159,8 @@ export default function App() {
                     <GameBoard snapshot={game} lobbyId={lobby.id} />
                     <ActionPanel lobbyId={lobby.id} snapshot={game} />
                     {game?.game_over ? (
-                      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, transition: 'opacity 220ms ease', opacity: fadingOut ? 0 : 1 }}>
-                        <div style={{ background: '#fff', borderRadius: 10, padding: 16, minWidth: 360, maxWidth: '85vw', boxShadow: '0 8px 24px rgba(0,0,0,0.25)' }}>
+                      <div style={{ position: 'fixed', inset: 0, background: 'var(--color-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000, transition: 'opacity 220ms ease', opacity: fadingOut ? 0 : 1 }}>
+                        <div style={{ background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 12, padding: 18, minWidth: 360, maxWidth: '85vw', boxShadow: 'var(--elev-4)' }}>
                           <h2 style={{ marginTop: 0, marginBottom: 8 }}>🏆 Game Over</h2>
                           <div style={{ fontSize: 14, display: 'grid', gap: 6 }}>
                             <div><strong>Winner:</strong> {game.game_over?.winner || '—'}</div>

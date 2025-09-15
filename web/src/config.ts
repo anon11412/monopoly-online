@@ -1,7 +1,8 @@
 // If VITE_BACKEND_URL is not set, default to same-origin (used with Vite proxy in dev)
 export const BACKEND_URL = (import.meta.env.VITE_BACKEND_URL as string) || '';
 
-export const SOCKET_PATH = '/socket.io/';
+// Use canonical Socket.IO path without trailing slash to avoid proxy mismatches
+export const SOCKET_PATH = '/socket.io';
 
 // Allow overriding board meta route if backend differs
 export const BOARD_META_PATH = (import.meta.env.VITE_BOARD_META_PATH as string) || '/board_meta';

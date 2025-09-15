@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react';
-import { connectSocket, getSocket, getRemembered, rememberLobby } from '../lib/socket';
+import { useState, useEffect, useRef } from 'react';
+import { useAuth } from '../lib/auth';
+import { connectSocket, getSocket, getRemembered, rememberLobby, getOrCreateDisplayName } from '../lib/socket';
 import { useTheme } from '../lib/theme';
 import AudioSettings from './AudioSettings';
 import AccessibilitySettings from './AccessibilitySettings';
 import type { LobbyInfo } from '../types';
+import { getStreetRent, houseCostForGroup, mortgageValue } from '../lib/rentData';
 
 type Props = {
   onEnterLobby: (lobby: LobbyInfo) => void;
@@ -11,7 +13,14 @@ type Props = {
 
 export default function MainMenu({ onEnterLobby }: Props) {
   const saved = getRemembered();
-  const [name, setName] = useState(saved.displayName || 'Player');
+  const sanitize = (n: string) => {
+    const s = (n || '').trim();
+    if (!s) return '';
+    if (/^player$/i.test(s)) return '';
+    return s;
+  };
+  const initialName = sanitize(saved.displayName || '') || getOrCreateDisplayName();
+  const [name, setName] = useState(initialName);
   const [lobbies, setLobbies] = useState<LobbyInfo[]>([]);
   const [connected, setConnected] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -23,17 +32,51 @@ export default function MainMenu({ onEnterLobby }: Props) {
   const [showAccessibilitySettings, setShowAccessibilitySettings] = useState(false);
   const lastLobbyId = (saved.lastLobbyId || '').trim();
   const { theme, toggleTheme } = useTheme();
+  const { user, ready: authReady, signIn, signOut, registerLocal, loginLocal } = useAuth();
+  const handleLoginLocal = async () => {
+    const id = prompt('Username or Email');
+    if (!id) return;
+    const pw = prompt('Password');
+    if (!pw) return;
+    try { await loginLocal(id, pw); } catch (e: any) { alert(e?.message || 'Login failed'); }
+  };
+  const handleRegisterLocal = async () => {
+    const username = prompt('Choose a username (min 3 chars)');
+    if (!username) return;
+    const email = prompt('Email (optional)') || '';
+    const display = prompt('Display name (optional)') || username;
+    const pw = prompt('Password (min 6 chars)');
+    if (!pw) return;
+    try { await registerLocal(username, email, pw, display); } catch (e: any) { alert(e?.message || 'Register failed'); }
+  };
+  const [showTradeDemo, setShowTradeDemo] = useState(false);
+  const tradeDemoRef = useRef<HTMLDivElement | null>(null);
+  const [friends, setFriends] = useState<{ accepted: any[]; pending_in: any[]; pending_out: any[] } | null>(null);
 
-  // Auto-leave remembered lobby on landing (prevents ghost membership lingering on server)
   useEffect(() => {
-    if (lastLobbyId) {
+    let cancelled = false;
+    async function loadFriends() {
       try {
-        const s = getSocket();
-        s.emit('leave_lobby', { id: lastLobbyId });
-        rememberLobby('');
+        if (!authReady || !user) { setFriends(null); return; }
+        const res = await fetch('/friends', { credentials: 'include' });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setFriends({
+          accepted: data.accepted || [],
+          pending_in: data.pending_in || [],
+          pending_out: data.pending_out || [],
+        });
       } catch {}
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadFriends();
+    const t = setInterval(loadFriends, 15000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [authReady, user]);
+
+  // Preserve last lobby for resume: do not auto-leave on landing
+  // This allows the user to rejoin within the server's disconnect grace period.
+  useEffect(() => {
+    // no-op: keep lastLobbyId so Resume buttons are shown
   }, []);
 
   async function handleConnect() {
@@ -177,6 +220,24 @@ export default function MainMenu({ onEnterLobby }: Props) {
     <div style={{ position: 'sticky', top: 0, zIndex: 40, backdropFilter: 'blur(6px)', background: 'rgba(0,0,0,0.4)', padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
       <strong style={{ letterSpacing: 0.5 }}>Monopoly Online</strong>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {authReady && (
+          user ? (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginRight: 6 }}>
+              {user.avatar ? <img src={user.avatar} alt={user.name} style={{ width: 20, height: 20, borderRadius: '50%' }} /> : <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#888', display: 'inline-block' }} />}
+              <span className="ui-sm" style={{ opacity: 0.9, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name}</span>
+              {Array.isArray(user.achievements) && user.achievements.includes('early_adopter') && (
+                <span className="badge badge-info" title="Early Adopter" style={{ fontSize: 10 }}>🎖 Early</span>
+              )}
+              <button className="btn btn-ghost" onClick={signOut} title="Sign out" style={{ padding: '2px 6px' }}>Sign out</button>
+            </div>
+          ) : (
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <button className="btn btn-ghost" onClick={handleLoginLocal} title="Log in">Log in</button>
+              <button className="btn btn-ghost" onClick={handleRegisterLocal} title="Sign up">Sign up</button>
+              <button className="btn" onClick={signIn} title="Sign in with Google">Google</button>
+            </div>
+          )
+        )}
         <input aria-label="Display Name" value={name} onChange={(e) => setName(e.target.value)} style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.08)', color: 'inherit', width: 140, fontSize: 12 }} />
         {!connected ? (
           <button className="btn" onClick={handleConnect} style={{ fontWeight: 600 }}>Connect</button>
@@ -241,42 +302,132 @@ export default function MainMenu({ onEnterLobby }: Props) {
         )}
       </section>
 
-      {/* Informational Section */}
+      {/* Friends (stub) */}
+      {authReady && user && (
+        <section style={{ padding: '20px', display: 'grid', gap: 10 }}>
+          <div className="ui-title ui-h3">Friends (preview)</div>
+          {friends ? (
+            <div className="ui-sm" style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              <span>Accepted: {friends.accepted.length}</span>
+              <span>Pending In: {friends.pending_in.length}</span>
+              <span>Pending Out: {friends.pending_out.length}</span>
+            </div>
+          ) : (
+            <div className="ui-sm" style={{ opacity: 0.7 }}>Sign in to see friends. UI coming soon.</div>
+          )}
+        </section>
+      )}
+
+      {/* Informational Section (classic style) */}
       <section style={{ padding: '40px 20px', display: 'grid', gap: 40 }}>
         <div style={{ maxWidth: 840, margin: '0 auto', textAlign: 'center' }}>
           <h2 style={{ fontSize: 'clamp(1.8rem,4vw,2.6rem)', margin: '0 0 10px' }}>Own, Invest, Automate, Dominate</h2>
           <p style={{ fontSize: 16, lineHeight: 1.5, opacity: 0.85 }}>
-            Build wealth not just through properties—deploy recurring payments, rental agreements, and cross-player stock stakes. Strategic liquidity and automation set elite players apart.
+            Learn the basics and master the advanced systems. These cards summarize the core flow and the powerful features we’ve added.
           </p>
         </div>
-        <div style={{ display: 'grid', gap: 24, gridTemplateColumns: 'repeat(auto-fit,minmax(240px,1fr))' }}>
-          {[
-            { icon: '📈', title: 'Player Stocks', text: 'Invest directly in other players—ride their momentum or diversify your influence.' },
-            { icon: '🤖', title: 'Auto Actions', text: 'Automate rolls, buys, and housing with smart thresholds to accelerate pacing.' },
-            { icon: '🔄', title: 'Advanced Trading', text: 'Bundle properties, cash, functions and more in multi-asset negotiations.' },
-            { icon: '💼', title: 'Recurring Deals', text: 'Set per-turn payments or rental flows for long-term leverage.' },
-            { icon: '🛠️', title: 'Dynamic Functions', text: 'Trigger rule-based interactions: rental agreements, stake adjustments, and more.' },
-            { icon: '🎨', title: 'Adaptive UI', text: 'Responsive, accessible interface with dark mode and reduced motion support.' },
-          ].map((f) => (
-            <div key={f.title} style={{ background: 'linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03))', border: '1px solid rgba(255,255,255,0.08)', padding: '18px 16px', borderRadius: 14, display: 'flex', flexDirection: 'column', gap: 10, position: 'relative', overflow: 'hidden' }}>
-              <div style={{ fontSize: 28 }}>{f.icon}</div>
-              <strong style={{ fontSize: 15 }}>{f.title}</strong>
-              <div style={{ fontSize: 13, lineHeight: 1.4, opacity: 0.85 }}>{f.text}</div>
+        <div style={{ display: 'grid', gap: 24, gridTemplateColumns: '1fr 1fr', alignItems: 'start' }}>
+          {/* Left: Basic Rules */}
+          <div>
+            <div className="ui-title ui-h3" style={{ marginBottom: 8 }}>Basic Rules</div>
+            <div style={{ display: 'grid', gap: 16 }}>
+              {[
+                {
+                  icon: '🏠',
+                  title: 'Buy & Trade Properties',
+                  what: 'Own tiles to collect rent. Trade to complete sets sooner.',
+                  why: 'Completing a set unlocks higher rent and building power.'
+                },
+                {
+                  icon: '🏗️',
+                  title: 'Build Houses & Hotels',
+                  what: 'Build evenly across a set; 4 houses upgrade to a hotel.',
+                  why: 'Each build multiplies rent and accelerates income growth.'
+                },
+                {
+                  icon: '🛡️',
+                  title: 'Avoid Bankruptcy',
+                  what: 'Keep cash ready. Mortgage low‑impact tiles before selling houses.',
+                  why: 'Staying liquid prevents forced sales and keeps control of your plan.'
+                },
+              ].map((f) => (
+                <div key={f.title} style={{ background: 'linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03))', border: '1px solid rgba(255,255,255,0.08)', padding: '18px 16px', borderRadius: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 28 }}>{f.icon}</div>
+                  <div className="ui-title" style={{ fontSize: 15 }}>{f.title}</div>
+                  <div style={{ fontSize: 13, lineHeight: 1.45, opacity: 0.9 }}>{f.what}</div>
+                  <div style={{ fontSize: 12, lineHeight: 1.4, opacity: 0.8 }}><span style={{ opacity: 0.85, fontWeight: 600 }}>Why it helps:</span> {f.why}</div>
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+
+          {/* Right: Advanced Features */}
+          <div>
+            <div className="ui-title ui-h3" style={{ marginBottom: 8 }}>Advanced Features</div>
+            <div style={{ display: 'grid', gap: 16 }}>
+              {[
+                {
+                  icon: '💸',
+                  title: 'Per‑Turn Payments',
+                  what: 'Add automatic payments to trades (e.g., $50 × 10 turns).',
+                  why: 'Close deals without big upfront cash and smooth your cash flow.'
+                },
+                {
+                  icon: '🤖',
+                  title: 'Auto‑Roll & Automation',
+                  what: 'Auto‑roll, auto‑buy, auto end‑turn; auto‑mortgage/unmortgage when needed.',
+                  why: 'Speeds up play with fewer clicks and handles routine money crunches automatically.'
+                },
+                {
+                  icon: '📈',
+                  title: 'Player Stocks',
+                  what: 'Buy shares in players to own a percentage of their cash value.',
+                  why: 'Example: invest $50 when a player has $50 → you own 50%. If their cash grows to $1,000, your stake is worth $500 — sell to realize $500.'
+                },
+              ].map((f) => (
+                <div key={f.title} style={{ background: 'linear-gradient(145deg, rgba(255,255,255,0.07), rgba(255,255,255,0.03))', border: '1px solid rgba(255,255,255,0.08)', padding: '18px 16px', borderRadius: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 28 }}>{f.icon}</div>
+                  <div className="ui-title" style={{ fontSize: 15 }}>{f.title}</div>
+                  <div style={{ fontSize: 13, lineHeight: 1.45, opacity: 0.9 }}>{f.what}</div>
+                  <div style={{ fontSize: 12, lineHeight: 1.4, opacity: 0.8 }}><span style={{ opacity: 0.85, fontWeight: 600 }}>Why it helps:</span> {f.why}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        <div style={{ display: 'grid', gap: 30, maxWidth: 1000, margin: '10px auto 0' }}>
-          <div style={{ display: 'grid', gap: 20, gridTemplateColumns: 'repeat(auto-fit,minmax(300px,1fr))' }}>
-            {[
-              { label: 'Board Layout', alt: 'Board screenshot placeholder' },
-              { label: 'Stocks Panel', alt: 'Stocks UI placeholder' },
-              { label: 'Auto Actions', alt: 'Automation settings placeholder' },
-            ].map(img => (
-              <div key={img.label} style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 12, background: 'rgba(0,0,0,0.3)', minHeight: 180, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', gap: 10 }}>
-                <div style={{ width: '100%', flex: 1, background: 'repeating-linear-gradient(45deg, rgba(255,255,255,0.05) 0 8px, transparent 8px 16px)', borderRadius: 8 }} />
-                <span style={{ fontSize: 13, opacity: 0.75 }}>{img.label}</span>
+        {/* Interactive Demos */}
+        <div style={{ display: 'grid', gap: 16 }}>
+          <div className="ui-title ui-h3">Interactive Demos</div>
+          <div style={{ display: 'grid', gap: 16, gridTemplateColumns: '1fr 1fr' }}>
+            <PropertyDemoCard />
+            <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 16, background: 'linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))', display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div className="ui-title" style={{ fontSize: 15 }}>Advanced Trade (Demo)</div>
+              <div style={{ fontSize: 13, opacity: 0.85 }}>
+                Explore the advanced trade builder without joining a lobby.
               </div>
-            ))}
+              <div style={{ display: 'flex', gap: 8 }}>
+                {!showTradeDemo ? (
+                  <button
+                    className="btn"
+                    onClick={() => {
+                      setShowTradeDemo(true);
+                      setTimeout(() => {
+                        try { tradeDemoRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch {}
+                      }, 0);
+                    }}
+                  >Open Demo</button>
+                ) : (
+                  <button className="btn btn-ghost" onClick={() => setShowTradeDemo(false)}>Close Demo</button>
+                )}
+              </div>
+              <div className="ui-sm" style={{ opacity: 0.75 }}>Safe preview — does not send to server.</div>
+              <div ref={tradeDemoRef} />
+              {showTradeDemo && (
+                <div style={{ marginTop: 12 }}>
+                  <TradeDemoInline />
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -296,6 +447,163 @@ export default function MainMenu({ onEnterLobby }: Props) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// --- Local Demo Components ---
+
+function PropertyDemoCard() {
+  // Demo tile: Paris (yellow, price $280)
+  const name = 'Paris';
+  const price = 280;
+  const group = 'yellow';
+  const color = '#FFFF00';
+  const rent = getStreetRent(name);
+  const houseCost = houseCostForGroup(group);
+  const mortVal = mortgageValue(price);
+  const unmortPay = mortVal + Math.ceil(mortVal * 0.1);
+
+  const [owner, setOwner] = useState<'Bank' | 'You' | 'Rival'>('Bank');
+  const [fullSet, setFullSet] = useState<boolean>(false);
+  const [houses, setHouses] = useState<number>(0);
+  const [hotel, setHotel] = useState<boolean>(false);
+  const [mortgaged, setMortgaged] = useState<boolean>(false);
+
+  function currentRent(): number {
+    if (mortgaged || !rent) return 0;
+    if (hotel) return rent.hotel;
+    if (houses === 4) return rent.house4;
+    if (houses === 3) return rent.house3;
+    if (houses === 2) return rent.house2;
+    if (houses === 1) return rent.house1;
+    return fullSet ? rent.withSet : rent.base;
+  }
+
+  const canBuild = owner === 'You' && !mortgaged && !hotel && houses < 4;
+  const canAddHotel = owner === 'You' && !mortgaged && !hotel && houses === 4;
+  const canSellHouse = owner === 'You' && (hotel || houses > 0);
+  const canMortgage = owner === 'You' && !mortgaged && !hotel && houses === 0;
+  const canUnmortgage = owner === 'You' && mortgaged;
+
+  function buy() {
+    setOwner('You');
+  }
+  function build() {
+    if (canBuild) setHouses(h => Math.min(4, h + 1));
+  }
+  function addHotel() {
+    if (canAddHotel) { setHotel(true); setHouses(0); }
+  }
+  function sellBuilding() {
+    if (hotel) { setHotel(false); setHouses(4); return; }
+    if (houses > 0) setHouses(h => Math.max(0, h - 1));
+  }
+  function mortgage() {
+    if (canMortgage) setMortgaged(true);
+  }
+  function unmortgage() {
+    if (canUnmortgage) setMortgaged(false);
+  }
+  function resetAll() {
+    setOwner('Bank'); setFullSet(false); setHouses(0); setHotel(false); setMortgaged(false);
+  }
+
+  return (
+    <div style={{ border: '1px solid rgba(255,255,255,0.08)', borderRadius: 12, padding: 16, background: 'linear-gradient(145deg, rgba(255,255,255,0.05), rgba(255,255,255,0.02))', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div className="ui-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ display: 'inline-block', width: 14, height: 14, background: color, border: '1px solid rgba(0,0,0,0.2)', borderRadius: 3 }} />
+        {name}
+      </div>
+      <div style={{ display: 'grid', gap: 6, gridTemplateColumns: '1fr 1fr' }}>
+        <div style={{ fontSize: 13, opacity: 0.85 }}>Price: ${price}</div>
+        <div style={{ fontSize: 13, opacity: 0.85 }}>House cost: ${houseCost}</div>
+        <div style={{ fontSize: 13, opacity: 0.85 }}>Mortgage: ${mortVal}</div>
+        <div style={{ fontSize: 13, opacity: 0.85 }}>Unmortgage: ${unmortPay}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <label style={{ fontSize: 12 }}>Owner
+          <select value={owner} onChange={(e) => setOwner(e.target.value as any)} style={{ marginLeft: 6 }}>
+            <option>Bank</option>
+            <option>You</option>
+            <option>Rival</option>
+          </select>
+        </label>
+        <label style={{ fontSize: 12 }}>
+          <input type="checkbox" checked={fullSet} onChange={(e) => setFullSet(e.target.checked)} disabled={houses>0 || hotel} /> own full set (no houses)
+        </label>
+        <span className="badge">{mortgaged ? 'Mortgaged' : 'Active'}</span>
+      </div>
+      <div style={{ display: 'grid', gap: 6, gridTemplateColumns: '1fr 1fr', alignItems: 'center' }}>
+        <div style={{ fontSize: 13 }}>Houses: {hotel ? 'Hotel' : houses}</div>
+        <div style={{ fontSize: 13, fontWeight: 700 }}>Rent now: ${currentRent()}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        {owner === 'Bank' && <button className="btn" onClick={buy}>Buy for ${price}</button>}
+        {owner !== 'Bank' && <button className="btn btn-ghost" onClick={resetAll}>Reset</button>}
+        <button className="btn" onClick={build} disabled={!canBuild}>Build House (+${houseCost})</button>
+        <button className="btn" onClick={addHotel} disabled={!canAddHotel}>Add Hotel (+${houseCost})</button>
+        <button className="btn btn-ghost" onClick={sellBuilding} disabled={!canSellHouse}>{hotel ? 'Sell Hotel' : 'Sell House'} (+${Math.floor(houseCost/2)})</button>
+        {!mortgaged ? (
+          <button className="btn btn-ghost" onClick={mortgage} disabled={!canMortgage}>Mortgage (+${mortVal})</button>
+        ) : (
+          <button className="btn" onClick={unmortgage} disabled={!canUnmortgage}>Unmortgage (−${unmortPay})</button>
+        )}
+      </div>
+      <div className="ui-sm" style={{ opacity: 0.75 }}>
+        Demo only — mirrors in‑game logic: build evenly, no rent when mortgaged, hotel after 4 houses.
+      </div>
+    </div>
+  );
+}
+
+function TradeDemoInline() {
+  const [give, setGive] = useState(0);
+  const [receive, setReceive] = useState(0);
+  const [payments, setPayments] = useState<Array<{ who: 'me'|'them'; amount: number; turns: number }>>([]);
+  function addPayment() { setPayments(p => [...p, { who: 'me', amount: 50, turns: 10 }]); }
+  function update(i: number, patch: Partial<{ who: 'me'|'them'; amount: number; turns: number }>) { setPayments(p => p.map((row, idx) => idx === i ? { ...row, ...patch } : row)); }
+  function remove(i: number) { setPayments(p => p.filter((_, idx) => idx !== i)); }
+  return (
+    <div className="ui-labelframe" style={{ display: 'grid', gap: 12 }}>
+      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: '1fr 1fr' }}>
+        <div>
+          <div className="ui-title">Your Offer</div>
+          <label style={{ fontSize: 12 }}>Cash
+            <input type="number" min={0} value={give} onChange={(e) => setGive(parseInt(e.target.value||'0',10))} style={{ width: 120, marginLeft: 6 }} />
+          </label>
+        </div>
+        <div>
+          <div className="ui-title">Partner Offer</div>
+          <label style={{ fontSize: 12 }}>Cash
+            <input type="number" min={0} value={receive} onChange={(e) => setReceive(parseInt(e.target.value||'0',10))} style={{ width: 120, marginLeft: 6 }} />
+          </label>
+        </div>
+      </div>
+      <div>
+        <div className="ui-title">Per‑Turn Payments</div>
+        <div style={{ display: 'grid', gap: 8 }}>
+          {payments.map((p, i) => (
+            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <select value={p.who} onChange={(e) => update(i, { who: e.target.value as any })}>
+                <option value="me">Me pay</option>
+                <option value="them">Partner pay</option>
+              </select>
+              <label style={{ fontSize: 12 }}>amount
+                <input type="number" min={1} value={p.amount} onChange={(e) => update(i, { amount: parseInt(e.target.value||'0',10) })} style={{ width: 100, marginLeft: 6 }} />
+              </label>
+              <label style={{ fontSize: 12 }}>turns
+                <input type="number" min={1} value={p.turns} onChange={(e) => update(i, { turns: parseInt(e.target.value||'0',10) })} style={{ width: 100, marginLeft: 6 }} />
+              </label>
+              <button className="btn btn-ghost" onClick={() => remove(i)}>🗑️</button>
+            </div>
+          ))}
+          <button className="btn" onClick={addPayment}>➕ Add payment</button>
+        </div>
+      </div>
+      <div className="ui-sm" style={{ opacity: 0.75 }}>
+        Demo only — in a lobby, the Advanced Trade panel can also bundle properties and rental rights.
+      </div>
     </div>
   );
 }

@@ -7,8 +7,11 @@ import { houseCostForGroup } from '../lib/rentData';
 import type { BoardTile } from '../types';
 import StockModal from './StockModal';
 import StockChartsModal from './StockChartsModal';
+import BondChartsModal from './BondChartsModal';
+import DashboardModal from './DashboardModal';
 import { playGameSound, initializeAudio } from '../lib/audio';
 import { normalizeName, equalNames } from '../lib/names';
+import { getSocket as _gs } from '../lib/socket';
 
 type Props = { lobbyId: string; snapshot: GameSnapshot };
 
@@ -28,6 +31,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   const myPlayer = (snapshot.players || []).find(p => equalNames(p.name, myName));
   const [showTrade, setShowTrade] = useState(false);
   const [showTradeAdvanced, setShowTradeAdvanced] = useState(false);
+  const [showDashboard, setShowDashboard] = useState(false);
   const [showLog, setShowLog] = useState(false);
   const [logFilters, setLogFilters] = useState<Set<string>>(new Set());
   const [showTrades, setShowTrades] = useState(false);
@@ -73,8 +77,14 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     localStorage.removeItem('ui.openTradeDetail');
   }
   const [kickStatus, setKickStatus] = useState<{ target?: string | null; remaining?: number | null }>({});
+  // Disconnect timers per player (seconds remaining)
+  const [disconnectRemainMap, setDisconnectRemainMap] = useState<Record<string, number>>({});
+  // Simple cash change animation map
+  const [moneyAnimations, setMoneyAnimations] = useState<Record<string, string>>({});
   const [openStock, setOpenStock] = useState<any | null>(null);
   const [showStockCharts, setShowStockCharts] = useState(false);
+  // Bonds UI state
+  const [showBondCharts, setShowBondCharts] = useState(false);
   const [collapseAuto, setCollapseAuto] = useState(false);
   const [collapseRecurring, setCollapseRecurring] = useState(false);
   const [collapseRentals, setCollapseRentals] = useState(false);
@@ -120,10 +130,28 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     const onLobbyState = (l: any) => {
       if (!l || l.id == null) return;
       setKickStatus({ target: l.kick_target, remaining: l.kick_remaining });
+      if (l.disconnect_remain && typeof l.disconnect_remain === 'object') {
+        setDisconnectRemainMap(l.disconnect_remain as Record<string, number>);
+      }
     };
     s.on('lobby_state', onLobbyState);
     return () => { s.off('lobby_state', onLobbyState); };
   }, [s]);
+
+  // Local per-second countdown for disconnect timers (no server spam)
+  useEffect(() => {
+    const t = setInterval(() => {
+      setDisconnectRemainMap(prev => {
+        const next: Record<string, number> = {};
+        for (const k of Object.keys(prev)) {
+          const v = typeof prev[k] === 'number' ? prev[k] : 0;
+          next[k] = v > 0 ? v - 1 : 0;
+        }
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     const snapTiles: any[] | undefined = (snapshot as any)?.tiles;
@@ -137,11 +165,11 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     }
   }, [(snapshot as any)?.tiles]);
 
-  // Reset automation settings to defaults when a new game starts or game ends
+  // Reset automation settings to defaults only on brand-new game (turns === 0) or when game ends
   useEffect(() => {
     const currentTurns = snapshot?.turns || 0;
     const gameOver = snapshot?.game_over;
-    if (currentTurns <= 1 || gameOver) {
+    if (currentTurns < 1 || gameOver) {
       // New game detected or game ended - reset all automation settings to defaults
       setAutoRoll(false);
       setAutoBuy(false);
@@ -239,10 +267,11 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
 
   // Sync client auto-mortgage state with server player state (one-way: server -> client)
   useEffect(() => {
-    if (myPlayer?.auto_mortgage !== undefined && myPlayer.auto_mortgage !== autoMortgage) {
-      setAutoMortgage(myPlayer.auto_mortgage);
+    const flag = (myPlayer as any)?.auto_mortgage;
+    if (typeof flag === 'boolean' && flag !== autoMortgage) {
+      setAutoMortgage(flag);
     }
-  }, [myPlayer?.auto_mortgage]);
+  }, [myPlayer, autoMortgage]);
 
   // Handle auto-mortgage toggle and sync with server
   const handleAutoMortgageChange = (checked: boolean) => {
@@ -405,6 +434,22 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     }
   }, [myPlayer?.cash]);
 
+  // Track cash changes for players to trigger a quick pulse animation
+  const prevCashRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const map: Record<string, number> = prevCashRef.current || {};
+    (snapshot.players || []).forEach(p => {
+      const prev = map[p.name];
+      if (typeof prev === 'number' && prev !== p.cash) {
+        const cls = p.cash > prev ? 'money-up' : 'money-down';
+        setMoneyAnimations(prevAnim => ({ ...prevAnim, [p.name]: cls }));
+        setTimeout(() => setMoneyAnimations(prevAnim => ({ ...prevAnim, [p.name]: '' })), 450);
+      }
+      map[p.name] = p.cash;
+    });
+    prevCashRef.current = map;
+  }, [snapshot.players]);
+
   useEffect(() => {
     // Check for negative cash regardless of turn (important for lag situations)
     const currentCash = myPlayer?.cash ?? 0;
@@ -437,12 +482,15 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       return;
     }
     
-    if (autoEnd && myTurn && rolledThisTurn && (snapshot.rolls_left ?? 0) === 0) {
+    const rollsZero = (snapshot.rolls_left ?? 0) === 0;
+    const la: any = snapshot.last_action;
+    const rolledFlag = rolledThisTurn || (la && la.type === 'rolled' && equalNames(la.by || '', myName || ''));
+    if (autoEnd && myTurn && rollsZero && rolledFlag) {
       // Add a small delay to ensure server state has fully synchronized
       autoEndTimerRef.current = setTimeout(() => {
         // Double-check conditions after delay to ensure sync
         const finalCash = myPlayer?.cash ?? 0;
-        if (myTurn && rolledThisTurn && (snapshot.rolls_left ?? 0) === 0 && (finalCash >= 0 || !autoMortgage)) {
+        if (myTurn && rollsZero && (finalCash >= 0 || !autoMortgage)) {
           console.log('Auto-ending turn after sync delay');
           playGameSound('notification');
           act('end_turn');
@@ -564,9 +612,68 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
         </div>
       ) : null}
 
-  {/* Dice moved to GameBoard center */}
+  {/* Players Overview — visible at top of Action Panel */}
+      <div className="ui-labelframe" style={{ marginBottom: 8 }}>
+        <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Players Overview</div>
+        <div style={{ fontSize: 12, marginTop: 6, display: 'grid', gap: 4 }}>
+          {(snapshot.players || []).map((p, i) => {
+            const isCurrent = i === (snapshot.current_turn ?? -1);
+            const remain = disconnectRemainMap[p.name];
+            const isDisc = typeof remain === 'number' && remain > 0;
+            const meName = myName;
+            return (
+              <div
+                key={p.name}
+                className={`list-item${isCurrent ? ' current' : ''}`}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}
+              >
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || 'var(--muted)', display: 'inline-block' }} />
+                <button
+                  className="btn btn-link"
+                  style={{ padding: 0, lineHeight: 1, height: 'auto', fontSize: 12, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  onClick={() => window.dispatchEvent(new CustomEvent('highlight-player', { detail: { name: p.name } }))}
+                  title="Highlight rents for this player's properties"
+                >
+                  {normalizeName(p.name)}
+                </button>
+                {isDisc && (
+                  <span
+                    title={`Player disconnected - ${Math.floor(remain/60)}:${String(remain%60).padStart(2,'0')} remaining`}
+                    className="badge"
+                    style={{ background: 'rgba(231,76,60,0.15)', border: '1px solid rgba(231,76,60,0.4)', color: '#e74c3c' }}
+                  >
+                    ⏱ {Math.max(0, Math.floor(remain))}s
+                  </span>
+                )}
+                {/* Kick button to the LEFT of cash value */}
+                {/* Spacer to push controls/cash to the right */}
+                <span style={{ marginLeft: 'auto' }} />
+                {isCurrent && p.name !== meName ? (
+                  <button
+                    className="btn btn-ghost"
+                    title={`Vote to kick ${p.name}`}
+                    style={{ padding: '0 6px', fontSize: 11 }}
+                    onClick={() => s.emit('vote_kick', { id: lobbyId, target: p.name })}
+                  >
+                    Kick
+                  </button>
+                ) : null}
+                <span className={moneyAnimations[p.name] || ''} style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  ${p.cash}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
-  {/* Players Overview moved into GameBoard overlay; keeping the modal infrastructure here */}
+      {/* Single entry point to the new Dashboard (centered between sections) */}
+      <div className="ui-labelframe" style={{ marginBottom: 8, display: 'flex', justifyContent: 'center' }}>
+        <button className="btn" onClick={() => setShowDashboard(true)} style={{ minWidth: 180 }}>📊 Dashboard</button>
+      </div>
+      <DashboardModal open={showDashboard} onClose={() => setShowDashboard(false)} lobbyId={lobbyId} snapshot={snapshot} />
+
+  {/* Dice moved to GameBoard center */}
 
   {showTrade ? (
     <TradePanel
@@ -728,7 +835,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       ) : null}
 
       {/* Compact Pending Trades (panel height reduced, inline metadata, overflow guard) */}
-      <div className="ui-labelframe" style={{ marginBottom: 8 }}>
+      <div className="ui-labelframe" style={{ marginBottom: 8, display: 'none' }}>
         <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="ui-title ui-h3" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             📬 Pending
@@ -782,11 +889,17 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
         </div>
       </div>
 
-      {/* Automation toggles — trimmed vertical length */}
+      {/* Automation toggles — visible */}
       <div className="ui-labelframe" style={{ marginBottom: 8 }}>
-        <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div className="ui-title ui-h3" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>⚙️ Auto Actions {autoRoll || autoBuy || autoEnd || autoHouses || autoMortgage ? <span style={{ fontSize: 10, padding: '2px 6px', background: '#3498db', color: '#fff', borderRadius: 4 }}>ON</span> : null}</div>
-    <button className="btn btn-ghost" style={{ padding: '2px 8px' }} aria-expanded={!collapseAuto} aria-controls="auto-section" onClick={() => setCollapseAuto(c => !c)}>{collapseAuto ? '➕' : '➖'}</button>
+        <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+          <div className="ui-title ui-h3" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            ⚙️ Auto Actions {autoRoll || autoBuy || autoEnd || autoHouses || autoMortgage ? <span style={{ fontSize: 10, padding: '2px 6px', background: '#3498db', color: '#fff', borderRadius: 4 }}>ON</span> : null}
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 11 }} title="Turn all auto settings on" onClick={() => { setAutoRoll(true); setAutoBuy(true); setAutoEnd(true); setAutoHouses(true); setAutoMortgage(true); setAutoSpread(true); }}>All On</button>
+            <button className="btn btn-ghost" style={{ padding: '2px 6px', fontSize: 11 }} title="Turn all auto settings off" onClick={() => { setAutoRoll(false); setAutoBuy(false); setAutoEnd(false); setAutoHouses(false); setAutoMortgage(false); setAutoSpread(false); }}>All Off</button>
+            <button className="btn btn-ghost" style={{ padding: '2px 8px' }} aria-expanded={!collapseAuto} aria-controls="auto-section" onClick={() => setCollapseAuto(c => !c)}>{collapseAuto ? '➕' : '➖'}</button>
+          </div>
         </div>
   <div id="auto-section" aria-hidden={collapseAuto} className={`animate-fade-in collapsible ${collapseAuto ? 'closed' : 'open'}`} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 6, overflowY: 'auto', paddingRight: 2 }}>
             <label style={{ fontSize: 11 }}><input type="checkbox" checked={autoRoll} onChange={(e) => setAutoRoll(e.target.checked)} /> Roll</label>
@@ -899,7 +1012,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
             })() : null}
 
       {/* Recurring obligations summary */}
-      <div className="ui-labelframe" style={{ marginBottom: 8 }}>
+      <div className="ui-labelframe" style={{ marginBottom: 8, display: 'none' }}>
         <div style={{ position: 'sticky', top: 0, background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="ui-title ui-h3">📆 Recurring Payments</div>
     <button className="btn btn-ghost" style={{ padding: '2px 8px' }} aria-expanded={!collapseRecurring} aria-controls="recurring-section" onClick={() => setCollapseRecurring(c => !c)}>{collapseRecurring ? '➕' : '➖'}</button>
@@ -916,7 +1029,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       </div>
 
       {/* Property Rental Agreements */}
-      <div className="ui-labelframe" style={{ marginBottom: 8 }}>
+      <div className="ui-labelframe" style={{ marginBottom: 8, display: 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="ui-title ui-h3">🏠 Property Rentals</div>
     <button className="btn btn-ghost" style={{ padding: '2px 8px' }} aria-expanded={!collapseRentals} aria-controls="rentals-section" onClick={() => setCollapseRentals(c => !c)}>{collapseRentals ? '➕' : '➖'}</button>
@@ -948,7 +1061,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       </div>
 
       {/* Stocks (per-player) */}
-      <div className="ui-labelframe" style={{ marginBottom: 8 }}>
+      <div className="ui-labelframe" style={{ marginBottom: 8, display: 'none' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div className="ui-title ui-h3">📈 Stocks</div>
           <button className="btn btn-ghost" onClick={() => setShowStockCharts(true)}>Charts</button>
@@ -957,6 +1070,16 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       </div>
       <StockModal open={!!openStock} lobbyId={lobbyId} snapshot={snapshot} stock={openStock} onClose={() => setOpenStock(null)} />
       <StockChartsModal open={showStockCharts} snapshot={snapshot} lobbyId={lobbyId} onOpenStock={(row) => { setShowStockCharts(false); setOpenStock(row); }} onClose={() => setShowStockCharts(false)} />
+
+      {/* Bonds — hidden in dashboard mode */}
+      <div className="ui-labelframe" style={{ marginBottom: 8, display: 'none' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div className="ui-title ui-h3">💵 Bonds</div>
+          <button className="btn btn-ghost" onClick={() => setShowBondCharts(true)}>Charts</button>
+        </div>
+        <BondsList lobbyId={lobbyId} snapshot={snapshot} myName={myName} />
+      </div>
+  <BondChartsModal open={showBondCharts} snapshot={snapshot} onClose={() => setShowBondCharts(false)} />
     </div>
   );
 }
@@ -1070,4 +1193,43 @@ function StocksList({ lobbyId: _lobbyId, snapshot, myName, onOpen }: { lobbyId: 
       ))}
     </div>
   );
+}
+
+function BondsList({ lobbyId, snapshot, myName }: { lobbyId: string, snapshot: GameSnapshot, myName: string }) {
+  const s = getSocket();
+  const bonds: any[] = (snapshot as any)?.bonds || [];
+  if (!bonds || bonds.length === 0) return <div className="ui-sm" style={{ opacity: 0.7 }}>None</div> as any;
+  return (
+    <div style={{ display: 'grid', gap: 6 }}>
+      {bonds.map((row: any, idx: number) => {
+        const isOwner = equalNames(row.owner || '', myName || '');
+        return (
+          <div key={idx} style={{ display: 'grid', gridTemplateColumns: 'auto 1fr auto', alignItems: 'center', gap: 8, border: '1px solid #eee', borderRadius: 6, padding: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span title={row.owner} style={{ width: 10, height: 10, borderRadius: '50%', background: row.owner_color || '#999', display: 'inline-block' }} />
+              <strong>{normalizeName(row.owner)}</strong>
+            </div>
+            <div className="ui-sm" style={{ opacity: 0.9 }}>
+              {row.allow_bonds ? `Rate: ${row.rate_percent || 0}% • Every ${row.period_turns || 1}t` : 'Disabled'}
+            </div>
+            <div style={{ display: 'flex', gap: 6 }}>
+              {isOwner ? (
+                <>
+                  <label className="ui-sm" title="Allow others to invest in your bond"><input type="checkbox" checked={!!row.allow_bonds} onChange={(e) => s.emit('game_action', { id: lobbyId, action: { type: 'bond_settings', allow_bonds: e.target.checked } })} /> Allow</label>
+                  <label className="ui-sm">Rate %<input type="number" min={0} max={100} defaultValue={row.rate_percent || 0} onBlur={(e) => s.emit('game_action', { id: lobbyId, action: { type: 'bond_settings', rate_percent: parseFloat(e.target.value || '0') } })} style={{ width: 60, marginLeft: 4 }} /></label>
+                  <label className="ui-sm">Period<input type="number" min={1} max={20} defaultValue={row.period_turns || 1} onBlur={(e) => s.emit('game_action', { id: lobbyId, action: { type: 'bond_settings', period_turns: parseInt(e.target.value || '1', 10) } })} style={{ width: 60, marginLeft: 4 }} /></label>
+                </>
+              ) : (
+                <>
+                  <button className="btn btn-ghost" disabled={!row.allow_bonds} onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'bond_invest', owner: row.owner, amount: 25 } })}>Invest $25</button>
+                  <button className="btn btn-ghost" disabled={!row.allow_bonds} onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'bond_invest', owner: row.owner, amount: 50 } })}>$50</button>
+                  <button className="btn btn-ghost" disabled={!row.allow_bonds} onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'bond_invest', owner: row.owner, amount: 100 } })}>$100</button>
+                </>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  ) as any;
 }

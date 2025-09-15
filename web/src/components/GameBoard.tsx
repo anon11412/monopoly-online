@@ -4,6 +4,7 @@ import TradePanel from './TradePanel';
 import type { BoardTile, GameSnapshot, PropertyState, PropertyStateLike } from '../types';
 import { buildPlayerColorMap } from '../lib/colors';
 import { getSocket, getRemembered } from '../lib/socket';
+import { equalNames } from '../lib/names';
 import { getStreetRent, houseCostForGroup, mortgageValue, RAILROAD_RENTS } from '../lib/rentData';
 import { playGameSound } from '../lib/audio';
 
@@ -39,9 +40,9 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   const [showTradeAdvanced, setShowTradeAdvanced] = useState(false);
   const [showPartnerPicker, setShowPartnerPicker] = useState<null | 'basic' | 'advanced'>(null);
   const [negativeBalanceError, setNegativeBalanceError] = useState<string | null>(null);
-  const [moneyAnimations, setMoneyAnimations] = useState<Record<string, string>>({});
+  // Keep a setter for money animations (UI no longer renders them here, but effects may update)
+  const [, setMoneyAnimations] = useState<Record<string, string>>({});
   const [turnChangeAnimation, setTurnChangeAnimation] = useState(false);
-  const [unreadIncoming, setUnreadIncoming] = useState(0);
   const [propertyAnimations, setPropertyAnimations] = useState<Record<number, string>>({});
   const [diceAnimation, setDiceAnimation] = useState('');
   // Responsive: simple small-screen detector
@@ -99,7 +100,6 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   // Vote kick banner
   const [kickBanner, setKickBanner] = useState<{ target?: string | null; votes?: number; required?: number; remaining?: number }>({});
   // Helpers to remember previous sets for unread counts
-  const prevIncomingRef = useRef<Set<string>>(new Set());
   const prevTradeIdsRef = useRef<Set<string>>(new Set());
   const prevLastActionRef = useRef<string | null>(null);
   
@@ -108,13 +108,27 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
   
   const meName = useMemo(() => {
     if (!storedName) return '';
-    
-    // Simple exact match - no more complex suffix handling
-    const found = (snapshot?.players || []).find(p => p.name === storedName);
-    const result = found?.name || storedName;
-    console.log('meName resolution (simple):', { storedName, found: found?.name, result });
-    return result;
+    // Resolve using normalized comparison to tolerate suffixes like "(2)" and minor differences
+    const found = (snapshot?.players || []).find(p => equalNames(p.name, storedName));
+    return found?.name || storedName;
   }, [snapshot?.players, storedName]);
+
+  // Derived: am I the current turn holder?
+  const isMyTurn = useMemo(() => {
+    const cur = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
+    return equalNames(cur?.name || '', meName || '');
+  }, [snapshot?.players, snapshot?.current_turn, meName]);
+
+  // Lag-spike recovery: if it's my turn but UI shows 0 rolls_left and not rolled yet,
+  // request a lobby rejoin to hydrate a fresh snapshot.
+  useEffect(() => {
+    if (!s.connected) return;
+    const rl = snapshot?.rolls_left ?? 0;
+    const rolled = !!snapshot?.rolled_this_turn;
+    if (isMyTurn && rl === 0 && !rolled) {
+      try { s.emit('lobby_join', { id: lobbyId, lobby_id: lobbyId }); } catch {}
+    }
+  }, [s, isMyTurn, snapshot?.rolls_left, snapshot?.rolled_this_turn, lobbyId]);
 
   // Helper: map flag emoji to ISO code for asset lookups (e.g., 🇺🇸 -> us)
   const flagToCode = (flag: string): string | null => {
@@ -195,15 +209,6 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     window.addEventListener('highlight-player' as any, onHi);
     return () => window.removeEventListener('highlight-player' as any, onHi);
   }, []);
-
-  // Track unread incoming trades (basic heuristic)
-  useEffect(() => {
-    const mine = new Set((snapshot?.pending_trades || []).filter((t: any) => t.to === meName).map((t: any) => String(t.id)));
-    let newly = 0;
-    mine.forEach(id => { if (!prevIncomingRef.current.has(id)) newly++; });
-    if (newly > 0) setUnreadIncoming(u => u + newly);
-    prevIncomingRef.current = mine;
-  }, [snapshot?.pending_trades, meName]);
 
   // Global trade sound triggers (new pending, accepted, declined)
   useEffect(() => {
@@ -339,10 +344,13 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     return () => { s.off('connect', onConnect); };
   }, [s, lobbyId]);
 
-  // Vote kick status
+  // Lobby updates: vote kick banner
   useEffect(() => {
     const onLobbyState = (l: any) => {
-      setKickBanner({ target: l.kick_target, votes: l.kick_votes, required: l.kick_required, remaining: l.kick_remaining });
+      const votesCount = (typeof l.kick_votes_count === 'number')
+        ? l.kick_votes_count
+        : (l.kick_target && l.kick_votes && Array.isArray(l.kick_votes[l.kick_target]) ? l.kick_votes[l.kick_target].length : 0);
+      setKickBanner({ target: l.kick_target, votes: votesCount, required: l.kick_required, remaining: l.kick_remaining });
     };
     s.on('lobby_state', onLobbyState);
     return () => { s.off('lobby_state', onLobbyState); };
@@ -673,7 +681,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 </div>
               ) : null}
               
-              {ownerColor ? <div className={`owner ${edge}`} style={{ background: ownerColor }} /> : null}
+              {/* Ownership dots removed (ownership bars provide the indicator) */}
               {/* Buildings bar: 🏠 xN or 🏨 x1 */}
               {(houses > 0 || hotel) ? (
                 <div className="buildings-bar">{hotel ? '🏨 x1' : `🏠 x${houses}`}</div>
@@ -685,11 +693,11 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 // Arrange up to 4 tokens in a centered 2x2 grid; 1 token stays centered
                 const gridTemplate = here.length <= 1 ? '1fr' : '1fr 1fr';
                 return (
-          <div className="tokens" style={{ display: 'grid', gridTemplateColumns: gridTemplate, gridTemplateRows: gridTemplate, alignItems: 'center', justifyItems: 'center', gap: 4, zIndex: 6, position: 'relative' }}>
-                    {here.map((pl, idx) => (
-                      <span key={idx} className="token" title={pl.name} style={{ background: pl.color || '#111' }} />
-                    ))}
-                  </div>
+          <div className="tokens" style={{ display: 'grid', gridTemplateColumns: gridTemplate, gridTemplateRows: gridTemplate, alignItems: 'center', justifyItems: 'center', gap: 4, zIndex: 20, position: 'relative' }}>
+                   {here.map((pl, idx) => (
+                     <span key={idx} className="token" title={pl.name} style={{ background: pl.color || '#111' }} />
+                   ))}
+                 </div>
                 );
               })()}
             </div>
@@ -705,77 +713,9 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
           </div>
           {/* Unified controls layer: contains trade controls and core action controls */}
           <div style={{ position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 50 }}>
-            {/* Players Overview — baseline-only */}
-            <div style={{ position: 'absolute', left: 'calc(50% - 130px)', top: 'calc(50% - 235px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
-                <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, minWidth: 140, maxWidth: 200, color: 'var(--color-text)' }}>
-                <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Players Overview</div>
-                <div style={{ fontSize: 12, marginTop: 6, display: 'grid', gap: 6 }}>
-                  {(snapshot?.players || []).map((p, i) => {
-                    const disconnectRemain: Record<string, number> = (snapshot as any)?.disconnect_remain || ({} as any);
-                    const remain = disconnectRemain[p.name];
-                    const isDisc = typeof remain === 'number' && remain > 0;
-                    
-                    // Format timer display
-                    const formatTime = (seconds: number) => {
-                      const mins = Math.floor(seconds / 60);
-                      const secs = seconds % 60;
-                      return mins > 0 ? `${mins}:${String(secs).padStart(2, '0')}` : `${secs}s`;
-                    };
-                    
-                    return (
-                      <div 
-                        key={i} 
-                        className={`list-item${i === (snapshot?.current_turn ?? -1) ? ' current' : ''} ${turnChangeAnimation && i === (snapshot?.current_turn ?? -1) ? 'animate-turn-highlight' : ''}`} 
-                        style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 }}
-                      >
-                        <span style={{ width: 8, height: 8, borderRadius: '50%', background: p.color || 'var(--muted)', display: 'inline-block' }} />
-                        <button className="btn btn-link" style={{ padding: 0 }} onClick={() => window.dispatchEvent(new CustomEvent('highlight-player', { detail: { name: p.name } }))} title="Highlight rents for this player's properties">{p.name}</button>
-                        {isDisc && (
-                          <div 
-                            title={`Player disconnected - ${formatTime(remain)} remaining to reconnect`} 
-                            className="disconnect-indicator"
-                            style={{ 
-                              display: 'inline-flex', 
-                              alignItems: 'center', 
-                              gap: 3, 
-                              background: 'rgba(231, 76, 60, 0.15)', 
-                              padding: '2px 6px', 
-                              borderRadius: '8px',
-                              border: '1px solid rgba(231, 76, 60, 0.4)',
-                              animation: 'pulse 2s infinite',
-                              fontSize: '10px',
-                              fontWeight: 600,
-                              color: '#e74c3c',
-                              boxShadow: '0 2px 4px rgba(231, 76, 60, 0.2)',
-                              backdropFilter: 'blur(2px)'
-                            }}
-                          >
-                            <span style={{ fontSize: '12px' }}>📶</span>
-                            <span style={{ opacity: 0.8 }}>❌</span>
-                            <span>{formatTime(remain)}</span>
-                          </div>
-                        )}
-                        <span 
-                          style={{ marginLeft: 'auto' }} 
-                          className={moneyAnimations[p.name] || ''}
-                        >
-                          ${p.cash}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8, justifyContent: 'center' }}>
-                  <button className={`btn btn-ghost${unreadIncoming > 0 ? ' btn-with-badge' : ''}`} onClick={() => window.dispatchEvent(new CustomEvent('open-trades'))}>
-                    📬 View Trades
-                    {unreadIncoming > 0 ? <span className="btn-badge" title={`${unreadIncoming} new`}>{unreadIncoming}</span> : null}
-                  </button>
-                  <button className="btn btn-ghost" onClick={() => window.dispatchEvent(new CustomEvent('open-log'))}>📜 Open Log</button>
-                </div>
-              </div>
-            </div>
-            {/* Game Log — always anchored to board */}
-            <div style={{ position: 'absolute', left: 'calc(50% + 90px)', top: 'calc(50% - 235px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
+            {/* Players Overview moved to ActionPanel top */}
+            {/* Game Log — centered horizontally, shifted down ~15px */}
+            <div style={{ position: 'absolute', left: '50%', top: 'calc(50% - 220px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
               <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, width: 275, height: 225, display: 'flex', flexDirection: 'column', color: 'var(--color-text)' }}>
                 <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Game Log</div>
                 <div ref={gameLogRef} style={{ fontSize: 10, marginTop: 4, flex: 1, overflowY: 'auto', lineHeight: 1.25 }}>
@@ -810,7 +750,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             {(() => {
               // Core roll/action buttons — now at former trade position and moved down by 30px
               const me = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
-              const myTurn = me?.name === meName;
+              const myTurn = equalNames(me?.name || '', meName || '');
               const rolledThisTurn = !!snapshot?.rolled_this_turn;
               const rollsLeft = snapshot?.rolls_left ?? 0;
               
@@ -859,7 +799,6 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               
               // Vote kick logic - can vote kick current turn holder if not me
               const currentTurnPlayer = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
-              const canVoteKick = !finalMyTurn && currentTurnPlayer && snapshot?.players && snapshot.players.length > 2;
               
               // Always anchor roll/buy/end row relative to board
               return (
@@ -918,23 +857,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                     });
                   }} title={(!canEndC ? 'Need roll or extra rolls left' : 'End your turn')}>⏭ End Turn</button>
                   
-                  {canVoteKick && (
-                    <button 
-                      className="btn btn-warning" 
-                      onClick={() => {
-                        if (confirm(`Vote to kick ${currentTurnPlayer.name}? This requires majority approval.`)) {
-                          s.emit('vote_kick', { 
-                            id: lobbyId, 
-                            target: currentTurnPlayer.name 
-                          });
-                        }
-                      }}
-                      title={`Vote to kick ${currentTurnPlayer.name} (majority required)`}
-                      style={{ fontSize: '12px', padding: '4px 8px' }}
-                    >
-                      🚫 Vote Kick
-                    </button>
-                  )}
+                  {/* Vote Kick moved to bottom bar */}
                   
                   <button 
                     className="btn btn-ghost" 
@@ -978,12 +901,36 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               const myName = meName || cur?.name || '';
               const players = (snapshot?.players || []).map(p => p.name).filter(n => n !== myName);
               const enableTrade = players.length >= 1;
+              const currentTurnPlayer = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
+              const canVoteKick = currentTurnPlayer && currentTurnPlayer.name !== myName && (snapshot?.players?.length || 0) > 2;
               return (
                 <div style={{ position: 'absolute', left: '50%', bottom: '115px', transform: 'translateX(-50%) scale(0.9)', display: 'flex', gap: 10, alignItems: 'stretch', pointerEvents: 'auto', background: 'var(--color-surface)', padding: '6px 10px', borderRadius: 10, boxShadow: '0 4px 14px var(--color-shadow)', border: '1px solid var(--color-border)' }}>
                   <button className="btn btn-trade" style={{ minWidth: 110 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('basic')} title="Create a standard property/cash trade">🤝 Trade</button>
                   <button className="btn btn-advanced" style={{ minWidth: 140 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('advanced')} title="Open advanced combined trade (recurring terms)">⚡ Advanced</button>
                   <div style={{ width: 1, background: 'rgba(0,0,0,0.15)', margin: '0 2px' }} />
                   <button className="btn btn-danger" style={{ minWidth: 120 }} onClick={() => act('bankrupt')} title="Declare bankruptcy">💥 Bankruptcy</button>
+                  {canVoteKick ? (
+                    <>
+                      <div style={{ width: 1, background: 'rgba(0,0,0,0.15)', margin: '0 2px' }} />
+                      <button 
+                        className="btn btn-warning" 
+                        onClick={() => {
+                          if (confirm(`Vote to kick ${currentTurnPlayer!.name}? This requires majority approval.`)) {
+                            s.emit('vote_kick', { id: lobbyId, target: currentTurnPlayer!.name });
+                          }
+                        }}
+                        title={`Vote to kick ${currentTurnPlayer!.name} (majority required)`}
+                        style={{ minWidth: 130 }}
+                      >
+                        🚫 Vote Kick
+                      </button>
+                      {kickBanner?.target === currentTurnPlayer!.name && typeof kickBanner.remaining === 'number' && (
+                        <span className="badge" title="Kick timer" style={{ alignSelf: 'center' }}>
+                          ⏰ {Math.floor((kickBanner.remaining as number)/60)}:{String((kickBanner.remaining as number)%60).padStart(2,'0')} · {kickBanner.votes || 0}/{kickBanner.required || 1}
+                        </span>
+                      )}
+                    </>
+                  ) : null}
                 </div>
               );
             })()}

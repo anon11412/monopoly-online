@@ -6,12 +6,16 @@ services:
     rootDir: .
     dockerCommand: ""
     autoDeploy: true
-  healthCheckPath: /healthz
+    healthCheckPath: /healthz
     envVars:
       - key: ALLOWED_ORIGINS
         value: "*"
       - key: WORKERS
         value: "1"
-    # Render will build using the Dockerfile in server/ by default only if set; we specify here
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: AUTH_SECRET
+        generateValue: true
+    # Use the API Dockerfile which also bakes the static frontend
     dockerfilePath: server/Dockerfile
     # Ports inferred from EXPOSE; keep default

@@ -28,3 +28,9 @@ Thumbs.db
 
 # Logs and caches
 *.log
+
+# Runtime PID/output files
+*.pid
+*.out
+.cache/
+

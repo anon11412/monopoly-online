@@ -18,6 +18,8 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
   const [botError, setBotError] = useState<string>('');
   const [startMsg, setStartMsg] = useState<string>('');
   const [startPending, setStartPending] = useState<boolean>(false);
+  // Local disconnect countdown state (seconds), separate from raw lobby_state
+  const [disconnectRemainLocal, setDisconnectRemainLocal] = useState<Record<string, number>>({});
   
   // Animation state tracking for player join/leave
   const [prevPlayerNames, setPrevPlayerNames] = useState<Set<string>>(new Set());
@@ -35,6 +37,15 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
           message: `${normalizeName(c.from || 'anon')}: ${c.message}`,
           timestamp: new Date(c.timestamp || Date.now())
         })));
+      }
+      if (data?.id === state.id && data.disconnect_remain && typeof data.disconnect_remain === 'object') {
+        // Initialize/refresh local countdown seconds
+        try {
+          const map = data.disconnect_remain as Record<string, number>;
+          const next: Record<string, number> = {};
+          Object.keys(map).forEach(k => { next[k] = Math.max(0, Math.floor(map[k])); });
+          setDisconnectRemainLocal(next);
+        } catch {}
       }
     };
   // Stop listening to legacy lobby_chat to avoid duplicate chat messages.
@@ -65,6 +76,21 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
       s.off('chat_message', onChatMessage);
     };
   }, [state.id, onGameStarted]);
+
+  // Drive local per-second countdown without server spam
+  useEffect(() => {
+    const t = setInterval(() => {
+      setDisconnectRemainLocal(prev => {
+        const next: Record<string, number> = {};
+        for (const k of Object.keys(prev)) {
+          const v = typeof prev[k] === 'number' ? prev[k] : 0;
+          next[k] = v > 0 ? v - 1 : 0;
+        }
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(t);
+  }, []);
 
   // Track player changes for animations
   useEffect(() => {
@@ -126,7 +152,9 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
   }
 
   const sidToName = state.players_map || {};
-  const disconnectRemain = (state as any).disconnect_remain || {} as Record<string, number>;
+  const authedNamesArr: string[] = (state as any).authed_names || [];
+  const authedSet = new Set(authedNamesArr);
+  const disconnectRemain = disconnectRemainLocal;
   const kickVotes = (state as any).kick_votes || {} as Record<string, string[]>;
   const hasSidMap = Object.keys(sidToName).length > 0;
   type PlayerRow = { sid?: string; name: string };
@@ -177,7 +205,7 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
           <div style={{ fontSize: 13 }}>
             Target: <strong>{(state as any).kick_target}</strong> | 
             Votes: <strong>{((state as any).kick_votes?.[(state as any).kick_target] || []).length}/{Math.floor(players.length / 2) + 1}</strong> | 
-            Time: <strong>{Math.ceil(((state as any).kick_remaining || 0) / 1000)}s</strong>
+            Time: <strong>{Math.max(0, Math.floor(((state as any).kick_remaining || 0)))}s</strong>
           </div>
         </div>
       )}
@@ -229,7 +257,7 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
               return (
                 <li key={`${p.sid || p.name}`} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: isBot ? 0.9 : 1 }}>
                   <span className={`dot ${isReady ? 'ready' : 'not-ready'}`} />
-                  <span>{p.name}{isHostRow ? ' (host)' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}</span>
+                  <span>{p.name}{authedSet.has(p.name) ? ' ✅' : ''}{isHostRow ? ' (host)' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}</span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
                   {!self && !isBot ? (
                     <button 
@@ -262,7 +290,7 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
               return (
                 <li key={`${p.name}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: isBot ? 0.9 : 1 }}>
                   <span className={`dot ${isReady ? 'ready' : 'not-ready'}`} />
-                  <span>{p.name}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}</span>
+                  <span>{p.name}{authedSet.has(p.name) ? ' ✅' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}</span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
                   {!self && !isBot ? (
                     <button 

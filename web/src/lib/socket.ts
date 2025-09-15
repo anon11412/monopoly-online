@@ -4,6 +4,34 @@ import { BACKEND_URL, SOCKET_PATH } from '../config';
 let socket: Socket | null = null;
 let displayName: string | null = null;
 
+function generateRandomName(): string {
+  const ADJ = [
+    'Swift','Clever','Bold','Lucky','Bright','Calm','Brave','Mighty','Rapid','Sunny',
+    'Noble','Quick','Cool','Happy','Keen','Neon','Icy','Rusty','Royal','Zesty'
+  ];
+  const ANIMALS = [
+    'Fox','Hawk','Panda','Otter','Wolf','Falcon','Tiger','Koala','Raven','Dolphin',
+    'Lynx','Bear','Eagle','Cobra','Moose','Seal','Bison','Heron','Whale','Jaguar'
+  ];
+  const a = ADJ[Math.floor(Math.random() * ADJ.length)];
+  const b = ANIMALS[Math.floor(Math.random() * ANIMALS.length)];
+  const n = Math.floor(Math.random() * 900) + 100; // 100-999
+  return `${a} ${b} ${n}`;
+}
+
+export function getOrCreateDisplayName(): string {
+  try {
+    let name = sessionStorage.getItem('displayName') || localStorage.getItem('displayName') || '';
+    if (!name) {
+      name = generateRandomName();
+      sessionStorage.setItem('displayName', name);
+    }
+    return name;
+  } catch {
+    return generateRandomName();
+  }
+}
+
 export function getClientId(): string {
   // One unique ID per browser tab (sessionStorage is tab-scoped)
   try {
@@ -29,7 +57,9 @@ export function getConnectionStatus() {
 
 export function getSocket() {
   if (!socket) {
-    socket = io(BACKEND_URL, {
+    // Prefer explicit BACKEND_URL; fallback to current origin (works with Vite proxy)
+    const base = BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+    socket = io(base, {
       path: SOCKET_PATH,
       // Use default transports for robustness (polling + websocket)
       autoConnect: false,
@@ -39,7 +69,7 @@ export function getSocket() {
     // Re-auth on reconnect (no implicit lobby join)
     socket.on('connect', () => {
       try {
-        const savedName = displayName ?? (sessionStorage.getItem('displayName') || localStorage.getItem('displayName'));
+        const savedName = displayName ?? (sessionStorage.getItem('displayName') || localStorage.getItem('displayName') || getOrCreateDisplayName());
         if (savedName) {
           socket!.emit('auth', { display: savedName, client_id: getClientId() });
         }
@@ -59,17 +89,17 @@ export function connectSocket(displayName: string): Promise<void> {
     // If already connected, authenticate and resolve immediately
     if (s.connected) {
       try {
-        sessionStorage.setItem('displayName', displayName);
+        sessionStorage.setItem('displayName', displayName || getOrCreateDisplayName());
       } catch {}
-      s.emit('auth', { display: displayName, client_id: getClientId() });
+      s.emit('auth', { display: displayName || getOrCreateDisplayName(), client_id: getClientId() });
       s.emit('lobby_list');
       return resolve();
     }
     const onConnect = () => {
       try {
-        sessionStorage.setItem('displayName', displayName);
+        sessionStorage.setItem('displayName', displayName || getOrCreateDisplayName());
       } catch {}
-      s.emit('auth', { display: displayName, client_id: getClientId() });
+      s.emit('auth', { display: displayName || getOrCreateDisplayName(), client_id: getClientId() });
       // Optional: app-level ping for visibility (no-op server-side)
       s.emit('ping', {}, () => {});
       s.off('connect', onConnect);

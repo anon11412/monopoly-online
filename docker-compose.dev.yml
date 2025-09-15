@@ -1,0 +1,36 @@
+version: '3.9'
+services:
+  server-dev:
+    image: python:3.11-slim
+    working_dir: /app
+    environment:
+      - ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+    volumes:
+      - ./server:/app
+    command: >-
+      bash -lc "pip install -r requirements.txt &&
+      uvicorn main:asgi --host 0.0.0.0 --port 8000 --reload"
+    ports:
+      - "8000:8000"
+
+  web-dev:
+    image: node:22.12.0-alpine
+    working_dir: /app
+    environment:
+      # Point browser directly to backend published on host:8000
+      - VITE_BACKEND_URL=http://localhost:8000
+    volumes:
+      - ./web:/app
+      # Keep node_modules inside the container to avoid host OS differences
+      - web_node_modules:/app/node_modules
+    command: >-
+      sh -lc "npm install &&
+      npm run dev -- --strictPort --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server-dev
+
+volumes:
+  web_node_modules:
+

@@ -49,7 +49,14 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   color: var(--color-text);
 }
 
-#root { max-width: 1600px; margin: 0 auto; padding: 0.5rem; }
+#root { 
+  width: 100%; 
+  margin: 0; 
+  padding: 0.5rem; 
+  overflow-x: visible; 
+  /* Ensure no max-width constraint that could cause issues */
+  max-width: none;
+}
 .app { display: flex; flex-direction: column; gap: 1rem; }
 
 /* Responsive game layout */
@@ -61,16 +68,35 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   align-items: start;
   justify-items: center; /* center children (board/panel) when stacked */
   justify-content: center; /* center grid itself when multi-column */
-  overflow-x: clip; /* guard against accidental overflow */
+  overflow: visible; /* allow content to extend beyond bounds */
+  min-height: fit-content;
 }
 
 /* Switch to two columns only when there's enough space for board + panel */
 @media (min-width: 1140px) {
   .game-view {
-    /* Left: fixed board width; Right: narrower panel (≈240px min, 320px max) */
-    grid-template-columns: 626px minmax(240px, 320px);
-    /* Center the two-column block within the viewport */
-    justify-content: center;
+    /* Left: fixed board width; Right: flexible panel that can grow */
+    grid-template-columns: 626px 1fr;
+    /* Remove centering to prevent cutoff - align to start instead */
+    justify-content: start;
+    /* Add padding to center content naturally without forcing cutoff */
+    padding: 0 2rem;
+    /* Spacing between board and panel */
+    column-gap: 2rem;
+  }
+  /* Restore sticky positioning but ensure it stays within viewport */
+  .actions-panel { 
+    margin-left: 0; 
+    margin-top: 20px; 
+    width: min(260px, 100%); 
+    max-width: 260px; 
+    /* Restore sticky positioning for embedded content */
+    position: sticky; 
+    top: 8px; 
+    z-index: 60;
+    /* Ensure panel doesn't overflow its container */
+    overflow-x: visible;
+    overflow-y: visible;
   }
 }
 
@@ -99,7 +125,7 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   }
 }
 
-.board { background: transparent; padding: 0 10px 0 20px; border: none; height: auto; }
+.board { background: transparent; padding: 0; border: none; height: auto; }
 
 /* Responsive board sizing */
 .board .board-wrap {
@@ -168,8 +194,8 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   .tile .stripe.v { width: 10px; }
   
   .tile .token { 
-    width: 8px; 
-    height: 8px; 
+    width: 15px; 
+    height: 15px; 
   }
   
   .tile .owner { 
@@ -195,8 +221,8 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   .tile .stripe.v { width: 8px; }
   
   .tile .token { 
-    width: 6px; 
-    height: 6px; 
+    width: 11px; 
+    height: 11px; 
   }
   
   .tile .owner { 
@@ -210,13 +236,13 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   }
 }
 .tile .tokens { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; place-items: center; gap: 5px; }
-.tile .token { width: 10px; height: 10px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.4); box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+.tile .token { width: 18.5px; height: 18.5px; border-radius: 50%; display: inline-block; border: 1px solid rgba(0,0,0,0.4); box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
 .tile .owner { position: absolute; width: 9px; height: 9px; border-radius: 50%; border: 1px solid #444; }
 .tile .owner.top { bottom: 100%; left: 50%; transform: translate(-50%, -2px); }
 .tile .owner.bottom { top: 100%; left: 50%; transform: translate(-50%, 2px); }
 .tile .owner.left { right: 100%; top: 50%; transform: translate(2px, -50%); }
 .tile .owner.right { left: 100%; top: 50%; transform: translate(-2px, -50%); }
-.tile .buildings-bar { position: absolute; right: 4px; bottom: 4px; background: rgba(0,0,0,0.7); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; }
+.tile .buildings-bar { position: absolute; right: 4px; bottom: 4px; background: rgba(0,0,0,0.7); color: #fff; font-size: 11px; padding: 2px 6px; border-radius: 12px; display: inline-flex; align-items: center; gap: 4px; z-index: 12; }
 .tile .mortgage-stamp { 
   position: absolute; 
   top: 50%; 
@@ -719,7 +745,8 @@ input, select, textarea {
 @media (min-width: 1140px) {
   .game-view {
     grid-template-columns: 626px minmax(240px, 320px);
-    justify-content: center;
+    /* Align grid to the left so the panel can use full right-side space */
+    justify-content: start;
   }
 }
 

@@ -69,6 +69,12 @@ class Game:
     property_rentals: List[Dict[str, Any]] = field(default_factory=list)
     # Cache of recently completed/declined trades for detail view (id -> trade dict)
     recent_trades: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Bonds settings per owner: owner -> { allow_bonds, rate_percent, period_turns, history: [{turn, rate}] }
+    bonds: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    # Bonds investments: list of { owner, investor, principal }
+    bond_investments: List[Dict[str, Any]] = field(default_factory=list)
+    # Per-player turn counts to schedule periodic bond coupons
+    turn_counts: Dict[str, int] = field(default_factory=dict)
 
     def snapshot(self) -> Dict[str, Any]:
         # Defensive: ensure pending_trades list exists
@@ -97,6 +103,8 @@ class Game:
             "stocks": _stocks_snapshot(self),
             # Include property rental agreements
             "property_rentals": list(self.property_rentals),
+            # Include bonds settings snapshot for UI
+            "bonds": _bonds_snapshot(self),
             # Provide list of recent trade ids for clients to prime caches
             "recent_trade_ids": list(self.recent_trades.keys())[-100:],
         }
@@ -278,8 +286,9 @@ def _auto_mortgage_for_cash(game: Game, player: Player, needed_amount: int) -> i
             if can_mortgage and group:
                 # Check if any property in the group has buildings
                 for p in _group_positions(group):
-                    ps = game.properties.get(p) or PropertyState(pos=p)
-                    if ps.houses > 0 or ps.hotel:
+                    ps = game.properties.get(p)
+                    # Only the current player's buildings should block mortgaging this group's properties
+                    if ps and ps.owner == player.name and (ps.houses > 0 or ps.hotel):
                         can_mortgage = False
                         break
             
@@ -287,8 +296,8 @@ def _auto_mortgage_for_cash(game: Game, player: Player, needed_amount: int) -> i
                 mortgage_value = _mortgage_value(pos)
                 owned_properties.append((pos, mortgage_value, tile.get("name", f"Property {pos}")))
     
-    # Sort by mortgage value (lowest first) to mortgage least valuable properties first
-    owned_properties.sort(key=lambda x: x[1])
+    # Sort by mortgage value (highest first) to raise cash quickly when in debt
+    owned_properties.sort(key=lambda x: x[1], reverse=True)
     
     # Mortgage properties until we have enough cash or run out of properties
     for pos, mortgage_value, prop_name in owned_properties:
@@ -321,8 +330,16 @@ def _auto_sell_houses_for_cash(game: Game, player: Player, needed_amount: int) -
     
     cash_raised = 0
     
+    # Determine target cash threshold:
+    # - If needed_amount > 0: raise cash until player.cash >= needed_amount (e.g., for purchases)
+    # - If needed_amount <= 0: raise cash until player.cash >= 0 (clear debt)
+    def need_more_cash() -> bool:
+        target = needed_amount if needed_amount and needed_amount > 0 else 0
+        return player.cash < target
+    
     # Continue selling buildings until we have enough cash or no more buildings
-    while player.cash + cash_raised < needed_amount:
+    # Note: We only compare against player.cash to avoid double-counting with cash_raised.
+    while need_more_cash():
         # Get all properties with buildings, grouped by color group
         groups_with_buildings = {}
         for pos, prop_state in game.properties.items():
@@ -371,7 +388,7 @@ def _auto_sell_houses_for_cash(game: Game, player: Player, needed_amount: int) -
             })
             
             # Check if we have enough cash now
-            if player.cash + cash_raised >= needed_amount:
+            if not need_more_cash():
                 break
         
         if not sold_something:
@@ -428,7 +445,8 @@ def _handle_negative_cash(game: Game, player: Player) -> bool:
     # If still negative after mortgaging, sell houses evenly
     houses_cash_raised = 0
     if player.cash < 0:
-        houses_cash_raised = _auto_sell_houses_for_cash(game, player, -player.cash)
+        # Sell buildings until player is no longer negative
+        houses_cash_raised = _auto_sell_houses_for_cash(game, player, 0)
     
     total_raised = houses_cash_raised + mortgage_cash_raised
     if total_raised > 0:
@@ -534,6 +552,14 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
     kick_remaining = None
     if l.kick_deadline:
         kick_remaining = int(max(0, (l.kick_deadline - now)))
+    # Compute vote-kick derived data
+    # Active, non-bot player count for majority threshold
+    total_players = len([p for p in l.players if p not in (l.bots or [])])
+    required_votes = (total_players // 2) + 1 if total_players > 0 else 1
+    # Count current votes for active target
+    votes_count = 0
+    if l.kick_target:
+        votes_count = len(set(l.kick_votes.get(l.kick_target, []) or []))
     return {
         "id": l.id,
         "name": l.name,
@@ -545,6 +571,8 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
     "kick_votes": {k: list(set(v)) for k, v in l.kick_votes.items()},
         "kick_target": l.kick_target,
         "kick_remaining": kick_remaining,
+        "kick_required": required_votes,
+        "kick_votes_count": votes_count,
         "disconnect_remain": remain,
         "chat": l.chat[-50:],
         "starting_cash": l.starting_cash,
@@ -589,8 +617,18 @@ async def disconnect(sid):
                 l.host_sid = next(iter(l.sid_to_name.keys()), l.host_sid)
             # Track disconnect deadline if game active
             if l.game and name and not still_connected:
-                l.disconnect_deadlines[name] = asyncio.get_event_loop().time() + 120.0
-                # schedule cleanup if not reconnected
+                loop = asyncio.get_event_loop()
+                deadline = loop.time() + 120.0
+                l.disconnect_deadlines[name] = deadline
+                # Log and broadcast to all players in-game
+                try:
+                    if l.game:
+                        secs = int(max(0, deadline - loop.time()))
+                        l.game.log.append({"type": "disconnect", "text": f"{name} disconnected — {secs}s to reconnect"})
+                        await sio.emit("game_state", {"lobby_id": l.id, "snapshot": l.game.snapshot()}, room=l.id)
+                except Exception:
+                    pass
+                # schedule cleanup if not reconnected (auto-remove from game)
                 async def timeout_check(lobby_id: str, pname: str, due: float):
                     await asyncio.sleep(max(0, due - asyncio.get_event_loop().time()))
                     l2 = LOBBIES.get(lobby_id)
@@ -598,8 +636,27 @@ async def disconnect(sid):
                         return
                     # If player still not reconnected
                     if l2.disconnect_deadlines.get(pname, 0) <= asyncio.get_event_loop().time():
-                        # Keep their name in players list (spectator), but no active sid
                         l2.disconnect_deadlines.pop(pname, None)
+                        # If a game is running, remove player from game and release assets
+                        if l2.game:
+                            g = l2.game
+                            # Remove properties and the player
+                            for pos, st in list(g.properties.items()):
+                                if st.owner == pname:
+                                    st.owner = None
+                                    st.houses = 0
+                                    st.hotel = False
+                                    st.mortgaged = False
+                                    g.properties[pos] = st
+                            g.players = [pl for pl in g.players if pl.name != pname]
+                            if len(g.players) > 0:
+                                g.current_turn = g.current_turn % len(g.players)
+                            # Log removal
+                            g.log.append({"type": "disconnect_kick", "text": f"{pname} removed after disconnect timeout"})
+                            try:
+                                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                            except Exception:
+                                pass
                         await sio.emit("lobby_state", lobby_state(l2), room=lobby_id)
                 asyncio.create_task(timeout_check(l.id, name, l.disconnect_deadlines[name]))
             await sio.emit("lobby_state", lobby_state(l), room=l.id)
@@ -627,12 +684,15 @@ async def lobby_list(sid):
     await sio.emit("lobby_list", {"lobbies": active_lobbies}, to=sid)
 
 def _lobby_visible(l: Lobby) -> bool:
-    """Visibility rules for advertising in main menu."""
-    # Hide if active game in progress (game exists & not over)
-    if l.game and not getattr(l.game, "game_over", None):
+    """Visibility rules for advertising in main menu.
+    We do NOT surface lobbies that have any game object attached — active or finished —
+    to prevent ended-game lobbies from reappearing as joinable.
+    """
+    # Hide any lobby that currently has a game object (active or finished)
+    if l.game is not None:
         return False
     # Hide zero-player pre-game lobbies
-    if not l.game and len(l.players) == 0:
+    if len(l.players) == 0:
         return False
     return True
 
@@ -660,11 +720,8 @@ async def _lobby_consistency_pass(broadcast: bool = True):
         l.sid_to_name = {s: n for s, n in l.sid_to_name.items() if n in l.players}
         if set(l.sid_to_name.keys()) != before_sid_map:
             changed = True
-        # Auto clear finished games (expose lobby again) after game_over present
-        if l.game and getattr(l.game, "game_over", None):
-            # Keep brief grace period? For now immediate exposure by clearing game reference
-            l.game = None
-            changed = True
+        # Do not auto-clear finished games; keep l.game set so lobby stays hidden
+        # until host explicitly rematches or resets.
         # Schedule removal if empty pre-game lobby OR empty finished-game lobby
         if len(l.players) == 0 and (not l.game or getattr(l.game, "game_over", None)):
             to_remove.append(lobby_id)
@@ -792,12 +849,17 @@ async def vote_kick(sid, data):
     votes = set(l.kick_votes.get(target, []))
     votes.add(voter)
     l.kick_votes[target] = list(votes)
-    # Start timer on first vote
+    # Start or adjust timer: 1 vote -> 5 min, 2 votes -> at most 2 min remaining
+    loop = asyncio.get_event_loop()
+    now = loop.time() if loop else 0.0
     if l.kick_target != target:
         l.kick_target = target
-        loop = asyncio.get_event_loop()
-        l.kick_deadline = (loop.time() if loop else 0.0) + 300
+        l.kick_deadline = now + 300  # 5 minutes default
         await _ensure_kick_timer(l)
+    else:
+        # If second unique vote arrives and more than 2 minutes remain, clamp to 2 minutes
+        if len(votes) >= 2 and (l.kick_deadline or 0) - now > 120:
+            l.kick_deadline = now + 120
     # Majority of active players (excluding bots)
     total = len([p for p in l.players if p not in l.bots])
     if len(votes) > total // 2:
@@ -991,6 +1053,26 @@ async def lobby_start(sid, data):
     for i, pl in enumerate(game.players):
         pl.color = palette[i % len(palette)]
     l.game = game
+    # Seed initial time-series so charts show real data from turn 0
+    try:
+        # Record starting stock pool values (owner cash) for each player at current global turn (0)
+        for pl in game.players:
+            _record_stock_history_for(game, pl.name, overwrite=True)
+    except Exception:
+        pass
+    try:
+        # Initialize bond rate history at current turn for each player (even if 0%)
+        for pl in game.players:
+            st = _bonds_ensure(game, pl.name)
+            turn0 = int(game.turns or 0)
+            hist = list(st.get("history") or [])
+            if not hist or (hist and hist[-1].get("turn") != turn0):
+                rate0 = float(st.get("rate_percent") or 0.0)
+                hist.append({"turn": turn0, "rate": rate0})
+                st["history"] = hist[-500:]
+            game.bonds[pl.name] = st
+    except Exception:
+        pass
     game.log.append({"type": "info", "text": f"Game started with players: {', '.join(l.players)}"})
     await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": game.snapshot()}, room=lobby_id)
     # Update lobby list so started lobby disappears
@@ -1041,6 +1123,8 @@ async def lobby_rematch(sid, data):
     new_id = f"l{random.randint(1000, 9999)}"
     new_name = f"{l.name} (Rematch)"
     l2 = Lobby(id=new_id, name=new_name, host_sid=sid)
+    # Preserve settings like starting cash
+    l2.starting_cash = getattr(l, 'starting_cash', 1500)
     # Copy player list and bots
     l2.players = list(dict.fromkeys(l.players))
     l2.bots = list(l.bots)
@@ -1053,7 +1137,17 @@ async def lobby_rematch(sid, data):
             await sio.emit("lobby_joined", lobby_state(l2), to=osid)
         except Exception:
             pass
-    # Notify both lobbies of state and update lobby list (new lobby has no game; old might have been finished)
+    # Clear old lobby membership and optionally remove it to avoid phantom listings
+    old_id = l.id
+    l.players = []
+    l.sid_to_name.clear()
+    # Remove old lobby entirely; it's finished and will be recreated via rematch flow
+    try:
+        LOBBIES.pop(old_id, None)
+        await sio.emit("lobby_deleted", {"id": old_id})
+    except Exception:
+        pass
+    # Notify new lobby state and update lobby list (new lobby has no game; old is deleted)
     await sio.emit("lobby_state", lobby_state(l2), room=new_id)
     await sio.emit("lobby_list", {"lobbies": [lobby_state(x) for x in LOBBIES.values() if not x.game]})
     return {"ok": True, "lobby": lobby_state(l2)}
@@ -1117,6 +1211,81 @@ async def game_action(sid, data):
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
         return {"ok": True}
 
+    # Bond settings (owner only)
+    if t == "bond_settings":
+        owner = actor
+        st = _bonds_ensure(g, owner)
+        # Only owner can update
+        if owner != actor:
+            g.last_action = {"type": "bond_settings_denied", "by": actor, "expected": owner}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
+        allow = bool((action or {}).get("allow_bonds")) if ("allow_bonds" in (action or {})) else bool(st.get("allow_bonds", False))
+        try:
+            rate = float((action or {}).get("rate_percent") or 0.0)
+        except Exception:
+            rate = float(st.get("rate_percent") or 0.0)
+        try:
+            period = int((action or {}).get("period_turns") or st.get("period_turns") or 1)
+        except Exception:
+            period = int(st.get("period_turns") or 1)
+        rate = max(0.0, min(100.0, rate))
+        period = max(1, min(20, period))
+        st["allow_bonds"] = allow
+        st["rate_percent"] = rate
+        st["period_turns"] = period
+        # record history of rate per global turn
+        try:
+            turn = int(g.turns or 0)
+            hist = list(st.get("history") or [])
+            if hist and hist[-1].get("turn") == turn:
+                hist[-1] = {"turn": turn, "rate": rate}
+            else:
+                hist.append({"turn": turn, "rate": rate})
+            st["history"] = hist[-500:]
+        except Exception:
+            pass
+        g.bonds[owner] = st
+        g.last_action = {"type": "bond_settings", "owner": owner, "allow_bonds": allow, "rate_percent": rate, "period_turns": period}
+        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+        return {"ok": True}
+
+    # Bond invest (investor -> owner's bond pool; owner pays coupons each period)
+    if t == "bond_invest":
+        owner = str((action or {}).get("owner") or "")
+        amount = int((action or {}).get("amount") or 0)
+        investor = actor
+        if not owner or amount <= 0:
+            return {"ok": False, "error": "invalid_params"}
+        if investor == owner:
+            return {"ok": False, "error": "owner_cannot_invest_in_own_bond"}
+        owner_p = _find_player(g, owner)
+        inv_p = _find_player(g, investor)
+        st = _bonds_ensure(g, owner)
+        if not owner_p or not inv_p:
+            return {"ok": False, "error": "player_missing"}
+        if not bool(st.get("allow_bonds", False)):
+            g.last_action = {"type": "bond_invest_denied", "by": investor, "owner": owner, "reason": "disabled"}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return {"ok": False, "error": "disabled"}
+        if inv_p.cash < amount:
+            g.last_action = {"type": "bond_invest_denied", "by": investor, "owner": owner, "reason": "insufficient_cash", "needed": amount}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return {"ok": False, "error": "insufficient_cash"}
+        inv_p.cash -= amount
+        owner_p.cash += amount
+        merged = False
+        for entry in g.bond_investments:
+            if entry.get("owner") == owner and entry.get("investor") == investor:
+                entry["principal"] = int(entry.get("principal") or 0) + amount
+                merged = True
+                break
+        if not merged:
+            g.bond_investments.append({"owner": owner, "investor": investor, "principal": amount})
+        g.last_action = {"type": "bond_invest", "by": investor, "owner": owner, "amount": amount}
+        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+        return {"ok": True}
+
     if t == "roll_dice":
         # Gate rolls by remaining moves this turn
         if g.rolls_left <= 0:
@@ -1132,6 +1301,8 @@ async def game_action(sid, data):
             except Exception:
                 pass
             _process_recurring_for(g, cur.name)
+            # Process bond coupons for this player at start of turn
+            _process_bonds_for(g, cur.name)
             recurring_processed = True
             # Mark that we've rolled this turn IMMEDIATELY to prevent re-processing on rapid clicks
             g.rolled_this_turn = True
@@ -1602,10 +1773,14 @@ async def game_action(sid, data):
     # End turn (advance player, reset roll state)
     if t == "end_turn":
         # Only allow ending turn after at least one roll and no remaining rolls
+        # Exception: if the player is currently in jail, allow immediate end of turn
+        # and normalize rolls_left to 0 to avoid UI deadlocks after jail events.
+        if cur.in_jail and g.rolls_left > 0:
+            g.rolls_left = 0
         deny_reasons = []
-        if not g.rolled_this_turn:
+        if not g.rolled_this_turn and not cur.in_jail:
             deny_reasons.append("no_roll_yet")
-        if g.rolls_left > 0:
+        if g.rolls_left > 0 and not cur.in_jail:
             deny_reasons.append(f"rolls_left_{g.rolls_left}")
         if cur.cash < 0:
             # Will also be caught by later negative balance check, but log early.
@@ -1631,6 +1806,11 @@ async def game_action(sid, data):
         g.rolls_left = 1
         g.rolled_this_turn = False
         cur.doubles_count = 0
+        # Increment per-player turn count for scheduling bond coupons
+        try:
+            g.turn_counts[cur.name] = int(g.turn_counts.get(cur.name) or 0) + 1
+        except Exception:
+            pass
         g.last_action = {"type": "end_turn", "by": cur.name}
         g.log.append({"type": "end_turn", "text": f"{cur.name} ended their turn"})
         g.turns += 1
@@ -1640,6 +1820,24 @@ async def game_action(sid, data):
             _record_stock_history(g)
         except Exception:
             pass
+        # Cancel any active kick votes/timer targeting the player who just ended turn
+        for l2 in LOBBIES.values():
+            if l2.game is g:
+                l2.kick_votes.pop(cur.name, None)
+                if l2.kick_target == cur.name:
+                    l2.kick_target = None
+                    l2.kick_deadline = None
+                    task = KICK_TASKS.pop(l2.id, None)
+                    if task:
+                        try:
+                            task.cancel()
+                        except Exception:
+                            pass
+                try:
+                    await sio.emit("lobby_state", lobby_state(l2), room=l2.id)
+                except Exception:
+                    pass
+                break
         # Note: recurring processed at start of turn (in roll_dice), not here
         # If game already over, broadcast and return
         if _check_and_finalize_game(g):
@@ -2471,6 +2669,33 @@ def _stocks_snapshot(g: Game) -> List[Dict[str, Any]]:
         })
     return out
 
+def _bonds_ensure(g: Game, owner: str) -> Dict[str, Any]:
+    st = g.bonds.get(owner)
+    if not st:
+        st = {"owner": owner, "allow_bonds": False, "rate_percent": 0.0, "period_turns": 1, "history": []}
+        g.bonds[owner] = st
+    # sanity defaults
+    st.setdefault("owner", owner)
+    st.setdefault("allow_bonds", False)
+    st.setdefault("rate_percent", 0.0)
+    st.setdefault("period_turns", 1)
+    st.setdefault("history", [])
+    return st
+
+def _bonds_snapshot(g: Game) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for p in g.players:
+        st = _bonds_ensure(g, p.name)
+        out.append({
+            "owner": p.name,
+            "owner_color": p.color,
+            "allow_bonds": bool(st.get("allow_bonds", False)),
+            "rate_percent": float(st.get("rate_percent", 0.0)),
+            "period_turns": int(st.get("period_turns", 1)),
+            "history": list(st.get("history") or [])[-300:],
+        })
+    return out
+
 
 def _stock_pool_value(g: Game, owner: str) -> float:
     # Pool value is simply the owner's current cash
@@ -2519,6 +2744,38 @@ def _process_recurring_for(g: Game, payer: str) -> None:
         else:
             g.log.append({"type": "recurring_done", "text": f"Recurring payment from {payer} to {to_name} completed"})
     g.recurring = remaining
+
+def _process_bonds_for(g: Game, owner: str) -> None:
+    st = _bonds_ensure(g, owner)
+    period = int(st.get("period_turns") or 1)
+    rate = float(st.get("rate_percent") or 0.0)
+    if rate <= 0.0:
+        return
+    # Increment owner's turn count (count turn starts)
+    cnt = int(g.turn_counts.get(owner) or 0)
+    # Pay when count % period == 0 (including first turn when cnt==0)
+    due_now = (cnt % max(1, period)) == 0
+    g.turn_counts[owner] = cnt + 1
+    if not due_now:
+        return
+    # Sum investor principals for this owner
+    total_paid = 0
+    for inv in list(g.bond_investments):
+        if inv.get("owner") != owner:
+            continue
+        principal = int(inv.get("principal") or 0)
+        if principal <= 0:
+            continue
+        coupon = int(round(principal * (rate / 100.0) * max(1, period)))
+        if coupon <= 0:
+            continue
+        pay = _find_player(g, owner)
+        rec = _find_player(g, inv.get("investor"))
+        if pay and rec:
+            pay.cash -= coupon
+            rec.cash += coupon
+            total_paid += coupon
+            g.log.append({"type": "bond_coupon", "text": f"{owner} paid ${coupon} bond coupon to {inv.get('investor')}"})
 
 
 def _record_land(g: Game, pos: int) -> None:
