@@ -79,20 +79,20 @@ Command:
   cd web && npm install --no-audit --no-fund
 Why flags: Suppress non-essential audit/funding noise for automation.
 
-STEP 7: Start Vite dev server
+STEP 7: Start Vite dev server (proxy-first)
 Command:
-  npm run dev -- --host 0.0.0.0
-Why: `--host 0.0.0.0` exposes the dev server externally (so other containers / remote browser can connect).
+  npm run dev -- --host 127.0.0.1
+Why: The repo's `vite.config.ts` proxies `/socket.io`, `/board_meta`, and `/trade` to `http://127.0.0.1:8000`, so no `VITE_BACKEND_URL` is needed in local dev.
 Default Vite Port: 5173 (printed after start).
 Expected Output Snippet:
   VITE v7.x ready
-  Local:   http://localhost:5173/
+  Local:   http://127.0.0.1:5173/
 
-STEP 8: Point frontend to backend (CORS)
-Current Implementation: In dev, the frontend likely calls relative or environment-based backend URLs. If direct calls fail due to CORS, confirm server/main.py added CORSMiddleware with ALLOWED_ORIGINS=* (or includes http://localhost:5173).
-If adjustment needed: Export VITE_BACKEND_URL in a `.env` or inline when starting.
-Example (if required):
-  VITE_BACKEND_URL=http://localhost:8000 npm run dev -- --host 0.0.0.0
+STEP 8: Verify backend health and Socket.IO handshake
+Commands:
+  curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8000/healthz
+  curl -s "http://127.0.0.1:8000/socket.io/?EIO=4&transport=polling" | head -c 60
+Expected: `200` for health; a line starting with `0{"sid":"..."` for Socket.IO.
 
 STEP 9: Open the app
 Visit:
@@ -156,9 +156,9 @@ Common Pitfalls & Resolutions
    Fix: Set PYTHONPATH to repo root or run uvicorn from root with module path.
 
 3. Frontend cannot reach backend (CORS / wrong URL)
-   - Ensure backend logs show requests.
-   - Confirm ALLOWED_ORIGINS includes dev frontend origin.
-   - Set VITE_BACKEND_URL explicitly if frontend uses env-based config.
+  - Use proxy-first: ensure you did NOT set `VITE_BACKEND_URL`.
+  - Confirm backend is on 127.0.0.1:8000 and `vite.config.ts` proxy is active.
+  - If you must run backend on a different port, either adjust the proxy or set `VITE_BACKEND_URL` accordingly.
 
 4. Socket.IO connection issues
    - Verify ws/wss requests not blocked by proxy (in Mode 2).

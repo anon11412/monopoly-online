@@ -49,21 +49,24 @@ Proxy (Nginx):
 
 ## Render deployment
 
-Render can build this repo using the Dockerfile at `server/Dockerfile` and serve both API and the built web on a single service.
+Render uses the single Dockerfile at `server/Dockerfile` to build both the frontend and backend into one service.
 
 - Service type: Web Service (env: docker)
-- Health check path: `/healthz`
 - Dockerfile path: `server/Dockerfile`
-- Important env vars:
-  - `ALLOWED_ORIGINS`: `*` (or your domain)
-  - `WORKERS`: `1` (ensures Socket.IO works reliably without a message broker)
+- Health check path: `/healthz`
+- Environment variables:
+  - `ALLOWED_ORIGINS=*` (or your domain)
+  - `WORKERS=1` (single worker; add Redis if scaling workers)
 
 Notes:
-- The Dockerfile builds the frontend in a first stage and copies `web/dist` into `/app/static`; `server/main.py` mounts that dir as static if present.
-- Socket.IO is configured with permissive CORS and reasonable ping timeouts; Render supports WebSockets, and Socket.IO will fall back to polling when needed.
-- If you need multiple instances/workers on Render, add a Socket.IO message queue (e.g., Redis) and persist game state externally.
+- Dockerfile builds the React app, copies `web/dist` to `/app/static`; FastAPI serves static at `/` when present.
+- Socket.IO path is `/socket.io`; Render supports WebSockets; Socket.IO will fall back to polling if needed.
+- For multi-instance or multi-worker deployments, configure Socket.IO with a message queue (e.g., Redis) and externalize game state.
 
 Local validation before push:
-- `docker build -f server/Dockerfile -t monopoly-server .`
-- `docker run -p 8000:8000 -e WORKERS=1 monopoly-server`
-- Visit `http://localhost:8000/` and `http://localhost:8000/board_meta`
+```bash
+docker build -f server/Dockerfile -t monopoly-server .
+docker run -p 8000:8000 -e WORKERS=1 monopoly-server
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/healthz
+curl -s "http://localhost:8000/socket.io/?EIO=4&transport=polling" | head -c 60
+```
