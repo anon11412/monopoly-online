@@ -432,7 +432,6 @@ function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameS
                               }
                             }
                             const range = Math.max(0.0001, ymax - ymin);
-                            const step = range / 4;
                             const toPct = (v:number) => `${Number(v).toFixed(range < 2 ? 1 : 0)}%`;
                             return (
                               <YAxis domain={[ymin, ymax]} tickCount={5} interval={0} tickFormatter={toPct} tick={{ fontSize: 10 }} width={40} allowDataOverflow />
