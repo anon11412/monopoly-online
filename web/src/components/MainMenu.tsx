@@ -254,10 +254,13 @@ export default function MainMenu({ onEnterLobby }: Props) {
       )}
       {/* Hero Section */}
       <section style={{ minHeight: '55vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', gap: 24, padding: '40px 20px' }}>
-        <h1 style={{ fontSize: 'clamp(2.2rem, 6vw, 3.6rem)', margin: 0, lineHeight: 1.1 }}>Strategic Monopoly Reimagined</h1>
+        <h1 style={{ fontSize: 'clamp(2.2rem, 6vw, 3.6rem)', margin: 0, lineHeight: 1.1 }}>InvestUp.trade — Strategic Monopoly Online</h1>
         <p style={{ maxWidth: 720, fontSize: 'clamp(1rem, 2.2vw, 1.25rem)', lineHeight: 1.4, opacity: 0.9 }}>
           Trade dynamically, invest in rival players, automate routine moves, and outmaneuver opponents through cash flow strategy, rentals, and stock-backed influence.
         </p>
+        <div className="ui-sm" style={{ opacity: 0.75 }}>
+          Play a modern Monopoly alternative with online multiplayer and a player stock market.
+        </div>
         {!connected && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
