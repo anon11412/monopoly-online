@@ -32,23 +32,10 @@ export default function MainMenu({ onEnterLobby }: Props) {
   const [showAccessibilitySettings, setShowAccessibilitySettings] = useState(false);
   const lastLobbyId = (saved.lastLobbyId || '').trim();
   const { theme, toggleTheme } = useTheme();
-  const { user, ready: authReady, signOut, registerLocal, loginLocal } = useAuth();
-  const handleLoginLocal = async () => {
-    const id = prompt('Username or Email');
-    if (!id) return;
-    const pw = prompt('Password');
-    if (!pw) return;
-    try { await loginLocal(id, pw); } catch (e: any) { alert(e?.message || 'Login failed'); }
-  };
-  const handleRegisterLocal = async () => {
-    const username = prompt('Choose a username (min 3 chars)');
-    if (!username) return;
-    const email = prompt('Email (optional)') || '';
-    const display = prompt('Display name (optional)') || username;
-    const pw = prompt('Password (min 6 chars)');
-    if (!pw) return;
-    try { await registerLocal(username, email, pw, display); } catch (e: any) { alert(e?.message || 'Register failed'); }
-  };
+  const { user, ready: authReady, signOut } = useAuth();
+  const [authStub, setAuthStub] = useState<string | null>(null);
+  const handleLoginLocal = () => setAuthStub('Login coming soon');
+  const handleRegisterLocal = () => setAuthStub('Sign up coming soon');
   const [showTradeDemo, setShowTradeDemo] = useState(false);
   const tradeDemoRef = useRef<HTMLDivElement | null>(null);
   const [friends, setFriends] = useState<{ accepted: any[]; pending_in: any[]; pending_out: any[] } | null>(null);
@@ -234,7 +221,6 @@ export default function MainMenu({ onEnterLobby }: Props) {
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <button className="btn btn-ghost" onClick={handleLoginLocal} title="Log in">Log in</button>
               <button className="btn btn-ghost" onClick={handleRegisterLocal} title="Sign up">Sign up</button>
-              {/* OAuth sign-in not available; remove Google button */}
             </div>
           )
         )}
@@ -255,6 +241,17 @@ export default function MainMenu({ onEnterLobby }: Props) {
   return (
     <div className="main-menu" style={{ maxWidth: 1200, margin: '0 auto', paddingBottom: 80 }}>
       {stickyBar}
+      {authStub && (
+        <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.45)' }} onClick={() => setAuthStub(null)}>
+          <div onClick={(e)=>e.stopPropagation()} style={{ background: 'var(--surface, #1f2937)', color: 'inherit', padding: 16, borderRadius: 10, minWidth: 280, maxWidth: '90vw', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 10px 30px rgba(0,0,0,0.35)' }}>
+            <div className="ui-title ui-h4" style={{ marginBottom: 8 }}>Feature coming soon</div>
+            <div className="ui-sm" style={{ opacity: 0.85, marginBottom: 12 }}>{authStub}</div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button className="btn" onClick={() => setAuthStub(null)}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
       {/* Hero Section */}
       <section style={{ minHeight: '55vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', gap: 24, padding: '40px 20px' }}>
         <h1 style={{ fontSize: 'clamp(2.2rem, 6vw, 3.6rem)', margin: 0, lineHeight: 1.1 }}>Strategic Monopoly Reimagined</h1>

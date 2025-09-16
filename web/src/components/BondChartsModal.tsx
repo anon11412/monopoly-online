@@ -49,12 +49,23 @@ function RateLineChart({ history, color }: { history: Array<{ turn: number; rate
   const data = history && history.length ? history : [{ turn: 0, rate: 0 }, { turn: 1, rate: 0 }];
   const minTurn = Math.min(...data.map(d => d.turn));
   const maxTurn = Math.max(...data.map(d => d.turn));
-  const minVal = Math.min(...data.map(d => d.rate));
-  const maxVal = Math.max(...data.map(d => d.rate));
+  const rawMin = Math.min(...data.map(d => d.rate));
+  const rawMax = Math.max(...data.map(d => d.rate));
+  let yMin = 0, yMax = 100;
+  if (isFinite(rawMin) && isFinite(rawMax)) {
+    if (Math.abs(rawMax - rawMin) <= 1.0) {
+      const padPct = Math.max(0.05, (rawMax - rawMin) * 0.5 || 0.1);
+      yMin = Math.max(0, rawMin - padPct);
+      yMax = Math.min(100, rawMax + padPct);
+      if (yMin === yMax) { yMin = Math.max(0, yMin - 0.1); yMax = Math.min(100, yMax + 0.1); }
+    } else {
+      yMin = 0; yMax = 100;
+    }
+  }
   const xSpan = Math.max(1, maxTurn - minTurn);
-  const ySpan = Math.max(1, maxVal - minVal);
+  const ySpan = Math.max(0.0001, yMax - yMin);
   const x = (t: number) => pad + ((t - minTurn) / xSpan) * (width - pad * 2);
-  const y = (v: number) => height - pad - ((v - minVal) / ySpan) * (height - pad * 2);
+  const y = (v: number) => height - pad - ((v - yMin) / ySpan) * (height - pad * 2);
   const path = data.map((d: any, i: number) => `${i === 0 ? 'M' : 'L'} ${x(d.turn)} ${y(d.rate)}`).join(' ');
   return (
     <div style={{ width: '100%', maxWidth: '480px', overflow: 'hidden' }}>
@@ -76,12 +87,23 @@ function CombinedRateChart({ series }: { series: Array<{ owner: string; owner_co
   const data = all.length ? all : [{ turn: 0, rate: 0 }, { turn: 1, rate: 0 }];
   const minTurn = Math.min(...data.map(d => d.turn));
   const maxTurn = Math.max(...data.map(d => d.turn));
-  const minVal = Math.min(...data.map(d => d.rate));
-  const maxVal = Math.max(...data.map(d => d.rate));
+  const rawMin = Math.min(...data.map(d => d.rate));
+  const rawMax = Math.max(...data.map(d => d.rate));
+  let yMin = 0, yMax = 100;
+  if (isFinite(rawMin) && isFinite(rawMax)) {
+    if (Math.abs(rawMax - rawMin) <= 1.0) {
+      const padPct = Math.max(0.05, (rawMax - rawMin) * 0.5 || 0.1);
+      yMin = Math.max(0, rawMin - padPct);
+      yMax = Math.min(100, rawMax + padPct);
+      if (yMin === yMax) { yMin = Math.max(0, yMin - 0.1); yMax = Math.min(100, yMax + 0.1); }
+    } else {
+      yMin = 0; yMax = 100;
+    }
+  }
   const xSpan = Math.max(1, maxTurn - minTurn);
-  const ySpan = Math.max(1, maxVal - minVal);
+  const ySpan = Math.max(0.0001, yMax - yMin);
   const x = (t: number) => pad + ((t - minTurn) / xSpan) * (width - pad * 2);
-  const y = (v: number) => height - pad - ((v - minVal) / ySpan) * (height - pad * 2);
+  const y = (v: number) => height - pad - ((v - yMin) / ySpan) * (height - pad * 2);
   const palette = ['#e74c3c','#3498db','#2ecc71','#f1c40f','#9b59b6','#e67e22','#1abc9c','#e84393'];
   return (
     <div style={{ width: '100%', maxWidth: '640px', overflow: 'hidden' }}>

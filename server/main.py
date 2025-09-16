@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import math
 import os
 import random
@@ -29,6 +30,7 @@ class Player:
     jail_cards: int = 0  # Get Out of Jail Free cards held
     color: Optional[str] = None
     auto_mortgage: bool = False  # automatically mortgage properties when needed for purchases
+    auto_buy_houses: bool = False  # automatically buy houses evenly after completing a color set
 
 
 @dataclass
@@ -47,6 +49,8 @@ class Game:
     properties: Dict[int, PropertyState] = field(default_factory=dict)
     last_action: Optional[Dict[str, Any]] = None
     log: List[Dict[str, Any]] = field(default_factory=list)
+    # Spending/income ledger entries: {ts, turn, round, type, from, to, amount, meta}
+    ledger: List[Dict[str, Any]] = field(default_factory=list)
     rolls_left: int = 1  # remaining rolls in current turn (doubles grant extra)
     pending_trades: List[Dict[str, Any]] = field(default_factory=list)
     rolled_this_turn: bool = False
@@ -75,6 +79,8 @@ class Game:
     bond_investments: List[Dict[str, Any]] = field(default_factory=list)
     # Per-player turn counts to schedule periodic bond coupons
     turn_counts: Dict[str, int] = field(default_factory=dict)
+    # Outstanding debts: debtor -> list of { creditor, amount }
+    debts: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
 
     def snapshot(self) -> Dict[str, Any]:
         # Defensive: ensure pending_trades list exists
@@ -90,6 +96,8 @@ class Game:
             "properties": {str(k): asdict(v) for k, v in self.properties.items()},
             "last_action": self.last_action,
             "log": self.log[-200:],
+            # Recent financial ledger entries for spending visuals
+            "ledger": list(self.ledger[-500:]),
             "pending_trades": list(self.pending_trades)[-50:],
             "rolls_left": self.rolls_left,
             "rolled_this_turn": self.rolled_this_turn,
@@ -134,6 +142,138 @@ class Lobby:
     chat: List[Dict[str, Any]] = field(default_factory=list)
     # Game settings
     starting_cash: int = 1500
+    # Optional per-player chosen colors (name -> hex)
+    player_colors: Dict[str, str] = field(default_factory=dict)
+    
+def _now_ms() -> int:
+    try:
+        return int(time.time() * 1000)
+    except Exception:
+        return 0
+
+def _ledger_add(g: Game, t: str, src: Optional[str], dst: Optional[str], amount: int, meta: Optional[Dict[str, Any]] = None) -> None:
+    try:
+        if amount is None:
+            amount = 0
+        amount = int(amount)
+    except Exception:
+        amount = 0
+    try:
+        entry = {
+            "ts": _now_ms(),
+            "turn": int(g.turns or 0),
+            "round": int(g.round or 0),
+            "type": str(t),
+            "from": src,
+            "to": dst,
+            "amount": amount,
+            "meta": dict(meta or {}),
+        }
+        g.ledger.append(entry)
+        # Trim to a reasonable size to avoid unbounded growth
+        if len(g.ledger) > 5000:
+            del g.ledger[:len(g.ledger) - 5000]
+    except Exception:
+        pass
+
+
+def _ensure_debts(g: Game) -> Dict[str, List[Dict[str, Any]]]:
+    if not hasattr(g, 'debts') or not isinstance(g.debts, dict):
+        g.debts = {}
+    return g.debts
+
+
+def _debt_total(g: Game, debtor: str) -> int:
+    dmap = _ensure_debts(g)
+    total = 0
+    for rec in dmap.get(debtor, []) or []:
+        try:
+            total += max(0, int(rec.get('amount') or 0))
+        except Exception:
+            continue
+    return total
+
+
+def _debt_add(g: Game, debtor: str, creditor: Optional[str], amount: int, meta: Optional[Dict[str, Any]] = None) -> None:
+    try:
+        amt = int(amount or 0)
+    except Exception:
+        amt = 0
+    if not debtor or amt <= 0:
+        return
+    dmap = _ensure_debts(g)
+    arr = list(dmap.get(debtor) or [])
+    # Coalesce adjacent same-creditor entries when possible
+    if arr and (arr[-1].get('creditor') == creditor):
+        arr[-1]['amount'] = int(arr[-1].get('amount') or 0) + amt
+    else:
+        arr.append({'creditor': creditor, 'amount': amt})
+    dmap[debtor] = arr
+    # Log and ledger for transparency
+    try:
+        who = debtor
+        to = creditor or 'bank'
+        _ledger_add(g, 'debt_add', who, to, int(amt), dict(meta or {}))
+        g.log.append({'type': 'debt_add', 'text': f"{who} incurred ${amt} debt to {to}"})
+    except Exception:
+        pass
+
+
+def _route_inflow(g: Game, receiver_name: Optional[str], amount: int, reason: str, meta: Optional[Dict[str, Any]] = None) -> int:
+    """Route inflow to receiver. If receiver has outstanding debts, automatically pay creditors FIFO.
+    Returns the amount retained by the receiver after routing.
+    - No overpay: pay up to min(inflow_remaining, debt_amount)
+    - Partial trickle: continue until inflow exhausted or debts cleared
+    - Records ledger entries per routed payment
+    """
+    if not receiver_name:
+        return amount
+    try:
+        inflow = max(0, int(amount or 0))
+    except Exception:
+        inflow = 0
+    if inflow <= 0:
+        return 0
+    dmap = _ensure_debts(g)
+    debts = list(dmap.get(receiver_name) or [])
+    if not debts:
+        return inflow
+    routed_total = 0
+    new_debts: List[Dict[str, Any]] = []
+    for rec in debts:
+        if inflow <= 0:
+            # Keep remaining entries as-is
+            if (int(rec.get('amount') or 0) > 0):
+                new_debts.append(rec)
+            continue
+        owed = max(0, int(rec.get('amount') or 0))
+        if owed <= 0:
+            continue
+        pay = min(inflow, owed)
+        if pay > 0:
+            inflow -= pay
+            routed_total += pay
+            creditor = rec.get('creditor') or 'bank'
+            # Apply payment to creditor's cash if it is a player
+            cred_p = _find_player(g, creditor)
+            if cred_p:
+                cred_p.cash += pay
+            # Reduce debt record
+            rem = owed - pay
+            if rem > 0:
+                new_debts.append({'creditor': rec.get('creditor'), 'amount': rem})
+            # Ledger/log entry per routed amount
+            try:
+                _ledger_add(g, 'debt_payment', receiver_name, creditor, int(pay), {**dict(meta or {}), 'reason': reason})
+                g.log.append({'type': 'debt_payment', 'text': f"{receiver_name} auto-routed ${pay} to {creditor} ({reason})"})
+            except Exception:
+                pass
+        else:
+            new_debts.append(rec)
+    # Update debts map
+    dmap[receiver_name] = new_debts
+    # Return retained amount
+    return max(0, inflow)
 
 
 # ---------------------------
@@ -296,29 +436,92 @@ def _auto_mortgage_for_cash(game: Game, player: Player, needed_amount: int) -> i
             
             if can_mortgage:
                 mortgage_value = _mortgage_value(pos)
-                owned_properties.append((pos, mortgage_value, tile.get("name", f"Property {pos}")))
+                # Determine if this is a singleton (player does not own the full color set)
+                is_singleton = True
+                if group:
+                    group_positions = _group_positions(group)
+                    if group_positions:
+                        owns_full_set = all((game.properties.get(p) or PropertyState(pos=p)).owner == player.name for p in group_positions)
+                        is_singleton = not owns_full_set
+                owned_properties.append((pos, mortgage_value, tile.get("name", f"Property {pos}"), is_singleton))
     
-    # Sort by mortgage value (highest first) to raise cash quickly when in debt
-    owned_properties.sort(key=lambda x: x[1], reverse=True)
+    # Sort by priority: singletons first, then by mortgage value (highest first)
+    # Tuple format: (pos, mortgage_value, name, is_singleton)
+    owned_properties.sort(key=lambda x: (not x[3], x[1]), reverse=True)
     
     # Mortgage properties until we have enough cash or run out of properties
-    for pos, mortgage_value, prop_name in owned_properties:
-        if player.cash + cash_raised >= needed_amount:
+    for pos, mortgage_value, prop_name, _is_single in owned_properties:
+        # Stop if we've already met the cash requirement
+        if player.cash >= needed_amount:
             break
-            
+
         # Mortgage this property
         prop_state = game.properties[pos]
         prop_state.mortgaged = True
-        player.cash += mortgage_value
+        retained = _route_inflow(game, player.name, int(mortgage_value), "mortgage", {"pos": pos})
+        player.cash += retained
         cash_raised += mortgage_value
-        
+
         # Add to game log
         game.log.append({
-            "type": "auto_mortgage", 
+            "type": "auto_mortgage",
             "text": f"{player.name} auto-mortgaged {prop_name} for ${mortgage_value}"
         })
     
     return cash_raised
+
+
+def _auto_buy_houses_even(game: Game, player: Player, group: str) -> int:
+    """
+    Attempt to buy houses evenly across a completed color group using available cash.
+    Returns total spent. Respects mortgaged state (won't build if any mortgaged) and even-building rules.
+    """
+    if not group:
+        return 0
+    positions = _group_positions(group)
+    if not positions:
+        return 0
+    # Must own all and none mortgaged
+    states = [game.properties.get(p) or PropertyState(pos=p) for p in positions]
+    if not all(s.owner == player.name for s in states):
+        return 0
+    if any(s.mortgaged for s in states):
+        return 0
+    house_cost = HOUSE_COST_BY_GROUP.get(group, 0)
+    if house_cost <= 0:
+        return 0
+
+    def can_build_even_local(target_pos: int, delta: int) -> bool:
+        counts = [s.houses + (5 if s.hotel else 0) for s in states]
+        idx = [s.pos for s in states].index(target_pos)
+        counts[idx] += delta
+        return (max(counts) - min(counts)) <= 1 and all(0 <= c <= 5 for c in counts)
+
+    spent = 0
+    # Greedy even-building: repeatedly pass through properties adding 1 where allowed
+    while player.cash >= house_cost:
+        progressed = False
+        for i, s in enumerate(states):
+            if s.hotel:
+                continue
+            if s.houses >= 4:
+                # Hotel requires special action in our rules; skip auto hotel
+                continue
+            if not can_build_even_local(s.pos, +1):
+                continue
+            # Buy one house
+            s.houses += 1
+            player.cash -= house_cost
+            spent += house_cost
+            game.properties[s.pos] = s
+            tile = monopoly_tiles()[s.pos]
+            game.log.append({"type": "auto_buy_house", "text": f"{player.name} auto-bought a house on {tile.get('name')} for ${house_cost}"})
+            progressed = True
+            if player.cash < house_cost:
+                break
+        if not progressed:
+            break
+    return spent
 
 
 def _auto_sell_houses_for_cash(game: Game, player: Player, needed_amount: int) -> int:
@@ -379,7 +582,8 @@ def _auto_sell_houses_for_cash(game: Game, player: Player, needed_amount: int) -
             else:
                 continue  # No buildings on this property
             
-            player.cash += sell_value
+            retained = _route_inflow(game, player.name, int(sell_value), "sell_building", {"pos": pos, "building": building_type})
+            player.cash += retained
             cash_raised += sell_value
             sold_something = True
             
@@ -578,6 +782,7 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
         "disconnect_remain": remain,
         "chat": l.chat[-50:],
         "starting_cash": l.starting_cash,
+        "player_colors": l.player_colors,
     }
 
 
@@ -1009,14 +1214,27 @@ async def lobby_setting(sid, data):
     if lobby_id not in LOBBIES:
         return {"ok": False, "error": "Lobby not found"}
     l = LOBBIES[lobby_id]
-    # Only host can change settings
-    if sid != l.host_sid:
-        return {"ok": False, "error": "Only host can change settings"}
+    actor = USERNAMES.get(sid) or l.sid_to_name.get(sid)
     # Validate setting
     if setting == "starting_cash":
+        # Only host can change starting cash
+        if sid != l.host_sid:
+            return {"ok": False, "error": "Only host can change settings"}
         if not isinstance(value, (int, float)) or value < 1 or value > 25000:
             return {"ok": False, "error": "Starting cash must be between $1 and $25,000"}
         l.starting_cash = int(value)
+    elif setting == "player_color":
+        # value is hex string; only self may change their own color
+        # If client provides a different target, reject
+        req_target = data.get("player")
+        target = actor
+        if req_target and req_target != actor:
+            return {"ok": False, "error": "You can only change your own color"}
+        if not isinstance(value, str) or not value.startswith("#") or len(value) not in (4, 7):
+            return {"ok": False, "error": "Invalid color"}
+        if target not in l.players:
+            return {"ok": False, "error": "Player not in lobby"}
+        l.player_colors[target] = value
     else:
         return {"ok": False, "error": "Unknown setting"}
     await sio.emit("lobby_state", lobby_state(l), room=lobby_id)
@@ -1275,7 +1493,12 @@ async def game_action(sid, data):
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return {"ok": False, "error": "insufficient_cash"}
         inv_p.cash -= amount
-        owner_p.cash += amount
+        retained = _route_inflow(g, owner, int(amount), "bond_invest_principal", {"note": "principal transfer"})
+        owner_p.cash += retained
+        try:
+            _ledger_add(g, "bond_invest", investor, owner, amount, {"note": "principal transfer"})
+        except Exception:
+            pass
         merged = False
         for entry in g.bond_investments:
             if entry.get("owner") == owner and entry.get("investor") == investor:
@@ -1345,9 +1568,10 @@ async def game_action(sid, data):
                     await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                     return
                 # On 3rd attempt, pay $50 and leave
-                cur.cash -= 50
-                if cur.cash < 0:
-                    _handle_negative_cash(g, cur)
+                pay_now = min(max(0, cur.cash), 50)
+                cur.cash -= pay_now
+                if 50 - pay_now > 0:
+                    _debt_add(g, cur.name, "bank", int(50 - pay_now), {"kind": "jail_fee"})
                 g.log.append({"type": "jail", "text": f"{cur.name} paid $50 to leave jail on the 3rd attempt"})
                 cur.in_jail = False
                 cur.jail_turns = 0
@@ -1373,7 +1597,8 @@ async def game_action(sid, data):
         old_pos = cur.position
         new_pos = (cur.position + roll) % 40
         if old_pos + roll >= 40:
-            cur.cash += 200
+            retained = _route_inflow(g, cur.name, 200, "pass_go", None)
+            cur.cash += retained
             g.log.append({"type": "pass_go", "text": f"{cur.name} collected $200 for passing GO"})
         cur.position = new_pos
         _record_land(g, new_pos)
@@ -1403,8 +1628,16 @@ async def game_action(sid, data):
             elif "Luxury Tax" in name:
                 amount = 100
             if amount:
-                cur.cash -= amount
+                pay_now = min(max(0, cur.cash), int(amount))
+                cur.cash -= pay_now
+                unpaid = int(amount) - pay_now
+                if unpaid > 0:
+                    _debt_add(g, cur.name, "bank", int(unpaid), {"name": name, "kind": "tax"})
                 g.log.append({"type": "tax", "text": f"{cur.name} paid ${amount} in taxes"})
+                try:
+                    _ledger_add(g, "tax", cur.name, "bank", int(pay_now), {"name": name, "unpaid": int(unpaid)})
+                except Exception:
+                    pass
 
         # Chance / Community Chest (minimal subset)
         if tile.get("type") in {"chance", "chest"}:
@@ -1430,8 +1663,16 @@ async def game_action(sid, data):
                 elif "Luxury Tax" in name:
                     amount = 100
                 if amount:
-                    cur.cash -= amount
+                    pay_now = min(max(0, cur.cash), int(amount))
+                    cur.cash -= pay_now
+                    unpaid = int(amount) - pay_now
+                    if unpaid > 0:
+                        _debt_add(g, cur.name, "bank", int(unpaid), {"name": name, "kind": "tax", "card_move": True})
                     g.log.append({"type": "tax", "text": f"{cur.name} paid ${amount} in taxes (card move)"})
+                    try:
+                        _ledger_add(g, "tax", cur.name, "bank", int(pay_now), {"name": name, "card_move": True, "unpaid": int(unpaid)})
+                    except Exception:
+                        pass
 
         # Rent payment
         rent_paid = False
@@ -1487,10 +1728,10 @@ async def game_action(sid, data):
         elif price <= 0:
             reason = "no_price"
         elif cur.cash < price:
-            # Try auto-sell houses first, then auto-mortgage if enabled and player doesn't have enough cash
-            houses_cash_raised = _auto_sell_houses_for_cash(g, cur, price)
+            # For purchases, don't sell houses; only auto-mortgage eligible singles
+            houses_cash_raised = 0
             mortgage_cash_raised = _auto_mortgage_for_cash(g, cur, price)
-            total_cash_raised = houses_cash_raised + mortgage_cash_raised
+            total_cash_raised = mortgage_cash_raised
             
             if cur.cash >= price:
                 # Success! Purchase the property
@@ -1498,14 +1739,23 @@ async def game_action(sid, data):
                 g.properties[p] = st
                 cur.cash -= price
                 auto_actions = []
-                if houses_cash_raised > 0:
-                    auto_actions.append(f"auto-sold buildings for ${houses_cash_raised}")
                 if mortgage_cash_raised > 0:
                     auto_actions.append(f"auto-mortgaged for ${mortgage_cash_raised}")
                 auto_text = f" ({', '.join(auto_actions)})" if auto_actions else ""
                 
                 g.last_action = {"type": "buy", "by": cur.name, "pos": p, "price": price, "name": tile["name"], "auto_actions": total_cash_raised > 0}
                 g.log.append({"type": "buy", "text": f"{cur.name} bought {tile['name']} for ${price}{auto_text}"})
+                try:
+                    _ledger_add(g, "buy_property", cur.name, "bank", int(price), {"pos": p, "name": tile.get("name")})
+                except Exception:
+                    pass
+                # If this completes a set and auto_buy_houses is enabled, auto-unmortgage group then buy houses evenly
+                group = tile.get("group")
+                if group and (all((g.properties.get(pp) or PropertyState(pos=pp)).owner == cur.name for pp in _group_positions(group))):
+                    if cur.auto_buy_houses:
+                        # Unmortgage within the group first if needed
+                        _auto_unmortgage_for_houses(g, cur, group)
+                        _auto_buy_houses_even(g, cur, group)
                 try:
                     await sio.emit("sound", {"event": "property_purchased", "by": cur.name, "pos": p, "price": price}, room=lobby_id)
                 except Exception:
@@ -1522,6 +1772,16 @@ async def game_action(sid, data):
             g.last_action = {"type": "buy", "by": cur.name, "pos": p, "price": price, "name": tile["name"]}
             g.log.append({"type": "buy", "text": f"{cur.name} bought {tile['name']} for ${price}"})
             try:
+                _ledger_add(g, "buy_property", cur.name, "bank", int(price), {"pos": p, "name": tile.get("name")})
+            except Exception:
+                pass
+            # If this completes a set and auto_buy_houses is enabled, auto-unmortgage group then buy houses evenly
+            group = tile.get("group")
+            if group and (all((g.properties.get(pp) or PropertyState(pos=pp)).owner == cur.name for pp in _group_positions(group))):
+                if cur.auto_buy_houses:
+                    _auto_unmortgage_for_houses(g, cur, group)
+                    _auto_buy_houses_even(g, cur, group)
+            try:
                 await sio.emit("sound", {"event": "property_purchased", "by": cur.name, "pos": p, "price": price}, room=lobby_id)
             except Exception:
                 pass
@@ -1530,6 +1790,18 @@ async def game_action(sid, data):
         
         # Purchase failed
         g.last_action = {"type": "buy_failed", "by": cur.name, "pos": p, "reason": reason}
+        await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+        return
+
+    # Toggle auto-buy-houses setting
+    if t == "toggle_auto_buy_houses":
+        # Anyone can toggle for themselves
+        for p in g.players:
+            if p.name == actor:
+                p.auto_buy_houses = not p.auto_buy_houses
+                g.last_action = {"type": "auto_buy_houses_toggled", "by": actor, "enabled": p.auto_buy_houses}
+                g.log.append({"type": "auto_buy_houses", "text": f"{actor} {'enabled' if p.auto_buy_houses else 'disabled'} auto-buy houses"})
+                break
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
         return
 
@@ -1648,7 +1920,12 @@ async def game_action(sid, data):
                 return
             # Cash transfer
             inv_p.cash -= A
-            own_p.cash += A
+            retained = _route_inflow(g, owner, int(A), "stock_invest", {"pool_before": P})
+            own_p.cash += retained
+            try:
+                _ledger_add(g, "stock_invest", investor, owner, A, {"pool_before": P, "pool_after": int(P_new) if 'P_new' in locals() else None})
+            except Exception:
+                pass
             # Recalculate percents based on dollar stakes
             P_new = float(P + A)
             # First compute each investor's dollar stake E_k from old percents
@@ -1723,7 +2000,12 @@ async def game_action(sid, data):
                 return
             # Cash transfer
             own_p.cash -= S
-            inv_p.cash += S
+            retained = _route_inflow(g, investor, int(S), "stock_sell", {"pool_before": P})
+            inv_p.cash += retained
+            try:
+                _ledger_add(g, "stock_sell", owner, investor, S, {"pool_before": P, "pool_after": int(P_new) if 'P_new' in locals() else None})
+            except Exception:
+                pass
             P_new = float(P - S)
             # Recompute percents from old dollar stakes
             if P_new <= 0:
@@ -1944,9 +2226,14 @@ async def game_action(sid, data):
                 st.mortgaged = True
                 g.properties[pos] = st
                 amt = _mortgage_value(pos)
-                cur.cash += amt
+                retained = _route_inflow(g, cur.name, int(amt), "mortgage", {"pos": pos})
+                cur.cash += retained
                 g.last_action = {"type": "mortgage", "by": cur.name, "pos": pos, "amount": amt}
                 g.log.append({"type": "mortgage", "text": f"{cur.name} mortgaged {tile['name']} for ${amt}"})
+                try:
+                    _ledger_add(g, "mortgage", cur.name, "bank", -int(amt), {"pos": pos, "name": tile.get("name")})
+                except Exception:
+                    pass
                 try:
                     await sio.emit("sound", {"event": "mortgage", "by": cur.name, "pos": pos, "amount": amt}, room=lobby_id)
                 except Exception:
@@ -1967,6 +2254,10 @@ async def game_action(sid, data):
                     g.properties[pos] = st
                     g.last_action = {"type": "unmortgage", "by": cur.name, "pos": pos, "amount": payoff}
                     g.log.append({"type": "unmortgage", "text": f"{cur.name} unmortgaged {tile['name']} paying ${payoff}"})
+                    try:
+                        _ledger_add(g, "unmortgage", cur.name, "bank", int(payoff), {"pos": pos, "name": tile.get("name")})
+                    except Exception:
+                        pass
                     try:
                         await sio.emit("sound", {"event": "unmortgage", "by": cur.name, "pos": pos, "amount": payoff}, room=lobby_id)
                     except Exception:
@@ -1995,6 +2286,10 @@ async def game_action(sid, data):
                 g.last_action = {"type": "buy_house", "by": cur.name, "pos": pos, "cost": house_cost}
                 g.log.append({"type": "buy_house", "text": f"{cur.name} bought a house on {tile['name']} for ${house_cost}"})
                 try:
+                    _ledger_add(g, "buy_house", cur.name, "bank", int(house_cost), {"pos": pos, "name": tile.get("name")})
+                except Exception:
+                    pass
+                try:
                     await sio.emit("sound", {"event": "property_purchased", "by": cur.name, "pos": pos, "house": True}, room=lobby_id)
                 except Exception:
                     pass
@@ -2007,10 +2302,15 @@ async def game_action(sid, data):
                 g.last_action = {"type": "sell_house_denied", "by": cur.name, "pos": pos, "reason": "even_rule"}
             else:
                 st.houses -= 1
-                cur.cash += house_cost // 2
+                retained = _route_inflow(g, cur.name, int(house_cost // 2), "sell_house", {"pos": pos})
+                cur.cash += retained
                 g.properties[pos] = st
                 g.last_action = {"type": "sell_house", "by": cur.name, "pos": pos, "refund": house_cost // 2}
                 g.log.append({"type": "sell_house", "text": f"{cur.name} sold a house on {tile['name']} for ${house_cost//2}"})
+                try:
+                    _ledger_add(g, "sell_house", "bank", cur.name, int(house_cost // 2), {"pos": pos, "name": tile.get("name")})
+                except Exception:
+                    pass
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
         if t == "buy_hotel":
@@ -2024,6 +2324,10 @@ async def game_action(sid, data):
                 g.last_action = {"type": "buy_hotel", "by": cur.name, "pos": pos, "cost": house_cost}
                 g.log.append({"type": "buy_hotel", "text": f"{cur.name} bought a hotel on {tile['name']} for ${house_cost}"})
                 try:
+                    _ledger_add(g, "buy_hotel", cur.name, "bank", int(house_cost), {"pos": pos, "name": tile.get("name")})
+                except Exception:
+                    pass
+                try:
                     await sio.emit("sound", {"event": "property_purchased", "by": cur.name, "pos": pos, "hotel": True}, room=lobby_id)
                 except Exception:
                     pass
@@ -2035,10 +2339,15 @@ async def game_action(sid, data):
             else:
                 st.hotel = False
                 st.houses = 4
-                cur.cash += house_cost // 2
+                retained = _route_inflow(g, cur.name, int(house_cost // 2), "sell_hotel", {"pos": pos})
+                cur.cash += retained
                 g.properties[pos] = st
                 g.last_action = {"type": "sell_hotel", "by": cur.name, "pos": pos, "refund": house_cost // 2}
                 g.log.append({"type": "sell_hotel", "text": f"{cur.name} sold a hotel on {tile['name']} for ${house_cost//2}"})
+                try:
+                    _ledger_add(g, "sell_hotel", "bank", cur.name, int(house_cost // 2), {"pos": pos, "name": tile.get("name")})
+                except Exception:
+                    pass
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
 
@@ -2080,9 +2389,21 @@ async def game_action(sid, data):
         b = _find_player(g, offer.get("to"))
         if a and b:
             a.cash -= cash_a
-            b.cash += cash_a
+            retained_ab = _route_inflow(g, b.name, int(cash_a), "trade_cash", {"trade_id": trade_id})
+            b.cash += retained_ab
+            if cash_a > 0:
+                try:
+                    _ledger_add(g, "trade_cash", a.name, b.name, cash_a, {"trade_id": trade_id})
+                except Exception:
+                    pass
             b.cash -= cash_b
-            a.cash += cash_b
+            retained_ba = _route_inflow(g, a.name, int(cash_b), "trade_cash", {"trade_id": trade_id})
+            a.cash += retained_ba
+            if cash_b > 0:
+                try:
+                    _ledger_add(g, "trade_cash", b.name, a.name, cash_b, {"trade_id": trade_id})
+                except Exception:
+                    pass
             # Jail cards
             if offer.get("give", {}).get("jail_card"):
                 if a.jail_cards > 0:
@@ -2282,13 +2603,24 @@ async def game_action(sid, data):
         renter = _find_player(g, offer.get("to"))
         owner = _find_player(g, offer.get("from"))
         
+        # Precompute rental id so ledger/meta align
+        rental_id = f"rental{random.randint(1000,9999)}"
         if renter and owner and renter.cash >= cash_amount:
             # Transfer cash immediately
             renter.cash -= cash_amount
-            owner.cash += cash_amount
+            retained = _route_inflow(g, owner.name, int(cash_amount or 0), "rental_upfront", {"rental_id": rental_id})
+            owner.cash += retained
+            try:
+                _ledger_add(g, "rental_upfront", renter.name, owner.name, int(cash_amount or 0), {
+                    "rental_id": rental_id,
+                    "properties": list(properties or []),
+                    "percentage": int(percentage or 0),
+                    "turns": int(turns or 0),
+                })
+            except Exception:
+                pass
             
             # Create rental agreement
-            rental_id = f"rental{random.randint(1000,9999)}"
             rentals = _ensure_rentals(g)
             rentals.append({
                 "id": rental_id,
@@ -2461,7 +2793,8 @@ def _handle_rent(g: Game, cur: Player, pos: int, last_roll: int) -> bool:
                 if renter:
                     redirected_amount = int((rent * percentage) / 100)
                     rental_redirected += redirected_amount
-                    renter.cash += redirected_amount
+                    retained_r = _route_inflow(g, renter.name, int(redirected_amount), "rental_income_split", {"property": pos})
+                    renter.cash += retained_r
                     
                     # Update rental tracking
                     rental["total_received"] = rental.get("total_received", 0) + redirected_amount
@@ -2483,23 +2816,35 @@ def _handle_rent(g: Game, cur: Player, pos: int, last_roll: int) -> bool:
     # Owner receives the remaining rent
     remaining_rent = rent - rental_redirected
     if remaining_rent > 0:
-        owner.cash += remaining_rent
+        retained_o = _route_inflow(g, owner.name, int(remaining_rent), "rent_income", {"pos": pos})
+        owner.cash += retained_o
 
-    # Player pays full rent - use auto-mortgage/auto-sell if needed
-    if cur.cash < rent:
-        houses_cash_raised = _auto_sell_houses_for_cash(g, cur, rent)
-        mortgage_cash_raised = _auto_mortgage_for_cash(g, cur, rent)
-    
-    cur.cash -= rent
-    
-    # Handle any remaining negative cash after payment
-    if cur.cash < 0:
-        _handle_negative_cash(g, cur)
+    # Player pays what they can now; if short, record debt for remainder
+    due = int(rent)
+    # Try to raise automatically if enabled and short
+    if cur.cash < due:
+        _auto_sell_houses_for_cash(g, cur, due)
+        _auto_mortgage_for_cash(g, cur, due)
+    pay_now = min(max(0, cur.cash), due)
+    cur.cash -= pay_now
+    unpaid = due - pay_now
+    if unpaid > 0:
+        _debt_add(g, cur.name, owner.name, int(unpaid), {"pos": pos, "kind": "rent"})
     
     if rental_redirected > 0:
         g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} rent (${remaining_rent} to {owner.name}, ${rental_redirected} to renters) for {tile.get('name')}"})
+        try:
+            if remaining_rent > 0:
+                _ledger_add(g, "rent", cur.name, owner.name, remaining_rent, {"pos": pos, "tile": tile.get("name")})
+            _ledger_add(g, "rent_split", cur.name, "<renters>", rental_redirected, {"pos": pos, "tile": tile.get("name")})
+        except Exception:
+            pass
     else:
         g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} rent to {owner.name} for landing on {tile.get('name')}"})
+        try:
+            _ledger_add(g, "rent", cur.name, owner.name, rent, {"pos": pos, "tile": tile.get("name")})
+        except Exception:
+            pass
 
     return True
 
@@ -2733,6 +3078,8 @@ def _bond_payouts_snapshot(g: Game) -> List[Dict[str, Any]]:
             "period_turns": period,
             "rate_percent": rate,
             "next_due_in_turns": next_in,
+            # deterministic display key; runtime payout ids set on events
+            "key": f"{owner}|{investor}"
         })
     # Stable sort by owner then investor for consistent UI
     out.sort(key=lambda x: (str(x.get("owner") or "").lower(), str(x.get("investor") or "").lower()))
@@ -2776,9 +3123,19 @@ def _process_recurring_for(g: Game, payer: str) -> None:
         pay = _find_player(g, payer)
         rec = _find_player(g, to_name)
         if pay and rec and amt > 0:
-            pay.cash -= amt
-            rec.cash += amt
+            pay_now = min(max(0, int(pay.cash)), int(amt))
+            pay.cash -= pay_now
+            if pay_now > 0:
+                retained = _route_inflow(g, to_name, int(pay_now), "recurring_income", {"id": r.get("id")})
+                rec.cash += retained
+            unpaid = int(amt) - pay_now
+            if unpaid > 0:
+                _debt_add(g, payer, to_name, int(unpaid), {"id": r.get("id"), "kind": "recurring"})
             g.log.append({"type": "recurring_pay", "text": f"{payer} paid ${amt} to {to_name} (recurring)"})
+            try:
+                _ledger_add(g, "recurring", payer, to_name, int(pay_now), {"id": r.get("id"), "unpaid": int(unpaid)})
+            except Exception:
+                pass
         left = int(r.get("turns_left") or 0) - 1
         if left > 0:
             r["turns_left"] = left
@@ -2814,10 +3171,25 @@ def _process_bonds_for(g: Game, owner: str) -> None:
         pay = _find_player(g, owner)
         rec = _find_player(g, inv.get("investor"))
         if pay and rec:
-            pay.cash -= coupon
-            rec.cash += coupon
-            total_paid += coupon
-            g.log.append({"type": "bond_coupon", "text": f"{owner} paid ${coupon} bond coupon to {inv.get('investor')}"})
+            pay_now = min(max(0, int(pay.cash)), int(coupon))
+            pay.cash -= pay_now
+            if pay_now > 0:
+                retained = _route_inflow(g, inv.get("investor"), int(pay_now), "bond_coupon", {"principal": principal})
+                rec.cash += retained
+            unpaid = int(coupon) - pay_now
+            if unpaid > 0:
+                _debt_add(g, owner, inv.get("investor"), int(unpaid), {"principal": principal, "kind": "bond_coupon"})
+            total_paid += int(coupon)
+            # Unique payout id: ts-owner-investor-random
+            try:
+                pid = f"{_now_ms()}:{owner}:{inv.get('investor')}:{random.randint(1000,9999)}"
+            except Exception:
+                pid = f"{owner}:{inv.get('investor')}:{int(time.time()*1000)}"
+            g.log.append({"type": "bond_coupon", "text": f"{owner} paid ${coupon} bond coupon to {inv.get('investor')} (id {pid})", "payout_id": pid, "paid_now": int(pay_now), "unpaid": int(unpaid)})
+            try:
+                _ledger_add(g, "bond_coupon", owner, inv.get("investor"), int(pay_now), {"principal": principal, "payout_id": pid, "unpaid": int(unpaid)})
+            except Exception:
+                pass
 
 
 def _record_land(g: Game, pos: int) -> None:
@@ -2969,7 +3341,8 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
             # Advance to GO and collect $200
             # Award $200 regardless of path per classic card
             cur.position = 0
-            cur.cash += 200
+            retained = _route_inflow(g, cur.name, 200, "advance_to_go", None)
+            cur.cash += retained
             g.log.append({"type": "card", "text": f"{cur.name} advanced to GO and collected $200"})
             _record_land(g, 0)
             return
@@ -2977,7 +3350,8 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
         if pos is not None:
             # Award $200 if passing GO as part of move
             if (cur.position > pos):
-                cur.cash += 200
+                retained = _route_inflow(g, cur.name, 200, "pass_go_card_move", None)
+                cur.cash += retained
                 g.log.append({"type": "pass_go", "text": f"{cur.name} collected $200 for passing GO (card)"})
             cur.position = pos
             g.log.append({"type": "card", "text": f"{cur.name} advanced to {target}"})
@@ -2985,13 +3359,22 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
         return
     if kind == "collect":
         amount = int(card.get("amount") or 0)
-        cur.cash += amount
+        retained = _route_inflow(g, cur.name, int(amount), "card_collect", {"text": card.get("text")})
+        cur.cash += retained
         g.log.append({"type": "card", "text": card.get("text") or f"Collected ${amount}"})
         return
     if kind == "pay":
         amount = int(card.get("amount") or 0)
-        cur.cash -= amount
+        pay_now = min(max(0, cur.cash), int(amount))
+        cur.cash -= pay_now
+        unpaid = int(amount) - pay_now
+        if unpaid > 0:
+            _debt_add(g, cur.name, "bank", int(unpaid), {"kind": "card_pay"})
         g.log.append({"type": "card", "text": card.get("text") or f"Paid ${amount}"})
+        try:
+            _ledger_add(g, "card_pay", cur.name, "bank", int(pay_now), {"unpaid": int(unpaid), "text": card.get("text")})
+        except Exception:
+            pass
         return
     if kind == "repairs":
         per_house = int(card.get("house") or 0)
@@ -3002,8 +3385,16 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
                 total += per_house * max(0, int(st.houses or 0))
                 total += per_hotel * (1 if st.hotel else 0)
         if total > 0:
-            cur.cash -= total
+            pay_now = min(max(0, cur.cash), int(total))
+            cur.cash -= pay_now
+            unpaid = int(total) - pay_now
+            if unpaid > 0:
+                _debt_add(g, cur.name, "bank", int(unpaid), {"kind": "repairs"})
             g.log.append({"type": "card", "text": f"{cur.name} paid ${total} for repairs"})
+            try:
+                _ledger_add(g, "repairs", cur.name, "bank", int(pay_now), {"unpaid": int(unpaid)})
+            except Exception:
+                pass
         else:
             g.log.append({"type": "card", "text": f"{cur.name} had no repairs to pay"})
         return
@@ -3025,7 +3416,8 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
             return
         # collect $200 if passing GO
         if np <= start:
-            cur.cash += 200
+            retained = _route_inflow(g, cur.name, 200, "pass_go_card_move", None)
+            cur.cash += retained
             g.log.append({"type": "pass_go", "text": f"{cur.name} collected $200 for passing GO (card)"})
         cur.position = np
         g.log.append({"type": "card", "text": f"{cur.name} advanced to nearest {target}"})
@@ -3041,10 +3433,16 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
                 count = _railroads_owned(g, owner)
                 mapping = {1: 25, 2: 50, 3: 100, 4: 200}
                 rent = mapping.get(count, 25) * 2
-                cur.cash -= rent
+                # Partial payment with debt
+                pay_now = min(max(0, cur.cash), rent)
+                cur.cash -= pay_now
+                unpaid = rent - pay_now
                 p_owner = _find_player(g, owner)
-                if p_owner:
-                    p_owner.cash += rent
+                if p_owner and pay_now > 0:
+                    retained = _route_inflow(g, p_owner.name, int(pay_now), "rent_income", {"pos": pos, "special": "double_rr"})
+                    p_owner.cash += retained
+                if unpaid > 0:
+                    _debt_add(g, cur.name, owner, int(unpaid), {"pos": pos, "kind": "rent_double_rr"})
                 g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} (double RR rent) to {owner}"})
         if special == "ten_x" and target == "utility":
             pos = cur.position
@@ -3052,10 +3450,15 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
             owner = st.owner if st else None
             if owner and owner != cur.name and not (st and st.mortgaged):
                 rent = 10 * max(2, min(12, int(last_roll or 0)))
-                cur.cash -= rent
+                pay_now = min(max(0, cur.cash), rent)
+                cur.cash -= pay_now
+                unpaid = rent - pay_now
                 p_owner = _find_player(g, owner)
-                if p_owner:
-                    p_owner.cash += rent
+                if p_owner and pay_now > 0:
+                    retained = _route_inflow(g, p_owner.name, int(pay_now), "rent_income", {"pos": pos, "special": "ten_x_util"})
+                    p_owner.cash += retained
+                if unpaid > 0:
+                    _debt_add(g, cur.name, owner, int(unpaid), {"pos": pos, "kind": "rent_tenx_util"})
                 g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} (10x utility) to {owner}"})
         return
 
@@ -3203,7 +3606,8 @@ async def _bot_take_simple_turn(l: Lobby):
     old_pos = cur.position
     new_pos = (cur.position + roll) % 40
     if old_pos + roll >= 40:
-        cur.cash += 200
+        retained = _route_inflow(g, cur.name, 200, "pass_go_bot", None)
+        cur.cash += retained
         g.log.append({"type": "pass_go", "text": f"{cur.name} collected $200 for passing GO"})
     cur.position = new_pos
     _record_land(g, new_pos)

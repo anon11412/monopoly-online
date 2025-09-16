@@ -7,6 +7,7 @@ export type LobbyInfo = {
   ready?: string[];
   bots?: string[];
   starting_cash?: number;
+  player_colors?: Record<string, string>;
 };
 
 export type BoardTile = {
@@ -57,6 +58,8 @@ export type GameSnapshot = {
   properties?: Record<string | number, PropertyStateLike>;
   last_action?: any;
   log?: Array<{ type: string; text?: string; [k: string]: any }>;
+  // Optional financial ledger from server for precise spending aggregation
+  ledger?: Array<{ ts: number; turn: number; round: number; type: string; from?: string; to?: string; amount: number; meta?: any }>;
   // Optional rule/UI helpers
   rolled_this_turn?: boolean;
   rolls_left?: number;

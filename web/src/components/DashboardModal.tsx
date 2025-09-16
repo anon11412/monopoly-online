@@ -84,66 +84,71 @@ function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameS
     const order = ["Fees", "Rent", "Properties", "Trades"] as const;
     const agg: Record<string, number> = { Fees: 0, Rent: 0, Properties: 0, Trades: 0 };
     const me = selectedPlayer || '';
-
     const isName = (a?: string, b?: string) => !!a && !!b && equalNames(a, b);
+
+    // Prefer precise server ledger for trades/rent
+    const ledger = (snapshot as any)?.ledger as Array<any> | undefined;
+    if (Array.isArray(ledger)) {
+      for (const e of ledger) {
+        const t = String(e?.type || '').toLowerCase();
+        const from = String(e?.from || '');
+        const amount = Number(e?.amount || 0);
+        if (!amount || !isName(from, me)) continue; // Only count outflows
+        if (t === 'trade_cash' || t === 'rental_upfront' || t === 'recurring' || t === 'stock_invest' || t === 'stock_sell' || t === 'bond_invest' || t === 'bond_coupon') {
+          agg.Trades += Math.abs(amount);
+          continue;
+        }
+        if (t === 'rent' || t === 'rent_split') {
+          agg.Rent += Math.abs(amount);
+          continue;
+        }
+        if (t === 'tax') {
+          agg.Fees += Math.abs(amount);
+          continue;
+        }
+        if (t === 'buy_property' || t === 'unmortgage' || t === 'buy_house' || t === 'buy_hotel') {
+          agg.Properties += Math.abs(amount);
+          continue;
+        }
+      }
+    }
+
+    // Fallback for fees and property spend from log (and any missing categories)
     const parseActorTarget = (txtRaw: string): { actor?: string; target?: string } => {
       const txt = txtRaw.trim();
-      // Patterns that commonly appear in logs
-      // 1) "Alice paid $123 rent to Bob ..." or "Alice paid $123 rent (...) to Bob ..."
       let m = txt.match(/^([^:]+?)\s+paid\s+\$[\d,]+\s+.*?\s+to\s+([^:]+?)(?:\s|$)/i);
       if (m) return { actor: m[1], target: m[2] };
-      // 2) "Alice paid $123 in taxes" (no explicit recipient)
       m = txt.match(/^([^:]+?)\s+paid\s+\$[\d,]+\b/i);
       if (m) return { actor: m[1] };
-      // 3) "Alice bought ... for $123"
       m = txt.match(/^([^:]+?)\s+bought\b/i);
       if (m) return { actor: m[1] };
-      // 3b) "Alice unmortgaged ... for $123"
       m = txt.match(/^([^:]+?)\s+unmortgag(?:e|ed)\b/i);
       if (m) return { actor: m[1] };
-      // 4) "Property rental: Alice paid $123 for ..."
       m = txt.match(/^Property rental:\s+([^:]+?)\s+paid\s+\$[\d,]+\b/i);
       if (m) return { actor: m[1] };
       return {};
     };
-
     for (const e of (snapshot.log || []) as any[]) {
       const t = String(e.type || '').toLowerCase();
       const txt = String(e.text || '');
-  const { actor } = parseActorTarget(txt);
-      if (!isName(actor, me)) {
-        // Only count spending when the selected player is the payer/actor
-        continue;
-      }
+      const { actor } = parseActorTarget(txt);
+      if (!isName(actor, me)) continue;
       const amt = extractAmount(txt.toLowerCase());
       if (!amt) continue;
-
-      // Map event to spending category. Only count outflows.
-      if (t === 'rent' || /\brent\b/i.test(txt)) {
-        agg.Rent += Math.abs(amt);
-        continue;
-      }
       if (t === 'tax' || /\b(tax|fee|fine|luxury)\b/i.test(txt) || (t === 'jail' && /\bpaid\b/i.test(txt))) {
         agg.Fees += Math.abs(amt);
         continue;
       }
       if (t === 'buy' || t === 'buy_house' || t === 'buy_hotel' || t === 'unmortgage' || t === 'auto_unmortgage' || /\b(bought|buy\b|house|hotel|unmortgage|property)\b/i.test(txt)) {
-        // Exclude obvious income events like "sold a house" from spending
-        if (/\bsold\b/i.test(txt)) {
-          // Selling is income; skip as spending
-        } else {
+        if (!/\bsold\b/i.test(txt)) {
           agg.Properties += Math.abs(amt);
         }
-        continue;
-      }
-      if (t.startsWith('trade') || t === 'rental_created' || t === 'recurring_pay' || t === 'stock_invest' || t === 'bond_invest' || t === 'bond_coupon' || /\btrade\b/i.test(txt)) {
-        agg.Trades += Math.abs(amt);
         continue;
       }
     }
     const total = Object.values(agg).reduce((a, b) => a + b, 0) || 1;
     return order.map((k) => ({ label: k as string, value: agg[k], pct: agg[k] / total }));
-  }, [snapshot.log, selectedPlayer]);
+  }, [snapshot.ledger, snapshot.log, selectedPlayer]);
 
   // Live balance series (client-side) for the current player; use snapshot.turns when available for x
   const balanceSeriesRef = useRef<Array<{ x: number; value: number }>>([]);
@@ -408,7 +413,31 @@ function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameS
                         <RCLineChart data={row.history} margin={{ top: 6, right: 6, left: 6, bottom: 6 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#e6e6e6" />
                           <XAxis dataKey="turn" tick={{ fontSize: 10 }} />
-                          <YAxis domain={[0, 100]} tickFormatter={(v:number)=>`${v}%`} tick={{ fontSize: 10 }} width={40} />
+                          {(() => {
+                            const hist = Array.isArray(row?.history) ? row.history as Array<{turn:number; rate:number}> : [];
+                            const vals = hist.map(h => Number(h.rate || 0)).filter(v => Number.isFinite(v));
+                            let ymin = 0, ymax = 100;
+                            if (vals.length >= 2) {
+                              const min = Math.min(...vals);
+                              const max = Math.max(...vals);
+                              if (isFinite(min) && isFinite(max)) {
+                                if (Math.abs(max - min) <= 1.0) {
+                                  const pad = Math.max(0.05, (max - min) * 0.5 || 0.1);
+                                  ymin = Math.max(0, min - pad);
+                                  ymax = Math.min(100, max + pad);
+                                  if (ymin === ymax) { ymin = Math.max(0, ymin - 0.1); ymax = Math.min(100, ymax + 0.1); }
+                                } else {
+                                  ymin = 0; ymax = 100;
+                                }
+                              }
+                            }
+                            const range = Math.max(0.0001, ymax - ymin);
+                            const step = range / 4;
+                            const toPct = (v:number) => `${Number(v).toFixed(range < 2 ? 1 : 0)}%`;
+                            return (
+                              <YAxis domain={[ymin, ymax]} tickCount={5} interval={0} tickFormatter={toPct} tick={{ fontSize: 10 }} width={40} allowDataOverflow />
+                            );
+                          })()}
                           <Tooltip formatter={(v:any)=>`${Number(v).toFixed(2)}%`} labelFormatter={(l:any)=>`Round ${l}`} />
                           <Line type="monotone" dataKey="rate" stroke="#8e44ad" strokeWidth={2} dot={false} isAnimationActive={false} />
                         </RCLineChart>
@@ -453,29 +482,74 @@ function DashboardGrid({ lobbyId, snapshot }: { lobbyId: string; snapshot: GameS
                         if (typeof n === 'number') return n === 0 ? ' • due now' : ` • next in ${n}t`;
                         return '';
                       })()}{(() => {
-                        const paid = ((snapshot.log||[]) as any[]).filter(e => String(e.type||'') === 'bond_coupon' &&
-                          String(e.text||'').toLowerCase().includes(String(bp.owner||'').toLowerCase()) &&
-                          String(e.text||'').toLowerCase().includes(String(bp.investor||'').toLowerCase())
-                        ).reduce((a, e) => {
-                          const m = String(e.text||'').match(/\$([\d,]+)/);
-                          const v = m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
-                          return a + (Number.isFinite(v) ? v : 0);
-                        }, 0);
+                        // Use payout_id where available (from ledger first), fallback to sum by pair
+                        const ledger = (snapshot as any).ledger as any[] | undefined;
+                        const seen = new Set<string>();
+                        let sum = 0;
+                        if (Array.isArray(ledger)) {
+                          for (const e of ledger) {
+                            if (String(e?.type||'').toLowerCase() !== 'bond_coupon') continue;
+                            if (String(e?.from||'').toLowerCase() !== String(bp.owner||'').toLowerCase()) continue;
+                            if (String(e?.to||'').toLowerCase() !== String(bp.investor||'').toLowerCase()) continue;
+                            const pid = String(e?.meta?.payout_id||'');
+                            if (pid) {
+                              if (seen.has(pid)) continue;
+                              seen.add(pid);
+                            }
+                            const v = Number(e?.amount||0);
+                            if (Number.isFinite(v)) sum += Math.max(0, v);
+                          }
+                        }
+                        if (sum === 0) {
+                          // Fallback to log parsing with payout_id if present
+                          for (const e of ((snapshot.log||[]) as any[])) {
+                            if (String(e.type||'') !== 'bond_coupon') continue;
+                            const txt = String(e.text||'');
+                            if (!txt.toLowerCase().includes(String(bp.owner||'').toLowerCase())) continue;
+                            if (!txt.toLowerCase().includes(String(bp.investor||'').toLowerCase())) continue;
+                            const m = txt.match(/\$([\d,]+)/);
+                            const v = m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
+                            const pidm = txt.match(/id\s+([^\)\s]+)/i);
+                            const pid = e.payout_id || (pidm ? pidm[1] : '');
+                            if (pid) {
+                              if (seen.has(pid)) continue; seen.add(pid);
+                            }
+                            if (Number.isFinite(v)) sum += Math.max(0, v);
+                          }
+                        }
+                        const paid = sum;
                         return paid ? ` • paid so far $${paid}` : '';
                       })()})</span>
                     ) : null}
                   </div>
                 ))}
                 {(() => {
-                  const totalPaid = ((snapshot.log||[]) as any[])
-                    .filter(e => String(e.type||'') === 'bond_coupon')
-                    .reduce((a, e) => {
-                      const m = String(e.text||'').match(/\$([\d,]+)/);
+                  const ledger = (snapshot as any).ledger as any[] | undefined;
+                  const seen = new Set<string>();
+                  let total = 0;
+                  if (Array.isArray(ledger)) {
+                    for (const e of ledger) {
+                      if (String(e?.type||'').toLowerCase() !== 'bond_coupon') continue;
+                      const pid = String(e?.meta?.payout_id||'');
+                      if (pid) { if (seen.has(pid)) continue; seen.add(pid); }
+                      const v = Number(e?.amount||0);
+                      if (Number.isFinite(v)) total += Math.max(0, v);
+                    }
+                  }
+                  if (total === 0) {
+                    for (const e of ((snapshot.log||[]) as any[])) {
+                      if (String(e.type||'') !== 'bond_coupon') continue;
+                      const txt = String(e.text||'');
+                      const m = txt.match(/\$([\d,]+)/);
                       const v = m ? parseInt(m[1].replace(/,/g, ''), 10) : 0;
-                      return a + (Number.isFinite(v) ? v : 0);
-                    }, 0);
-                  return totalPaid > 0 ? (
-                    <div className="ui-xs" style={{ marginTop: 6, opacity: 0.85 }}>Total paid so far: ${totalPaid}</div>
+                      const pidm = txt.match(/id\s+([^\)\s]+)/i);
+                      const pid = (e as any).payout_id || (pidm ? pidm[1] : '');
+                      if (pid) { if (seen.has(pid)) continue; seen.add(pid); }
+                      if (Number.isFinite(v)) total += Math.max(0, v);
+                    }
+                  }
+                  return total > 0 ? (
+                    <div className="ui-xs" style={{ marginTop: 6, opacity: 0.85 }}>Total paid so far: ${total}</div>
                   ) : null;
                 })()}
               </>
@@ -536,7 +610,15 @@ function GameLogPanel({ snapshot }: { snapshot: GameSnapshot }) {
   useEffect(() => {
     if (ref.current) ref.current.scrollTop = ref.current.scrollHeight;
   }, [snapshot?.log]);
-  const items = (snapshot?.log || []).slice(-80);
+  // Filter to only money-in/out and feature state changes
+  const items = ((snapshot?.log || []) as any[]).filter((e: any) => {
+    const t = String(e.type || '').toLowerCase();
+    if (t === 'rent' || t === 'recurring_pay' || t === 'rental_created') return true;
+    if (t === 'bond_invest' || t === 'bond_coupon' || t === 'stock_invest' || t === 'stock_sell') return true;
+    if (t === 'bond_settings' || t === 'stock_settings' || t === 'auto_mortgage') return true;
+    if (t === 'trade_accepted') return true;
+    return false;
+  }).slice(-80);
   const icon = (t: string) => {
     const m: Record<string, string> = {
       rolled: '🎲',
@@ -879,8 +961,11 @@ function BondSettingsModal({ onClose, lobbyId, snapshot, owner }: BondSettingsPr
           <button className="btn" onClick={onClose}>Close</button>
         </div>
         <div style={{ display: 'grid', gap: 10 }}>
-          <label className="ui-sm" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <input type="checkbox" checked={allow} onChange={(e) => setAllow(e.target.checked)} /> Allow bond investments
+          <label className="ui-sm" style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 8px', border: '1px solid var(--color-border)', borderRadius: 6, background: allow ? 'rgba(39, 174, 96, 0.12)' : 'rgba(231, 76, 60, 0.08)', fontWeight: 700 }}>
+            <input type="checkbox" checked={allow} onChange={(e) => setAllow(e.target.checked)} />
+            <span style={{ color: allow ? '#27ae60' : '#c0392b' }}>
+              {allow ? 'Bond investments ENABLED' : 'Bond investments DISABLED'}
+            </span>
           </label>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', alignItems: 'center', gap: 8 }}>
             <label className="ui-sm">Rate %</label>

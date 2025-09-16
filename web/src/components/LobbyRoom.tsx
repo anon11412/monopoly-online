@@ -12,6 +12,8 @@ type Props = {
 
 export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props) {
   const [state, setState] = useState<LobbyInfo>(lobby);
+  const [colorModalOpen, setColorModalOpen] = useState(false);
+  const [colorTarget, setColorTarget] = useState<string | null>(null);
   const [chat, setChat] = useState<Array<{message: string, timestamp: Date}>>([]);
   const [msg, setMsg] = useState('');
   const [bots, setBots] = useState<BotHandle[]>([]);
@@ -186,6 +188,7 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
   const allReady = players.length > 0 && readyCount === players.length;
   const isHost = state.host_sid ? (getSocket().id === state.host_sid) : true;
   const startReason = !isHost ? 'Only host can start' : (!allReady ? 'All players must be ready' : 'Start the game');
+  const playerColors = (state as any).player_colors || {} as Record<string,string>;
 
   return (
     <div className="lobby-room" style={{ maxWidth: 1200, margin: '0 auto', padding: '0 16px' }}>
@@ -254,11 +257,28 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
               const total = (state.players || []).filter(n => !(state.bots || []).includes(n)).length;
               const self = getSocket().id === p.sid;
               const remain = disconnectRemain[p.name] ? Math.max(0, Math.ceil(disconnectRemain[p.name])) : 0;
+              const assignedColor = playerColors[p.name];
               return (
                 <li key={`${p.sid || p.name}`} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: isBot ? 0.9 : 1 }}>
                   <span className={`dot ${isReady ? 'ready' : 'not-ready'}`} />
-                  <span>{p.name}{authedSet.has(p.name) ? ' ✅' : ''}{isHostRow ? ' (host)' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {assignedColor ? (
+                      <span title="color" style={{ width: 12, height: 12, borderRadius: '50%', background: assignedColor, display: 'inline-block', border: '1px solid rgba(0,0,0,0.5)' }} />
+                    ) : null}
+                    {p.name}{authedSet.has(p.name) ? ' ✅' : ''}{isHostRow ? ' (host)' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}
+                  </span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
+                  {/* Self-only: open modal to choose color */}
+                  {(!isBot) && (p.sid && p.sid === getSocket().id) ? (
+                    <button
+                      className="btn btn-ghost"
+                      title="Choose Color"
+                      onClick={() => { setColorTarget(p.name); setColorModalOpen(true); }}
+                      style={{ marginLeft: 8 }}
+                    >
+                      🎨 Choose Color
+                    </button>
+                  ) : null}
                   {!self && !isBot ? (
                     <button 
                       className="btn btn-ghost" 
@@ -287,11 +307,18 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
               const total = (state.players || []).filter(n => !(state.bots || []).includes(n)).length;
               const self = false;
               const remain = disconnectRemain[p.name] ? Math.max(0, Math.ceil(disconnectRemain[p.name])) : 0;
+              const assignedColor = playerColors[p.name];
               return (
                 <li key={`${p.name}-${idx}`} style={{ display: 'flex', alignItems: 'center', gap: 8, opacity: isBot ? 0.9 : 1 }}>
                   <span className={`dot ${isReady ? 'ready' : 'not-ready'}`} />
-                  <span>{p.name}{authedSet.has(p.name) ? ' ✅' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}</span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    {assignedColor ? (
+                      <span title="color" style={{ width: 12, height: 12, borderRadius: '50%', background: assignedColor, display: 'inline-block', border: '1px solid rgba(0,0,0,0.5)' }} />
+                    ) : null}
+                    {p.name}{authedSet.has(p.name) ? ' ✅' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}
+                  </span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
+                  {/* Name-only list: cannot identify self, so no color change controls */}
                   {!self && !isBot ? (
                     <button 
                       className="btn btn-ghost" 
@@ -538,6 +565,33 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
         </div>
         
       </div>
+      {/* Color Picker Modal */}
+      {colorModalOpen && (
+        <div onClick={() => { setColorModalOpen(false); setColorTarget(null); }} style={{ position: 'fixed', inset: 0, background: 'var(--color-overlay)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 3000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 14, minWidth: 300, boxShadow: 'var(--elev-4)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+              <h3 style={{ margin: 0 }}>Choose Your Color</h3>
+              <button className="btn btn-ghost" onClick={() => { setColorModalOpen(false); setColorTarget(null); }} aria-label="Close">✕</button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(9, 24px)', gap: 8 }}>
+              {['#EF4444','#F97316','#F59E0B','#10B981','#14B8A6','#06B6D4','#3B82F6','#6366F1','#8B5CF6','#A855F7','#EC4899','#22C55E','#84CC16','#EAB308','#F43F5E','#64748B','#0EA5E9'].map((c) => (
+                <button
+                  key={c}
+                  aria-label={`Set color ${c}`}
+                  onClick={() => {
+                    const s = getSocket();
+                    s.emit('lobby_setting', { id: state.id, setting: 'player_color', value: c, player: colorTarget || undefined });
+                    setColorModalOpen(false);
+                    setColorTarget(null);
+                  }}
+                  className="btn btn-ghost"
+                  style={{ width: 24, height: 24, padding: 0, borderRadius: 4, background: c, border: (colorTarget && playerColors[colorTarget] === c) ? '2px solid #000' : '1px solid rgba(0,0,0,0.3)' }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

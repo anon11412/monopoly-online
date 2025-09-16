@@ -293,6 +293,8 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       return () => clearTimeout(t);
     }
   }, [myTurn, autoRoll, rolledThisTurn, snapshot.rolls_left, snapshot.last_action]);
+  // Auto-buy: allow server to auto-mortgage if short on cash when enabled
+  const lastBuyAttemptRef = useRef<{ pos: number; ts: number; denied: boolean } | null>(null);
   useEffect(() => {
     if (!myTurn) return;
     const pos = myPlayer?.position ?? -1;
@@ -301,14 +303,28 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     if (!t || !['property','railroad','utility'].includes(String(t.type))) return;
     const price = t.price || 0;
     const allowByCost = costRule === 'any' || (costRule === 'above' ? price >= costValue : price <= costValue);
-    const allowByMin = (myPlayer?.cash ?? 0) - price >= (minKeep || 0);
+    // Keep $ applies only when we actually spend; still allow attempt so server can auto-mortgage if enabled
+    const keep = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
+    const cash = myPlayer?.cash ?? 0;
+    const allowByMin = (cash - price) >= keep || (autoMortgage && canBuy);
     const prop: any = (snapshot.properties as any)?.[pos];
     const unowned = !prop || !prop.owner;
-    if (unowned && allowByCost && allowByMin && canBuy) {
+
+    // Simple throttle: don't spam attempts if the last action was a denial for this tile very recently
+    const la: any = snapshot.last_action;
+    const now = Date.now();
+    if (la && la.type === 'buy_failed' && typeof la.pos === 'number' && la.pos === pos) {
+      lastBuyAttemptRef.current = { pos, ts: now, denied: true };
+    }
+    const last = lastBuyAttemptRef.current;
+    const recentlyDenied = last && last.denied && last.pos === pos && (now - last.ts) < 1200; // 1.2s backoff
+
+    if (unowned && allowByCost && allowByMin && canBuy && !recentlyDenied) {
+      lastBuyAttemptRef.current = { pos, ts: now, denied: false };
       playGameSound('purchase');
       act('buy_property');
     }
-  }, [snapshot.last_action, myTurn, autoBuy, canBuy, minKeep, costRule, costValue, tiles, myPlayer?.position, myPlayer?.cash, snapshot.properties]);
+  }, [snapshot.last_action, myTurn, autoBuy, autoMortgage, canBuy, minKeep, costRule, costValue, tiles, myPlayer?.position, myPlayer?.cash, snapshot.properties]);
 
   // Helper to find next house/hotel action candidate based on settings
   const nextHouseActionCandidate = useMemo(() => {
@@ -664,6 +680,15 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
               </div>
             );
           })}
+        </div>
+        {/* Restore Pending Trades entry point */}
+        <div style={{ marginTop: 10, display: 'flex', justifyContent: 'center' }}>
+          <button className="btn" onClick={() => setShowTrades(true)} style={{ minWidth: 180 }}>
+            📬 Pending Trades
+            {((snapshot.pending_trades || []).length > 0) && (
+              <span className="badge badge-info" style={{ marginLeft: 8 }}>{(snapshot.pending_trades || []).length}</span>
+            )}
+          </button>
         </div>
       </div>
 
@@ -1238,7 +1263,18 @@ function BondsList({ lobbyId, snapshot, myName }: { lobbyId: string, snapshot: G
             <div style={{ display: 'flex', gap: 6 }}>
               {isOwner ? (
                 <>
-                  <label className="ui-sm" title="Allow others to invest in your bond"><input type="checkbox" checked={!!row.allow_bonds} onChange={(e) => s.emit('game_action', { id: lobbyId, action: { type: 'bond_settings', allow_bonds: e.target.checked } })} /> Allow</label>
+                  <label className="ui-sm" title="Allow others to invest in your bond" style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    fontWeight: 700,
+                    color: row.allow_bonds ? 'var(--color-success)' : 'var(--color-danger)'
+                  }}>
+                    <input
+                      type="checkbox"
+                      checked={!!row.allow_bonds}
+                      onChange={(e) => s.emit('game_action', { id: lobbyId, action: { type: 'bond_settings', allow_bonds: e.target.checked } })}
+                    />
+                    {row.allow_bonds ? 'Bond investments ENABLED' : 'Bond investments DISABLED'}
+                  </label>
                   <label className="ui-sm">Rate %<input type="number" min={0} max={100} defaultValue={row.rate_percent || 0} onBlur={(e) => s.emit('game_action', { id: lobbyId, action: { type: 'bond_settings', rate_percent: parseFloat(e.target.value || '0') } })} style={{ width: 60, marginLeft: 4 }} /></label>
                   <label className="ui-sm">Period<input type="number" min={1} max={20} defaultValue={row.period_turns || 1} onBlur={(e) => s.emit('game_action', { id: lobbyId, action: { type: 'bond_settings', period_turns: parseInt(e.target.value || '1', 10) } })} style={{ width: 60, marginLeft: 4 }} /></label>
                 </>
