@@ -115,6 +115,8 @@ class Game:
             "bonds": _bonds_snapshot(self),
             # Include computed bond payouts summary for UI
             "bond_payouts": _bond_payouts_snapshot(self),
+            # Include outstanding debts for UI display
+            "debts": dict(self.debts) if hasattr(self, 'debts') else {},
             # Provide list of recent trade ids for clients to prime caches
             "recent_trade_ids": list(self.recent_trades.keys())[-100:],
         }
@@ -1151,6 +1153,20 @@ async def get_players(sid, data):
 
 
 @sio.event
+async def get_lobby(sid, data):
+    """Return current lobby_state to the requesting socket without altering membership.
+
+    Used by clients to rehydrate UI panels (e.g., chat) without rejoining the lobby.
+    """
+    lobby_id = data.get("id") or data.get("lobby_id")
+    if not lobby_id or lobby_id not in LOBBIES:
+        return {"ok": False, "error": "Lobby not found"}
+    l = LOBBIES[lobby_id]
+    await sio.emit("lobby_state", lobby_state(l), to=sid)
+    return {"ok": True}
+
+
+@sio.event
 async def lobby_join(sid, data):
     lobby_id = data.get("id") or data.get("lobby_id")
     if not lobby_id or lobby_id not in LOBBIES:
@@ -1265,13 +1281,17 @@ async def lobby_start(sid, data):
 
     players = [Player(name=p, cash=l.starting_cash) for p in l.players]
     game = Game(players=players)
-    # Assign colors
+    # Assign colors from lobby choices or fallback to palette
     palette = [
         "#e74c3c", "#3498db", "#2ecc71", "#f1c40f",
         "#9b59b6", "#e67e22", "#1abc9c", "#e84393",
     ]
     for i, pl in enumerate(game.players):
-        pl.color = palette[i % len(palette)]
+        # Use chosen color from lobby if available, otherwise use palette
+        chosen_color = l.player_colors.get(pl.name)
+        pl.color = chosen_color if chosen_color else palette[i % len(palette)]
+    # Also set the game's player_colors for consistency
+    game.player_colors = dict(l.player_colors)
     l.game = game
     # Seed initial time-series so charts show real data from turn 0
     try:
@@ -1506,7 +1526,7 @@ async def game_action(sid, data):
                 merged = True
                 break
         if not merged:
-            g.bond_investments.append({"owner": owner, "investor": investor, "principal": amount})
+            g.bond_investments.append({"owner": owner, "investor": investor, "principal": amount, "fractional_accumulated": 0.0})
         g.last_action = {"type": "bond_invest", "by": investor, "owner": owner, "amount": amount}
         g.log.append({"type": "bond_invest", "text": f"{investor} invested ${amount} in {owner} bonds"})
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
@@ -1532,11 +1552,7 @@ async def game_action(sid, data):
             recurring_processed = True
             # Mark that we've rolled this turn IMMEDIATELY to prevent re-processing on rapid clicks
             g.rolled_this_turn = True
-            # If recurring payments caused negative balance, deny the roll but keep rolled_this_turn = True
-            if cur.cash < 0:
-                g.last_action = {"type": "roll_denied", "by": cur.name, "reason": "negative_after_recurring"}
-                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-                return {"ok": False, "action": "roll_dice", "reasons": ["negative_after_recurring"]}
+            # Allow rolling even if negative; debts will be handled over time
 
         d1 = random.randint(1, 6)
         d2 = random.randint(1, 6)
@@ -1567,11 +1583,13 @@ async def game_action(sid, data):
                     g.rolls_left = 0
                     await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                     return
-                # On 3rd attempt, pay $50 and leave
-                pay_now = min(max(0, cur.cash), 50)
-                cur.cash -= pay_now
-                if 50 - pay_now > 0:
-                    _debt_add(g, cur.name, "bank", int(50 - pay_now), {"kind": "jail_fee"})
+                # On 3rd attempt, pay $50 and leave (allow negative; no phantom money)
+                available = max(0, int(cur.cash))
+                pay_now = min(available, 50)
+                cur.cash -= 50
+                unpaid = 50 - pay_now
+                if unpaid > 0:
+                    _debt_add(g, cur.name, "bank", int(unpaid), {"kind": "jail_fee"})
                 g.log.append({"type": "jail", "text": f"{cur.name} paid $50 to leave jail on the 3rd attempt"})
                 cur.in_jail = False
                 cur.jail_turns = 0
@@ -1628,8 +1646,9 @@ async def game_action(sid, data):
             elif "Luxury Tax" in name:
                 amount = 100
             if amount:
-                pay_now = min(max(0, cur.cash), int(amount))
-                cur.cash -= pay_now
+                available = max(0, int(cur.cash))
+                pay_now = min(available, int(amount))
+                cur.cash -= int(amount)
                 unpaid = int(amount) - pay_now
                 if unpaid > 0:
                     _debt_add(g, cur.name, "bank", int(unpaid), {"name": name, "kind": "tax"})
@@ -1663,8 +1682,9 @@ async def game_action(sid, data):
                 elif "Luxury Tax" in name:
                     amount = 100
                 if amount:
-                    pay_now = min(max(0, cur.cash), int(amount))
-                    cur.cash -= pay_now
+                    available = max(0, int(cur.cash))
+                    pay_now = min(available, int(amount))
+                    cur.cash -= int(amount)
                     unpaid = int(amount) - pay_now
                     if unpaid > 0:
                         _debt_add(g, cur.name, "bank", int(unpaid), {"name": name, "kind": "tax", "card_move": True})
@@ -2068,8 +2088,7 @@ async def game_action(sid, data):
         if g.rolls_left > 0 and not cur.in_jail:
             deny_reasons.append(f"rolls_left_{g.rolls_left}")
         if cur.cash < 0:
-            # Will also be caught by later negative balance check, but log early.
-            pass
+            deny_reasons.append("negative_balance")
         if deny_reasons:
             g.last_action = {"type": "end_turn_denied", "by": cur.name, "reasons": deny_reasons}
             try:
@@ -2078,11 +2097,7 @@ async def game_action(sid, data):
                 pass
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return {"ok": False, "action": "end_turn", "reasons": deny_reasons}
-        # Disallow ending turn with negative balance
-        if cur.cash < 0:
-            g.last_action = {"type": "end_turn_denied", "by": cur.name, "reason": "negative_balance"}
-            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-            return {"ok": False, "action": "end_turn", "reasons": ["negative_balance"]}
+        # Prevent ending turn with negative balance to force debt resolution
         # Recurring payments now handled at start of turn (in roll_dice), not here
         prev = g.current_turn
         g.current_turn = (g.current_turn + 1) % len(g.players)
@@ -2388,20 +2403,34 @@ async def game_action(sid, data):
         a = _find_player(g, offer.get("from"))
         b = _find_player(g, offer.get("to"))
         if a and b:
-            a.cash -= cash_a
-            retained_ab = _route_inflow(g, b.name, int(cash_a), "trade_cash", {"trade_id": trade_id})
-            b.cash += retained_ab
+            # A pays B
             if cash_a > 0:
+                avail_a = max(0, int(a.cash))
+                pay_ab = min(avail_a, int(cash_a))
+                a.cash -= int(cash_a)  # allow negative
+                unpaid_ab = int(cash_a) - pay_ab
+                if pay_ab > 0:
+                    retained_ab = _route_inflow(g, b.name, int(pay_ab), "trade_cash", {"trade_id": trade_id})
+                    b.cash += retained_ab
+                if unpaid_ab > 0:
+                    _debt_add(g, a.name, b.name, int(unpaid_ab), {"trade_id": trade_id, "kind": "trade_cash"})
                 try:
-                    _ledger_add(g, "trade_cash", a.name, b.name, cash_a, {"trade_id": trade_id})
+                    _ledger_add(g, "trade_cash", a.name, b.name, int(pay_ab), {"trade_id": trade_id, "unpaid": int(unpaid_ab)})
                 except Exception:
                     pass
-            b.cash -= cash_b
-            retained_ba = _route_inflow(g, a.name, int(cash_b), "trade_cash", {"trade_id": trade_id})
-            a.cash += retained_ba
+            # B pays A
             if cash_b > 0:
+                avail_b = max(0, int(b.cash))
+                pay_ba = min(avail_b, int(cash_b))
+                b.cash -= int(cash_b)  # allow negative
+                unpaid_ba = int(cash_b) - pay_ba
+                if pay_ba > 0:
+                    retained_ba = _route_inflow(g, a.name, int(pay_ba), "trade_cash", {"trade_id": trade_id})
+                    a.cash += retained_ba
+                if unpaid_ba > 0:
+                    _debt_add(g, b.name, a.name, int(unpaid_ba), {"trade_id": trade_id, "kind": "trade_cash"})
                 try:
-                    _ledger_add(g, "trade_cash", b.name, a.name, cash_b, {"trade_id": trade_id})
+                    _ledger_add(g, "trade_cash", b.name, a.name, int(pay_ba), {"trade_id": trade_id, "unpaid": int(unpaid_ba)})
                 except Exception:
                     pass
             # Jail cards
@@ -2736,7 +2765,12 @@ def _new_trade_id(g: Game) -> str:
 
 
 def _handle_rent(g: Game, cur: Player, pos: int, last_roll: int) -> bool:
-    """Handle rent payment and return True if rent was paid"""
+    """Handle rent payment with negative cash allowed and no phantom transfers.
+    - Compute total rent and splits (owner + rental redirects).
+    - Subtract full due from payer cash (may go negative).
+    - Pay out only available cash proportionally to each recipient; record remaining as debts.
+    Returns True if any rent event processed.
+    """
     tiles = monopoly_tiles()
     tile = tiles[pos]
     ttype = tile.get("type")
@@ -2781,70 +2815,89 @@ def _handle_rent(g: Game, cur: Player, pos: int, last_roll: int) -> bool:
     if rent <= 0:
         return False
 
-    # Handle property rental agreements
-    rental_redirected = 0
+    # Build recipient splits
+    splits: List[Dict[str, Any]] = []  # each: {to, amount, kind}
     rentals = _ensure_rentals(g)
-    for rental in rentals[:]:  # Use slice to allow removal during iteration
+    rental_redirected = 0
+    for rental in rentals[:]:
         if pos in rental.get("properties", []) and rental.get("turns_left", 0) > 0:
             renter_name = rental.get("renter")
-            percentage = rental.get("percentage", 0)
+            percentage = int(rental.get("percentage") or 0)
             if renter_name and 0 < percentage <= 100:
-                renter = _find_player(g, renter_name)
-                if renter:
-                    redirected_amount = int((rent * percentage) / 100)
-                    rental_redirected += redirected_amount
-                    retained_r = _route_inflow(g, renter.name, int(redirected_amount), "rental_income_split", {"property": pos})
-                    renter.cash += retained_r
-                    
-                    # Update rental tracking
-                    rental["total_received"] = rental.get("total_received", 0) + redirected_amount
-                    rental["last_payment"] = redirected_amount
+                amount = int((rent * percentage) / 100)
+                if amount > 0:
+                    splits.append({"to": renter_name, "amount": amount, "kind": "rental_income_split", "rental_id": rental.get("id")})
+                    rental_redirected += amount
+    owner_amount = max(0, int(rent - rental_redirected))
+    if owner_amount > 0:
+        splits.append({"to": owner.name, "amount": owner_amount, "kind": "rent_income"})
+
+    # Determine available cash and pay proportionally among splits
+    total_due = sum(int(s["amount"]) for s in splits)
+    available = max(0, int(cur.cash))
+    pay_now_total = min(available, total_due)
+    # Deduct full rent from payer to allow negative
+    cur.cash -= int(rent)
+
+    paid_log_parts = []
+    for s in splits:
+        due_i = int(s["amount"])
+        portion = (float(due_i) / float(total_due)) if total_due > 0 else 0.0
+        pay_i = int(round(portion * pay_now_total)) if total_due > 0 else 0
+        # Clip rounding drift on last entry
+        if s is splits[-1]:
+            already = sum(int(round((float(ss["amount"]) / float(total_due)) * pay_now_total)) for ss in splits[:-1]) if total_due > 0 else 0
+            pay_i = max(0, min(due_i, pay_now_total - already))
+        unpaid_i = max(0, due_i - pay_i)
+        recipient = s["to"]
+        # Route and credit payment
+        if pay_i > 0:
+            retained = _route_inflow(g, recipient, int(pay_i), s.get("kind") or "rent_income", {"pos": pos})
+            rec_p = _find_player(g, recipient)
+            if rec_p:
+                rec_p.cash += retained
+        # Record debt for unpaid portion
+        if unpaid_i > 0:
+            _debt_add(g, cur.name, recipient, int(unpaid_i), {"pos": pos, "kind": s.get("kind") or "rent"})
+        paid_log_parts.append(f"${pay_i} to {recipient}")
+
+        # Update rental tracking for renters only (track actual paid now)
+        if s.get("kind") == "rental_income_split":
+            rid = s.get("rental_id")
+            for rental in rentals:
+                if rental.get("id") == rid:
+                    rental["total_received"] = int(rental.get("total_received") or 0) + int(pay_i)
+                    rental["last_payment"] = int(pay_i)
                     rental["last_payment_turn"] = g.turns
-                    
                     g.log.append({
-                        "type": "rental_income", 
-                        "text": f"{renter_name} received ${redirected_amount} ({percentage}%) from {tile.get('name')} rental",
-                        "rental_id": rental.get("id"),
+                        "type": "rental_income",
+                        "text": f"{s['to']} received ${pay_i} from {tile.get('name')} rental",
+                        "rental_id": rid,
                         "property": pos,
                         "payer": cur.name,
-                        "payee": renter_name,
-                        "percentage": percentage,
-                        "amount": redirected_amount,
+                        "payee": s['to'],
+                        "amount": int(pay_i),
                         "turn": g.turns
                     })
 
-    # Owner receives the remaining rent
-    remaining_rent = rent - rental_redirected
-    if remaining_rent > 0:
-        retained_o = _route_inflow(g, owner.name, int(remaining_rent), "rent_income", {"pos": pos})
-        owner.cash += retained_o
-
-    # Player pays what they can now; if short, record debt for remainder
-    due = int(rent)
-    # Try to raise automatically if enabled and short
-    if cur.cash < due:
-        _auto_sell_houses_for_cash(g, cur, due)
-        _auto_mortgage_for_cash(g, cur, due)
-    pay_now = min(max(0, cur.cash), due)
-    cur.cash -= pay_now
-    unpaid = due - pay_now
-    if unpaid > 0:
-        _debt_add(g, cur.name, owner.name, int(unpaid), {"pos": pos, "kind": "rent"})
-    
-    if rental_redirected > 0:
-        g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} rent (${remaining_rent} to {owner.name}, ${rental_redirected} to renters) for {tile.get('name')}"})
-        try:
-            if remaining_rent > 0:
-                _ledger_add(g, "rent", cur.name, owner.name, remaining_rent, {"pos": pos, "tile": tile.get("name")})
-            _ledger_add(g, "rent_split", cur.name, "<renters>", rental_redirected, {"pos": pos, "tile": tile.get("name")})
-        except Exception:
-            pass
-    else:
-        g.log.append({"type": "rent", "text": f"{cur.name} paid ${rent} rent to {owner.name} for landing on {tile.get('name')}"})
-        try:
-            _ledger_add(g, "rent", cur.name, owner.name, rent, {"pos": pos, "tile": tile.get("name")})
-        except Exception:
-            pass
+    # Log and ledger
+    g.log.append({"type": "rent", "text": f"{cur.name} incurred ${rent} rent on {tile.get('name')}: " + ", ".join(paid_log_parts)})
+    try:
+        paid_so_far = 0
+        for idx, s in enumerate(splits):
+            due_i = int(s["amount"])
+            if total_due > 0:
+                portion = float(due_i) / float(total_due)
+                pay_i = int(round(portion * pay_now_total))
+            else:
+                pay_i = 0
+            if idx == len(splits) - 1:
+                pay_i = max(0, pay_now_total - paid_so_far)
+            paid_so_far += max(0, pay_i)
+            if pay_i > 0:
+                _ledger_add(g, "rent", cur.name, s["to"], int(pay_i), {"pos": pos, "tile": tile.get("name"), "due": int(due_i)})
+    except Exception:
+        pass
 
     return True
 
@@ -3123,12 +3176,13 @@ def _process_recurring_for(g: Game, payer: str) -> None:
         pay = _find_player(g, payer)
         rec = _find_player(g, to_name)
         if pay and rec and amt > 0:
-            pay_now = min(max(0, int(pay.cash)), int(amt))
-            pay.cash -= pay_now
+            available = max(0, int(pay.cash))
+            pay_now = min(available, int(amt))
+            pay.cash -= int(amt)
+            unpaid = int(amt) - pay_now
             if pay_now > 0:
                 retained = _route_inflow(g, to_name, int(pay_now), "recurring_income", {"id": r.get("id")})
                 rec.cash += retained
-            unpaid = int(amt) - pay_now
             if unpaid > 0:
                 _debt_add(g, payer, to_name, int(unpaid), {"id": r.get("id"), "kind": "recurring"})
             g.log.append({"type": "recurring_pay", "text": f"{payer} paid ${amt} to {to_name} (recurring)"})
@@ -3165,29 +3219,47 @@ def _process_bonds_for(g: Game, owner: str) -> None:
         principal = int(inv.get("principal") or 0)
         if principal <= 0:
             continue
-        coupon = int(round(principal * (rate / 100.0) * max(1, period)))
-        if coupon <= 0:
+        
+        # Calculate exact coupon amount (not rounded)
+        exact_coupon = principal * (rate / 100.0) * max(1, period)
+        
+        # Add to accumulated fractional amount
+        accumulated = float(inv.get("fractional_accumulated") or 0.0)
+        accumulated += exact_coupon
+        
+        # Pay out whole dollars when accumulated >= $1
+        pay_now = 0
+        if accumulated >= 1.0:
+            pay_now = int(accumulated)  # Take whole dollar amount
+            accumulated -= pay_now  # Keep the remainder
+        
+        # Update the accumulated amount
+        inv["fractional_accumulated"] = accumulated
+        
+        if pay_now <= 0:
             continue
+            
         pay = _find_player(g, owner)
         rec = _find_player(g, inv.get("investor"))
         if pay and rec:
-            pay_now = min(max(0, int(pay.cash)), int(coupon))
-            pay.cash -= pay_now
-            if pay_now > 0:
-                retained = _route_inflow(g, inv.get("investor"), int(pay_now), "bond_coupon", {"principal": principal})
+            available = max(0, int(pay.cash))
+            actual_pay = min(available, int(pay_now))
+            pay.cash -= int(pay_now)
+            unpaid = int(pay_now) - actual_pay
+            if actual_pay > 0:
+                retained = _route_inflow(g, inv.get("investor"), int(actual_pay), "bond_coupon", {"principal": principal, "accumulated_fraction": accumulated})
                 rec.cash += retained
-            unpaid = int(coupon) - pay_now
             if unpaid > 0:
                 _debt_add(g, owner, inv.get("investor"), int(unpaid), {"principal": principal, "kind": "bond_coupon"})
-            total_paid += int(coupon)
+            total_paid += int(pay_now)
             # Unique payout id: ts-owner-investor-random
             try:
                 pid = f"{_now_ms()}:{owner}:{inv.get('investor')}:{random.randint(1000,9999)}"
             except Exception:
                 pid = f"{owner}:{inv.get('investor')}:{int(time.time()*1000)}"
-            g.log.append({"type": "bond_coupon", "text": f"{owner} paid ${coupon} bond coupon to {inv.get('investor')} (id {pid})", "payout_id": pid, "paid_now": int(pay_now), "unpaid": int(unpaid)})
+            g.log.append({"type": "bond_coupon", "text": f"{owner} paid ${pay_now} bond coupon to {inv.get('investor')} (id {pid})", "payout_id": pid, "paid_now": int(actual_pay), "unpaid": int(unpaid), "accumulated_fraction": accumulated})
             try:
-                _ledger_add(g, "bond_coupon", owner, inv.get("investor"), int(pay_now), {"principal": principal, "payout_id": pid, "unpaid": int(unpaid)})
+                _ledger_add(g, "bond_coupon", owner, inv.get("investor"), int(actual_pay), {"principal": principal, "payout_id": pid, "unpaid": int(unpaid), "accumulated_fraction": accumulated})
             except Exception:
                 pass
 
@@ -3228,8 +3300,9 @@ def _handle_bankruptcy(g: Game, player_name: str) -> None:
                 mv = _mortgage_value(pos)
                 total_raised += mv
                 g.properties[pos] = st
-    # 3) Apply raised funds to debts (simplified: add to cash, then zero)
-    debtor.cash += total_raised
+    # 3) Apply raised funds to debts via auto-routing
+    retained = _route_inflow(g, debtor.name, total_raised, "bankruptcy_liquidation", None)
+    debtor.cash += retained
     # Apply to outstanding deficit if any, and do not let player retain cash on exit
     if debtor.cash < 0:
         # Still in deficit after liquidation; log remaining debt
@@ -3244,7 +3317,36 @@ def _handle_bankruptcy(g: Game, player_name: str) -> None:
             st.hotel = False
             st.mortgaged = False
             g.properties[pos] = st
-    # 5) Remove player from game
+    # 5) Handle bond investments - return principal to investors if possible
+    for inv in list(g.bond_investments):
+        if inv.get("owner") == player_name:
+            investor_name = inv.get("investor")
+            principal = int(inv.get("principal") or 0)
+            if investor_name and principal > 0:
+                investor = _find_player(g, investor_name)
+                if investor:
+                    # Try to pay back the principal from remaining liquidation funds
+                    pay_back = min(total_raised, principal)
+                    if pay_back > 0:
+                        retained = _route_inflow(g, investor_name, pay_back, "bond_redemption", {"original_principal": principal})
+                        investor.cash += retained
+                        total_raised -= pay_back
+                        principal -= pay_back
+                        g.log.append({"type": "bond_redemption", "text": f"{player_name} bankruptcy: returned ${pay_back} to {investor_name} bond investor"})
+                    # If couldn't pay back fully, create debt for remaining
+                    if principal > 0:
+                        _debt_add(g, player_name, investor_name, principal, {"kind": "bond_redemption", "original_principal": int(inv.get("principal") or 0)})
+                        g.log.append({"type": "bond_debt", "text": f"{player_name} bankruptcy: ${principal} bond debt to {investor_name}"})
+            # Remove the investment
+            g.bond_investments.remove(inv)
+        elif inv.get("investor") == player_name:
+            # Investor is bankrupt, remove their investment
+            owner_name = inv.get("owner")
+            principal = int(inv.get("principal") or 0)
+            if owner_name:
+                g.log.append({"type": "bond_loss", "text": f"{player_name} bankruptcy: lost ${principal} bond investment with {owner_name}"})
+            g.bond_investments.remove(inv)
+    # 6) Remove player from game
     g.players = [p for p in g.players if p.name != player_name]
     # Remove any recurring obligations involving this player
     g.recurring = [r for r in g.recurring if r.get("from") != player_name and r.get("to") != player_name]
@@ -3365,8 +3467,9 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
         return
     if kind == "pay":
         amount = int(card.get("amount") or 0)
-        pay_now = min(max(0, cur.cash), int(amount))
-        cur.cash -= pay_now
+        available = max(0, int(cur.cash))
+        pay_now = min(available, int(amount))
+        cur.cash -= int(amount)
         unpaid = int(amount) - pay_now
         if unpaid > 0:
             _debt_add(g, cur.name, "bank", int(unpaid), {"kind": "card_pay"})
@@ -3385,8 +3488,9 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
                 total += per_house * max(0, int(st.houses or 0))
                 total += per_hotel * (1 if st.hotel else 0)
         if total > 0:
-            pay_now = min(max(0, cur.cash), int(total))
-            cur.cash -= pay_now
+            available = max(0, int(cur.cash))
+            pay_now = min(available, int(total))
+            cur.cash -= int(total)
             unpaid = int(total) - pay_now
             if unpaid > 0:
                 _debt_add(g, cur.name, "bank", int(unpaid), {"kind": "repairs"})
@@ -3433,10 +3537,11 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
                 count = _railroads_owned(g, owner)
                 mapping = {1: 25, 2: 50, 3: 100, 4: 200}
                 rent = mapping.get(count, 25) * 2
-                # Partial payment with debt
-                pay_now = min(max(0, cur.cash), rent)
-                cur.cash -= pay_now
-                unpaid = rent - pay_now
+                # Partial payment with debt; allow negative balance
+                available = max(0, int(cur.cash))
+                pay_now = min(available, int(rent))
+                cur.cash -= int(rent)
+                unpaid = int(rent) - pay_now
                 p_owner = _find_player(g, owner)
                 if p_owner and pay_now > 0:
                     retained = _route_inflow(g, p_owner.name, int(pay_now), "rent_income", {"pos": pos, "special": "double_rr"})
@@ -3450,9 +3555,10 @@ def _apply_card(g: Game, cur: Player, card: Dict[str, Any], last_roll: int = 0) 
             owner = st.owner if st else None
             if owner and owner != cur.name and not (st and st.mortgaged):
                 rent = 10 * max(2, min(12, int(last_roll or 0)))
-                pay_now = min(max(0, cur.cash), rent)
-                cur.cash -= pay_now
-                unpaid = rent - pay_now
+                available = max(0, int(cur.cash))
+                pay_now = min(available, int(rent))
+                cur.cash -= int(rent)
+                unpaid = int(rent) - pay_now
                 p_owner = _find_player(g, owner)
                 if p_owner and pay_now > 0:
                     retained = _route_inflow(g, p_owner.name, int(pay_now), "rent_income", {"pos": pos, "special": "ten_x_util"})

@@ -110,11 +110,16 @@ export default function RentalPanel({ lobbyId, snapshot, myName, onClose, tiles 
               style={{ width: '100%', padding: '8px', border: '1px solid #ccc', borderRadius: '4px' }}
             >
               <option value="">Select a player...</option>
-              {otherPlayers.map(p => (
-                <option key={p.name} value={p.name}>
-                  {p.name} (${p.cash})
-                </option>
-              ))}
+              {otherPlayers.map(p => {
+                const debts = (snapshot as any)?.debts?.[p.name] || [];
+                const totalDebt = debts.reduce((sum: number, d: any) => sum + (d.amount || 0), 0);
+                const debtText = totalDebt > 0 ? ` (owes $${totalDebt})` : '';
+                return (
+                  <option key={p.name} value={p.name}>
+                    {p.name} (${p.cash}){debtText}
+                  </option>
+                );
+              })}
             </select>
           </div>
 

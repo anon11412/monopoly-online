@@ -10,29 +10,41 @@ export default function ChatPanel({ lobbyId }: { lobbyId: string }) {
   const storedName = (getRemembered().displayName || '').trim();
 
   useEffect(() => {
+    // Load from storage first for instant UI, then ask server for source of truth
+    try {
+      const raw = sessionStorage.getItem(`chat:${lobbyId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) setChatLog(parsed);
+      }
+    } catch {}
+
     const onChat = (msg: any) => {
-      if (!msg) return;
+      if (!msg || (msg.lobby_id && msg.lobby_id !== lobbyId)) return;
       const from = msg.from || 'anon';
       const text = msg.message || '';
       const ts = msg.ts || Date.now();
       setChatLog(prev => [...prev, { from, message: text, ts }]);
     };
-    const onJoined = (data: any) => {
+    const onLobbyState = (data: any) => {
       if (!data || (data.id && data.id !== lobbyId)) return;
       const hist = Array.isArray((data as any).chat) ? (data as any).chat : [];
       const mapped = hist.map((c: any) => ({ from: c.from || 'anon', message: c.message || '', ts: c.ts ? Number(c.ts) : undefined }));
       setChatLog(mapped);
     };
     s.on('chat_message', onChat);
-    s.on('lobby_joined', onJoined);
-    try { s.emit('lobby_join', { id: lobbyId, lobby_id: lobbyId }); } catch {}
-    return () => { s.off('chat_message', onChat); s.off('lobby_joined', onJoined); };
+    s.on('lobby_state', onLobbyState);
+    // Request a fresh lobby snapshot without changing membership
+    try { s.emit('get_lobby', { id: lobbyId, lobby_id: lobbyId }); } catch {}
+    return () => { s.off('chat_message', onChat); s.off('lobby_state', onLobbyState); };
   }, [s, lobbyId]);
 
   useEffect(() => {
     if (messagesRef.current) {
       messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
     }
+    // Persist chat to keep GameBoard and Dashboard panels in sync per lobby
+    try { sessionStorage.setItem(`chat:${lobbyId}`, JSON.stringify(chatLog)); } catch {}
   }, [chatLog]);
 
   const sendChat = () => {

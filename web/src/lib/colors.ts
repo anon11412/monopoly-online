@@ -13,8 +13,10 @@ export function getPlayerColor(index: number): string {
   return PALETTE[index % PALETTE.length];
 }
 
-export function buildPlayerColorMap(players: { name: string }[]): Record<string, string> {
+export function buildPlayerColorMap(players: { name: string; color?: string }[]): Record<string, string> {
   const map: Record<string, string> = {};
-  players.forEach((p, i) => { map[p.name] = getPlayerColor(i); });
+  players.forEach((p, i) => { 
+    map[p.name] = p.color || getPlayerColor(i); 
+  });
   return map;
 }

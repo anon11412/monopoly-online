@@ -491,10 +491,10 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     // If auto-houses has an action pending, let it run first
     if (autoHouses && nextHouseActionCandidate) return;
     
-    // Don't auto-end turn if player has negative cash (let auto-mortgage work)
+    // Don't auto-end turn if player has negative cash
     const currentCash = myPlayer?.cash ?? 0;
-    if (currentCash < 0 && autoMortgage) {
-      console.log('Skipping auto-end turn: negative cash, waiting for auto-mortgage');
+    if (currentCash < 0) {
+      console.log('Skipping auto-end turn: negative cash');
       return;
     }
     
@@ -506,7 +506,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
       autoEndTimerRef.current = setTimeout(() => {
         // Double-check conditions after delay to ensure sync
         const finalCash = myPlayer?.cash ?? 0;
-        if (myTurn && rollsZero && (finalCash >= 0 || !autoMortgage)) {
+        if (myTurn && rollsZero && finalCash >= 0) {
           console.log('Auto-ending turn after sync delay');
           playGameSound('notification');
           act('end_turn');
@@ -676,6 +676,15 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
                 ) : null}
                 <span className={moneyAnimations[p.name] || ''} style={{ fontVariantNumeric: 'tabular-nums' }}>
                   ${p.cash}
+                  {(() => {
+                    const debts = (snapshot as any)?.debts?.[p.name] || [];
+                    const totalDebt = debts.reduce((sum: number, d: any) => sum + (d.amount || 0), 0);
+                    return totalDebt > 0 ? (
+                      <span style={{ color: '#e74c3c', fontSize: '0.8em', marginLeft: 4 }}>
+                        (owes ${totalDebt})
+                      </span>
+                    ) : null;
+                  })()}
                 </span>
               </div>
             );

@@ -615,7 +615,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                   }
                 }
               }
-              const canEndC = finalMyTurn && rolledThisTurn && rollsLeft === 0;
+              const canEndC = finalMyTurn && rolledThisTurn && rollsLeft === 0 && (me?.cash ?? 0) >= 0;
               
               // Always anchor roll/buy/end row relative to board
               return (
@@ -672,7 +672,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                         }
                       }
                     });
-                  }} title={(!canEndC ? 'Need roll or extra rolls left' : 'End your turn')}>⏭ End Turn</button>
+                  }} title={(!canEndC ? ((me?.cash ?? 0) < 0 ? 'Cannot end turn: negative balance' : 'Need roll or extra rolls left') : 'End your turn')}>⏭ End Turn</button>
                   
                   {/* Vote Kick moved to bottom bar */}
                   
