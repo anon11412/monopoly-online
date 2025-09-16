@@ -329,6 +329,10 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
   // Helper to find next house/hotel action candidate based on settings
   const nextHouseActionCandidate = useMemo(() => {
     if (!autoHouses || !myTurn) return null as null | { type: 'buy_house' | 'buy_hotel' | 'unmortgage', pos: number };
+    // Keep Cash has priority: if current cash is at or below keep, do not invest
+    const budgetNow = (myPlayer?.cash ?? 0);
+    const keepFloor = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
+    if (budgetNow <= keepFloor) return null;
     // Build groups -> property positions I own (and group completeness)
     const allTiles: BoardTile[] = Object.values(tiles) as BoardTile[];
     const byGroup: Record<string, { positions: number[], allOwned: boolean, anyMortgaged: boolean, cost: number, mortgagedPositions: number[] }> = {};
@@ -368,8 +372,8 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     }
     
     // Second priority: Build houses on complete unmortgaged color sets
-    const budget = (myPlayer?.cash ?? 0);
-    const keeps = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
+  const budget = (myPlayer?.cash ?? 0);
+  const keeps = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
     for (const [_group, info] of Object.entries(byGroup)) {
       if (!info.allOwned) continue;
       if (info.anyMortgaged) continue; // Skip if any are still mortgaged
