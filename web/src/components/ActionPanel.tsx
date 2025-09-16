@@ -302,11 +302,11 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     const t = tiles[pos];
     if (!t || !['property','railroad','utility'].includes(String(t.type))) return;
     const price = t.price || 0;
-    const allowByCost = costRule === 'any' || (costRule === 'above' ? price >= costValue : price <= costValue);
-    // Keep $ applies only when we actually spend; still allow attempt so server can auto-mortgage if enabled
+  const allowByCost = costRule === 'any' || (costRule === 'above' ? price >= costValue : price <= costValue);
+  // Keep $ has priority: do not attempt a purchase that would drop cash below keep
     const keep = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
     const cash = myPlayer?.cash ?? 0;
-    const allowByMin = (cash - price) >= keep || (autoMortgage && canBuy);
+  const allowByMin = (cash - price) >= keep;
     const prop: any = (snapshot.properties as any)?.[pos];
     const unowned = !prop || !prop.owner;
 
