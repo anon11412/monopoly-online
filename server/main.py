@@ -274,6 +274,22 @@ def _route_inflow(g: Game, receiver_name: Optional[str], amount: int, reason: st
             new_debts.append(rec)
     # Update debts map
     dmap[receiver_name] = new_debts
+    # If receiver has negative cash, offset it by the amount routed to creditors (but not beyond zero)
+    try:
+        if routed_total > 0:
+            rcvr = _find_player(g, receiver_name)
+            if rcvr and int(rcvr.cash) < 0:
+                deficit = -int(rcvr.cash)
+                adjust = min(int(routed_total), int(deficit))
+                if adjust > 0:
+                    rcvr.cash += int(adjust)
+                    try:
+                        _ledger_add(g, 'debt_offset', receiver_name, 'bank', int(adjust), {**dict(meta or {}), 'reason': reason})
+                        g.log.append({'type': 'debt_offset', 'text': f"{receiver_name}'s negative cash reduced by ${adjust} via auto-routing"})
+                    except Exception:
+                        pass
+    except Exception:
+        pass
     # Return retained amount
     return max(0, inflow)
 
