@@ -302,11 +302,13 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     const t = tiles[pos];
     if (!t || !['property','railroad','utility'].includes(String(t.type))) return;
     const price = t.price || 0;
-  const allowByCost = costRule === 'any' || (costRule === 'above' ? price >= costValue : price <= costValue);
-  // Keep $ has priority: do not attempt a purchase that would drop cash below keep
+    const allowByCost = costRule === 'any' || (costRule === 'above' ? price >= costValue : price <= costValue);
+    // Keep $ has priority when we already have enough cash; if we're short and Auto Mortgage is ON, allow attempt and let server mortgage
     const keep = Number.isFinite(minKeep) ? (minKeep || 0) : 0;
     const cash = myPlayer?.cash ?? 0;
-  const allowByMin = (cash - price) >= keep;
+    const hasCash = cash >= price;
+    const allowByMinNow = (cash - price) >= keep;
+    const allowByMinEffective = hasCash ? allowByMinNow : (autoMortgage ? true : allowByMinNow);
     const prop: any = (snapshot.properties as any)?.[pos];
     const unowned = !prop || !prop.owner;
 
@@ -319,7 +321,7 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
     const last = lastBuyAttemptRef.current;
     const recentlyDenied = last && last.denied && last.pos === pos && (now - last.ts) < 1200; // 1.2s backoff
 
-    if (unowned && allowByCost && allowByMin && canBuy && !recentlyDenied) {
+    if (unowned && allowByCost && allowByMinEffective && canBuy && !recentlyDenied) {
       lastBuyAttemptRef.current = { pos, ts: now, denied: false };
       playGameSound('purchase');
       act('buy_property');
