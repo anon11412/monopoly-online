@@ -440,32 +440,43 @@ def _auto_mortgage_for_cash(game: Game, player: Player, needed_amount: int) -> i
         if prop_state.owner == player.name and not prop_state.mortgaged:
             tile = monopoly_tiles()[pos]
             group = tile.get("group")
-            
+            ttype = tile.get("type")
+
             # Can mortgage if this property has no buildings AND no buildings in the group
             can_mortgage = prop_state.houses == 0 and not prop_state.hotel
             if can_mortgage and group:
-                # Check if any property in the group has buildings
+                # Check if any property in the group has buildings owned by this player
                 for p in _group_positions(group):
                     ps = game.properties.get(p)
-                    # Only the current player's buildings should block mortgaging this group's properties
                     if ps and ps.owner == player.name and (ps.houses > 0 or ps.hotel):
                         can_mortgage = False
                         break
-            
-            if can_mortgage:
-                mortgage_value = _mortgage_value(pos)
-                # Determine if this is a singleton (player does not own the full color set)
+
+            if not can_mortgage:
+                continue
+
+            # Skip mortgaging properties in a completed color set (do not break monopolies)
+            owns_full_color_set = False
+            if ttype == "property" and group:
+                group_positions = _group_positions(group)
+                if group_positions:
+                    owns_full_color_set = all((game.properties.get(p) or PropertyState(pos=p)).owner == player.name for p in group_positions)
+            if owns_full_color_set:
+                # Do not include this property as a mortgage candidate
+                continue
+
+            mortgage_value = _mortgage_value(pos)
+            # Treat railroads/utilities as preferred (safe) singles regardless of owning all
+            is_singleton = True
+            if ttype == "property" and group:
+                # For color properties, singleton means not owning the full color set (already filtered above if owns full set)
                 is_singleton = True
-                if group:
-                    group_positions = _group_positions(group)
-                    if group_positions:
-                        owns_full_set = all((game.properties.get(p) or PropertyState(pos=p)).owner == player.name for p in group_positions)
-                        is_singleton = not owns_full_set
-                owned_properties.append((pos, mortgage_value, tile.get("name", f"Property {pos}"), is_singleton))
+            owned_properties.append((pos, mortgage_value, tile.get("name", f"Property {pos}"), is_singleton))
     
     # Sort by priority: singletons first, then by mortgage value (highest first)
     # Tuple format: (pos, mortgage_value, name, is_singleton)
-    owned_properties.sort(key=lambda x: (not x[3], x[1]), reverse=True)
+    # Priority: singletons first, then higher mortgage value
+    owned_properties.sort(key=lambda x: (x[3], x[1]), reverse=True)
     
     # Mortgage properties until we have enough cash or run out of properties
     for pos, mortgage_value, prop_name, _is_single in owned_properties:

@@ -574,6 +574,12 @@ export default function ActionPanel({ lobbyId, snapshot }: Props) {
             console.log(`Skipping ${x.tile?.name} - color group ${group} has houses`);
             return false;
           }
+          // Skip mortgaging properties in a completed color set (do not break monopolies)
+          const ownsFullSet = groupProps.every(gp => equalNames(gp.st.owner || '', myName));
+          if (ownsFullSet && x.tile?.type === 'property') {
+            console.log(`Skipping ${x.tile?.name} - part of a complete color set ${group}`);
+            return false;
+          }
         }
         return true;
       })
