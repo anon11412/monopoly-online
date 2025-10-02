@@ -77,12 +77,15 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   .game-view {
     /* Left: fixed board width; Right: flexible panel that can grow */
     grid-template-columns: 626px 1fr;
-    /* Remove centering to prevent cutoff - align to start instead */
-    justify-content: start;
-    /* Add padding to center content naturally without forcing cutoff */
-    padding: 0 2rem;
+    /* Center the grid content to prevent left cutoff */
+    justify-content: center;
+    /* Add padding for breathing room */
+    padding: 0 20px;
     /* Spacing between board and panel */
     column-gap: 2rem;
+    /* Ensure board isn't cut off on the left */
+    margin: 0 auto;
+    max-width: 100%;
   }
   /* Restore sticky positioning but ensure it stays within viewport */
   .actions-panel { 
@@ -113,6 +116,14 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   .app {
     gap: 0.5rem;
   }
+  
+  /* Make ActionPanel wider on tablets */
+  .actions-panel {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-top: 10px;
+  }
 }
 
 @media (max-width: 768px) {
@@ -122,6 +133,15 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   
   #root {
     padding: 0.1rem;
+  }
+  
+  /* Make ActionPanel as wide as the board on mobile */
+  .actions-panel {
+    width: 100%;
+    max-width: 100%;
+    margin-left: 0;
+    margin-top: 8px;
+    position: relative; /* Remove sticky positioning on mobile */
   }
 }
 
