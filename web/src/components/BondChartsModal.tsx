@@ -30,7 +30,7 @@ export default function BondChartsModal({ open, snapshot, onClose }: Props) {
               <div key={row.owner} className="ui-labelframe">
                 <div className="ui-title ui-h3" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span title={row.owner} style={{ width: 12, height: 12, borderRadius: '50%', background: row.owner_color || '#999', display: 'inline-block' }} />
-                  {row.owner} — {row.allow_bonds ? `${row.rate_percent || 0}% every ${row.period_turns || 1} turn(s)` : 'disabled'}
+                  {row.owner} — {row.allow_bonds ? `${(row.rate_percent != null ? row.rate_percent : row.rate) || 0}% every ${row.period_turns || 1} turn(s)` : 'disabled'}
                 </div>
                 <div style={{ padding: 6 }}>
                   <RateLineChart history={row.history || []} color={row.owner_color || '#2c3e50'} />
@@ -44,9 +44,16 @@ export default function BondChartsModal({ open, snapshot, onClose }: Props) {
   );
 }
 
-function RateLineChart({ history, color }: { history: Array<{ turn: number; rate: number }>, color: string }) {
+function RateLineChart({ history, color }: { history: Array<{ turn: number; rate?: number; rate_percent?: number }>, color: string }) {
   const width = 480; const height = 120; const pad = 40;
-  const data = history && history.length ? history : [{ turn: 0, rate: 0 }, { turn: 1, rate: 0 }];
+  // Normalize: map rate_percent -> rate; synthesize baseline + current extension similar to dashboard logic
+  let base = Array.isArray(history) ? history.map(h => ({ ...h, rate: (h as any).rate_percent != null ? (h as any).rate_percent : (h as any).rate })) : [];
+  if (base.length === 1) {
+    const only = base[0];
+    if (only.turn > 0 && !base.some((p:any)=>p.turn===0)) base = [{ turn:0, rate: only.rate }, ...base];
+  }
+  // We don't have snapshot turns here; attempt extension only if there are at least two points missing continuity? (Skip since modal is static snapshot)
+  const data = base.length ? base : [{ turn: 0, rate: 0 }, { turn: 1, rate: 0 }];
   const minTurn = Math.min(...data.map(d => d.turn));
   const maxTurn = Math.max(...data.map(d => d.turn));
   const rawMin = Math.min(...data.map(d => d.rate));

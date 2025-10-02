@@ -4,6 +4,11 @@ import { BACKEND_URL, SOCKET_PATH } from '../config';
 let socket: Socket | null = null;
 let displayName: string | null = null;
 
+// Diagnostics helper to expose resolved backend info
+export function getResolvedSocketConfig() {
+  return { base: BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : ''), path: SOCKET_PATH };
+}
+
 function generateRandomName(): string {
   const ADJ = [
     'Swift','Clever','Bold','Lucky','Bright','Calm','Brave','Mighty','Rapid','Sunny',
@@ -57,17 +62,17 @@ export function getConnectionStatus() {
 
 export function getSocket() {
   if (!socket) {
-    // Prefer explicit BACKEND_URL; fallback to current origin (works with Vite proxy)
     const base = BACKEND_URL || (typeof window !== 'undefined' ? window.location.origin : '');
+    console.debug('[socket] initializing', { base, SOCKET_PATH });
     socket = io(base, {
       path: SOCKET_PATH,
-      // Use default transports for robustness (polling + websocket)
       autoConnect: false,
       auth: { client_id: getClientId() },
     });
 
-    // Re-auth on reconnect (no implicit lobby join)
+    // Lifecycle diagnostics
     socket.on('connect', () => {
+      console.debug('[socket] connect', { id: socket?.id });
       try {
         const savedName = displayName ?? (sessionStorage.getItem('displayName') || localStorage.getItem('displayName') || getOrCreateDisplayName());
         if (savedName) {
@@ -76,8 +81,19 @@ export function getSocket() {
       } catch {}
     });
     socket.on('disconnect', (reason) => {
-      // eslint-disable-next-line no-console
-      console.warn('Socket disconnected:', reason);
+      console.warn('[socket] disconnect', { reason });
+    });
+    socket.io.on('reconnect_attempt', (attempt) => {
+      console.debug('[socket] reconnect_attempt', { attempt });
+    });
+    socket.io.on('reconnect', (n) => {
+      console.debug('[socket] reconnect success', { n });
+    });
+    socket.io.on('error', (err) => {
+      console.error('[socket] manager error', err);
+    });
+    socket.on('connect_error', (err) => {
+      console.error('[socket] connect_error', err);
     });
   }
   return socket;
@@ -86,7 +102,7 @@ export function getSocket() {
 export function connectSocket(displayName: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const s = getSocket();
-    // If already connected, authenticate and resolve immediately
+    console.debug('[socket] connectSocket called', { alreadyConnected: s.connected, displayName });
     if (s.connected) {
       try {
         sessionStorage.setItem('displayName', displayName || getOrCreateDisplayName());
@@ -96,22 +112,33 @@ export function connectSocket(displayName: string): Promise<void> {
       return resolve();
     }
     const onConnect = () => {
+      console.debug('[socket] onConnect handler');
       try {
         sessionStorage.setItem('displayName', displayName || getOrCreateDisplayName());
       } catch {}
       s.emit('auth', { display: displayName || getOrCreateDisplayName(), client_id: getClientId() });
-      // Optional: app-level ping for visibility (no-op server-side)
       s.emit('ping', {}, () => {});
       s.off('connect', onConnect);
+      s.off('connect_error', onError);
       resolve();
     };
     const onError = (err: any) => {
+      console.error('[socket] onError', err);
       s.off('connect_error', onError);
+      s.off('connect', onConnect);
       reject(err);
     };
     s.on('connect', onConnect);
     s.on('connect_error', onError);
-    s.connect();
+    try {
+      console.debug('[socket] initiating transport connect');
+      s.connect();
+    } catch (e) {
+      console.error('[socket] immediate connect throw', e);
+      s.off('connect', onConnect);
+      s.off('connect_error', onError);
+      reject(e);
+    }
   });
 }
 

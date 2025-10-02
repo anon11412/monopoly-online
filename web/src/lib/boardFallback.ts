@@ -57,6 +57,7 @@ export function buildDefaultBoardTiles(): BoardTile[] {
       type: t.type,
       price: t.price,
       group: t.group,
+      flag: (t as any).flag,
     } as BoardTile;
   });
 }

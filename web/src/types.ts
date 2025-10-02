@@ -8,6 +8,7 @@ export type LobbyInfo = {
   bots?: string[];
   starting_cash?: number;
   player_colors?: Record<string, string>;
+  premium_players?: string[];
 };
 
 export type BoardTile = {
@@ -30,6 +31,7 @@ export type GamePlayer = {
   jail_cards?: number;
   color?: string;
   auto_mortgage?: boolean;
+  token?: string;
 };
 
 export type TradeSide = {
@@ -55,6 +57,7 @@ export type GameSnapshot = {
   players: GamePlayer[];
   current_turn: number;
   board_len: number;
+  player_colors?: Record<string,string>; // mapping name -> hex color supplied by server
   properties?: Record<string | number, PropertyStateLike>;
   last_action?: any;
   log?: Array<{ type: string; text?: string; [k: string]: any }>;
@@ -108,6 +111,32 @@ export type GameSnapshot = {
     rate_percent: number;
     next_due_in_turns?: number;
   }>;
+  // Authoritative aggregated statistics from server for charts (optional while rolling out)
+  stats?: {
+    players: Array<{
+      name: string;
+      avg_roll: number;
+      rolls: number;
+      spending_total: number;
+      earnings_total: number;
+      net_worth: number;
+      rent_potential?: number; // total potential rent from all owned properties if a single opponent lands once on each (rail/util normalized)
+    }>;
+    rent_groups: Array<{ group: string; rent_estimate: number }>;
+    history?: Array<{
+      turn: number;
+      round?: number;
+      players: Array<{
+        name: string;
+        net_worth: number;
+        avg_roll: number;
+        spending_total: number;
+        earnings_total: number;
+        rent_potential?: number;
+      }>;
+      rent_groups?: Array<{ group: string; rent_estimate: number }>;
+    }>;
+  };
 };
 
 // Server may send variants; normalize into PropertyState

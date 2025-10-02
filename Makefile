@@ -2,6 +2,9 @@ DEV_COMPOSE=docker-compose.dev.yml
 
 .PHONY: dev dev-up dev-down dev-logs \
 	dev-local dev-local-backend dev-local-frontend dev-local-stop
+.PHONY: dev dev-up dev-down dev-logs \
+	dev-local dev-local-backend dev-local-frontend dev-local-stop \
+	dev-up-local dev-down-local help
 
 # Docker-based hot reload
 dev: dev-up ## Build and start dev stack (backend + frontend) with hot reload
@@ -35,6 +38,19 @@ dev-local-stop:
 	else \
 		echo "No .backend.pid file found"; \
 	fi
+
+# One-command local dev (scripts)
+dev-up-local: ## Start backend, frontend, and Cloudflare tunnel (background)
+	bash scripts/dev-start.sh
+
+dev-down-local: ## Stop local dev services started by dev-up-local
+	bash scripts/dev-stop.sh
+
+dev-url: ## Print public tunnel URL (use --follow to wait)
+	bash scripts/dev-url.sh
+
+help: ## Show this help
+	@awk 'BEGIN {FS = ":.*##"}; /^[a-zA-Z0-9_-]+:.*##/ {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 .PHONY: dev-local-status
 dev-local-status:

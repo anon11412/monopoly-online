@@ -11,3 +11,6 @@ export const BOARD_META_PATH = (import.meta.env.VITE_BOARD_META_PATH as string) 
 // origin: which corner shows GO; direction: traversal direction from GO
 export const BOARD_ORIGIN = (import.meta.env.VITE_BOARD_ORIGIN as 'bottom-right' | 'bottom-left' | 'top-left' | 'top-right') || 'top-left';
 export const BOARD_DIRECTION = (import.meta.env.VITE_BOARD_DIRECTION as 'clockwise' | 'counterclockwise') || 'clockwise';
+
+// Stripe Configuration
+export const STRIPE_PUBLISHABLE_KEY = (import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY as string) || 'pk_test_51SCPAPGw95IEXtgzIGjm45OoZ7u5NlcLN922Hmd0Lw4IrGaFrQ24vayvmW4WwOm4YpHRAM6HHEL0dCgdk975jiUr00raPxroVn';

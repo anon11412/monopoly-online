@@ -4,7 +4,8 @@ services:
     image: python:3.11-slim
     working_dir: /app
     environment:
-      - ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+      # Allow local dev origins (hosted via Vite) and container-hosted vite
+      - ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://0.0.0.0:5173
     volumes:
       - ./server:/app
     command: >-
@@ -17,8 +18,7 @@ services:
     image: node:22.12.0-alpine
     working_dir: /app
     environment:
-      # Point browser directly to backend published on host:8000
-      - VITE_BACKEND_URL=http://localhost:8000
+      - BACKEND_PROXY=http://server-dev:8000
     volumes:
       - ./web:/app
       # Keep node_modules inside the container to avoid host OS differences

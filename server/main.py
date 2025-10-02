@@ -8,12 +8,15 @@ import random
 from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any
 
-from fastapi import FastAPI
+from dotenv import load_dotenv
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
 import socketio
 
+# Load environment variables from .env file
+load_dotenv()
 
 # ---------------------------
 # In-memory game structures
@@ -31,6 +34,8 @@ class Player:
     color: Optional[str] = None
     auto_mortgage: bool = False  # automatically mortgage properties when needed for purchases
     auto_buy_houses: bool = False  # automatically buy houses evenly after completing a color set
+    token: Optional[str] = None  # cosmetic token identifier (e.g., premium pieces)
+    token: str = "classic"
 
 
 @dataclass
@@ -81,6 +86,8 @@ class Game:
     turn_counts: Dict[str, int] = field(default_factory=dict)
     # Outstanding debts: debtor -> list of { creditor, amount }
     debts: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
+    # Historical stats per turn for time-series charts (list of {turn, players:[{name, net_worth, cash, spending_total, earnings_total, avg_roll}]})
+    stats_history: List[Dict[str, Any]] = field(default_factory=list)
 
     def snapshot(self) -> Dict[str, Any]:
         # Defensive: ensure pending_trades list exists
@@ -89,7 +96,63 @@ class Game:
         # Defensive: ensure property_rentals list exists
         if not isinstance(self.property_rentals, list):
             self.property_rentals = []
-        return {
+        stats_now = _stats_snapshot(self)
+        # Append to history only when turn advances or history empty (avoid spamming multiple entries within same turn render)
+        try:
+            last_turn = self.stats_history[-1]["turn"] if self.stats_history else None
+            if last_turn != self.turns:
+                entry = {
+                    "turn": self.turns,
+                    "round": self.round,
+                    "players": [
+                        {
+                            "name": p.get("name"),
+                            "net_worth": p.get("net_worth"),
+                            "avg_roll": p.get("avg_roll"),
+                            "spending_total": p.get("spending_total"),
+                            "earnings_total": p.get("earnings_total"),
+                            "rent_potential": p.get("rent_potential"),
+                        } for p in stats_now.get("players", [])
+                    ],
+                    "rent_groups": [
+                        {
+                            "group": rg.get("group"),
+                            "rent_estimate": rg.get("rent_estimate")
+                        } for rg in stats_now.get("rent_groups", [])
+                    ]
+                }
+                self.stats_history.append(entry)
+                # Trim to last 150 entries (enough for long games but bounded)
+                if len(self.stats_history) > 150:
+                    del self.stats_history[:len(self.stats_history) - 150]
+        except Exception:
+            pass
+        # Build a working player_colors map: prefer game.player_colors if present, else derive stable palette
+        existing_color_map: Dict[str, str] = {}
+        if hasattr(self, 'player_colors') and isinstance(getattr(self, 'player_colors'), dict):
+            existing_color_map = dict(getattr(self, 'player_colors'))
+        # Deterministic fallback palette (mirrors client palette order) if some players missing
+        fallback_palette = ['#e74c3c', '#3498db', '#2ecc71', '#f1c40f', '#9b59b6', '#e67e22', '#1abc9c', '#e84393']
+        # Assign missing colors deterministically by player order
+        for idx, p in enumerate(self.players):
+            if p.name not in existing_color_map or not existing_color_map[p.name]:
+                existing_color_map[p.name] = fallback_palette[idx % len(fallback_palette)]
+        # Ensure Player objects have color set so asdict reflects it
+        for p in self.players:
+            if not p.color:
+                try:
+                    p.color = existing_color_map.get(p.name)
+                except Exception:
+                    pass
+            try:
+                owns_premium = player_has_premium_piece(p.name)
+            except Exception:
+                owns_premium = False
+            if owns_premium:
+                p.token = 'premium-coin'
+            elif getattr(p, 'token', None) == 'premium-coin':
+                p.token = None
+        snap = {
             "players": [asdict(p) for p in self.players],
             "current_turn": self.current_turn,
             "board_len": 40,
@@ -119,7 +182,16 @@ class Game:
             "debts": dict(self.debts) if hasattr(self, 'debts') else {},
             # Provide list of recent trade ids for clients to prime caches
             "recent_trade_ids": list(self.recent_trades.keys())[-100:],
+            # Authoritative aggregated stats for charts (server-derived)
+            "stats": {**stats_now, "history": list(self.stats_history[-150:])},
         }
+        # Attach player color mapping if present on game (copied from lobby when game starts)
+        # Always include resolved player_colors map
+        try:
+            snap["player_colors"] = dict(existing_color_map)
+        except Exception:
+            pass
+        return snap
 
 
 @dataclass
@@ -177,6 +249,187 @@ def _ledger_add(g: Game, t: str, src: Optional[str], dst: Optional[str], amount:
             del g.ledger[:len(g.ledger) - 5000]
     except Exception:
         pass
+
+def _stats_snapshot(g: Game) -> Dict[str, Any]:
+    """Compute aggregated statistics for charts. Intentionally lightweight each snapshot.
+    Structure:
+      {
+        players: [{ name, avg_roll, rolls, spending_total, earnings_total, net_worth }],
+        rent_groups: [{ group, rent_estimate }],
+      }
+    Notes:
+      - avg_roll derived from log 'rolled' entries (limited to last 200 already sliced in snapshot)
+      - spending/earnings from last 500 ledger entries (already limited) aggregated by name
+      - net_worth = cash + property_equity (purchase price + house investments - mortgage penalty)
+      - rent_groups is an estimated current rent potential using tile base price heuristics when detailed rent formula not exposed
+    """
+    try:
+        players = g.players
+        # Build roll aggregates
+        roll_map: Dict[str, Dict[str, int]] = {}
+        for e in g.log[-200:]:
+            try:
+                if (e.get("type") or "").lower() != "rolled":
+                    continue
+                txt = str(e.get("text") or "")
+                if "rolled" not in txt:
+                    continue
+                parts = txt.split("rolled", 1)[1].strip()
+                if "=" in parts:
+                    total_str = parts.split("=")[-1].strip().split()[0]
+                    total = int(total_str)
+                else:
+                    import re
+                    m = re.search(r"(\d+)$", parts)
+                    if not m:
+                        continue
+                    total = int(m.group(1))
+                name = txt.split(" rolled ")[0].strip()
+                rec = roll_map.setdefault(name, {"sum": 0, "count": 0})
+                rec["sum"] += total
+                rec["count"] += 1
+            except Exception:
+                continue
+        spend_map: Dict[str, int] = {}
+        earn_map: Dict[str, int] = {}
+        for e in g.ledger[-500:]:
+            try:
+                amt = int(e.get("amount") or 0)
+                if amt <= 0:
+                    continue
+                src = (e.get("from") or "").strip()
+                dst = (e.get("to") or "").strip()
+                if src:
+                    spend_map[src] = spend_map.get(src, 0) + amt
+                if dst:
+                    earn_map[dst] = earn_map.get(dst, 0) + amt
+            except Exception:
+                continue
+        tile_meta = {t.get("pos"): t for t in build_board_meta()}
+        net_players: List[Dict[str, Any]] = []
+        for p in players:
+            # Liquidation-based valuation per requirements:
+            # - Property base value: half purchase price if not mortgaged, 0 if mortgaged.
+            # - Houses: half the per-house build cost each (hotel = 5 houses). (We approximate house cost via color group mapping.)
+            # - Cash: full value.
+            liquidation_equity = 0
+            try:
+                for pos, state in g.properties.items():
+                    if state.owner != p.name:
+                        continue
+                    tile = tile_meta.get(state.pos)
+                    if not tile:
+                        continue
+                    price = int(tile.get("price") or 0)
+                    group = tile.get("group")
+                    # Property base liquidation value
+                    if state.mortgaged:
+                        base_liq = 0  # mortgaged worth zero for liquidation potential
+                    else:
+                        base_liq = price // 2  # half purchase price
+                    liquidation_equity += base_liq
+                    # Building liquidation value
+                    if tile.get("type") == "property" and group:
+                        house_cost = HOUSE_COST_BY_GROUP.get(group, 0)
+                        if house_cost > 0:
+                            buildings = 5 if state.hotel else int(state.houses)
+                            if buildings > 0:
+                                liquidation_equity += (house_cost * buildings) // 2  # half cost per building
+            except Exception:
+                pass
+            rolls = roll_map.get(p.name, {"sum": 0, "count": 0})
+            avg_roll = (rolls["sum"] / rolls["count"]) if rolls["count"] else 0.0
+            net_players.append({
+                "name": p.name,
+                "avg_roll": round(avg_roll, 2),
+                "rolls": rolls["count"],
+                "spending_total": spend_map.get(p.name, 0),
+                "earnings_total": earn_map.get(p.name, 0),
+                "net_worth": p.cash + liquidation_equity,
+            })
+        # Legacy rent_groups heuristic (kept for backward compatibility / potential future removal)
+        rent_groups: Dict[str, int] = {}
+        for t in build_board_meta():
+            group = t.get("group") or t.get("color") or "misc"
+            price = int(t.get("price") or 0)
+            rent_groups[group] = rent_groups.get(group, 0) + max(0, round(price * 0.1))
+        rent_list = [{"group": gname, "rent_estimate": val} for gname, val in rent_groups.items()]
+
+        # New: per-player rent potential if a (single) generic opponent lands once on each owned property now.
+        # Rules:
+        #  - Mortgaged properties contribute 0.
+        #  - Houses/hotel: use RENT_TABLE to get correct rent tier (hotel treated as 5th level).
+        #  - Railroads: base 25, 50, 100, 200 depending on how many the same owner possesses.
+        #  - Utilities: assume dice roll of 7; one utility = 4 * roll, both = 10 * roll.
+        #  - Other property types ignored (go, tax, chance, chest, jail, free, gotojail).
+        # Snapshot does not attempt to model card effects or special rents (e.g. double rent cards).
+        rr_owned: Dict[str, int] = {p.name: 0 for p in g.players}
+        util_owned: Dict[str, int] = {p.name: 0 for p in g.players}
+        # First pass: count railroads & utilities
+        tiles_meta = monopoly_tiles()
+        for pos, st in g.properties.items():
+            if not st.owner:
+                continue
+            tile = tiles_meta[pos]
+            ttype = tile.get("type")
+            if ttype == "railroad":
+                rr_owned[st.owner] = rr_owned.get(st.owner, 0) + 1
+            elif ttype == "utility":
+                util_owned[st.owner] = util_owned.get(st.owner, 0) + 1
+        # Helper for railroad rent
+        def _rr_rent(cnt: int) -> int:
+            if cnt <= 0: return 0
+            if cnt == 1: return 25
+            if cnt == 2: return 50
+            if cnt == 3: return 100
+            return 200
+        # Utility rent for roll=7
+        def _util_rent(cnt: int) -> int:
+            if cnt <= 0: return 0
+            roll = 7
+            if cnt == 1: return 4 * roll
+            return 10 * roll
+        # Precompute each owner's railroad + utility contribution
+        rr_rent_map = {owner: _rr_rent(cnt) for owner, cnt in rr_owned.items()}
+        util_rent_map = {owner: _util_rent(cnt) for owner, cnt in util_owned.items()}
+        # Base property rents (with houses/hotel)
+        per_player_rent_potential: Dict[str, int] = {p.name: 0 for p in g.players}
+        for pos, st in g.properties.items():
+            owner = st.owner
+            if not owner:
+                continue
+            if st.mortgaged:
+                continue  # mortgaged yields zero
+            tile = tiles_meta[pos]
+            ttype = tile.get("type")
+            if ttype == "property":
+                base_rents = RENT_TABLE.get(pos)
+                if base_rents:
+                    tier = 0
+                    # houses 0-4, hotel -> 5th index
+                    if st.hotel:
+                        tier = 5
+                    else:
+                        h = max(0, min(4, int(st.houses)))
+                        tier = h
+                    try:
+                        rent_val = int(base_rents[tier])
+                    except Exception:
+                        rent_val = int(base_rents[0])
+                    per_player_rent_potential[owner] = per_player_rent_potential.get(owner, 0) + rent_val
+            # Railroads and utilities handled separately (added after loop)
+        for owner, val in rr_rent_map.items():
+            per_player_rent_potential[owner] = per_player_rent_potential.get(owner, 0) + val
+        for owner, val in util_rent_map.items():
+            per_player_rent_potential[owner] = per_player_rent_potential.get(owner, 0) + val
+        # Attach to player stats (augment existing net_players list)
+        # Convert net_players (list of dicts) by matching name
+        for pstat in net_players:
+            name = pstat.get("name")
+            pstat["rent_potential"] = int(per_player_rent_potential.get(name, 0))
+        return {"players": net_players, "rent_groups": rent_list}
+    except Exception:
+        return {"players": [], "rent_groups": []}
 
 
 def _ensure_debts(g: Game) -> Dict[str, List[Dict[str, Any]]]:
@@ -759,6 +1012,318 @@ async def get_trade(lobby_id: str, trade_id: str):
         return JSONResponse({"trade": recent, "status": "archived"})
     return JSONResponse({"error": "not_found"}, status_code=404)
 
+# ---------------------------
+# Authentication endpoints
+# ---------------------------
+
+import jwt
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+import hashlib
+import secrets
+import stripe
+from passlib.hash import bcrypt as bcrypt_hasher
+
+# Session storage - in production, use Redis or database
+SESSIONS: Dict[str, Dict[str, Any]] = {}
+
+# User storage - in production, use a database
+USERS: Dict[str, Dict[str, Any]] = {}  # username -> user_data
+
+SESSION_DEFAULT_AGE = 30 * 24 * 60 * 60  # 30 days
+SESSION_GUEST_AGE = 60 * 60  # 1 hour
+SESSION_REMEMBER_AGE = 90 * 24 * 60 * 60  # 90 days for remember me
+
+def _secure_cookie_settings(request: Request, remember: bool = False, guest: bool = False) -> Dict[str, Any]:
+    max_age = SESSION_GUEST_AGE if guest else (SESSION_REMEMBER_AGE if remember else SESSION_DEFAULT_AGE)
+    secure_flag = (request.url.scheme == 'https') or bool(os.environ.get('FORCE_SECURE_COOKIES'))
+    return {
+        "max_age": max_age,
+        "httponly": True,
+        "secure": secure_flag,
+        "samesite": "lax",
+    }
+
+def _create_session(user_profile: Dict[str, Any], request: Optional[Request] = None, *, remember: bool = False, guest: bool = False) -> Tuple[str, Dict[str, Any]]:
+    """Central helper to create a session dict and return (session_id, session_record)."""
+    session_id = f"session_{secrets.token_hex(8)}"
+    now = time.time()
+    max_age = SESSION_GUEST_AGE if guest else (SESSION_REMEMBER_AGE if remember else SESSION_DEFAULT_AGE)
+    record = {
+        "user": user_profile,
+        "created_at": now,
+        "expires_at": now + max_age,
+        "remember": remember,
+        "guest": guest,
+        "last_seen": now,
+    }
+    if request is not None:
+        try:
+            record["ip"] = request.client.host if request.client else None
+            record["user_agent"] = request.headers.get('user-agent')
+        except Exception:
+            pass
+    SESSIONS[session_id] = record
+    return session_id, record
+
+def _touch_session(session_id: str):
+    rec = SESSIONS.get(session_id)
+    if not rec:
+        return
+    now = time.time()
+    rec["last_seen"] = now
+    # Sliding renewal for non-guest sessions (short idle extension for active users)
+    if not rec.get("guest") and (rec["expires_at"] - now) < (SESSION_DEFAULT_AGE // 4):
+        # Extend base window lightly (not exceeding original policy for remember sessions)
+        base = SESSION_REMEMBER_AGE if rec.get("remember") else SESSION_DEFAULT_AGE
+        rec["expires_at"] = min(now + base, now + base)  # simplified; could clamp vs absolute created_at
+
+def _cleanup_expired_sessions():
+    now = time.time()
+    expired = [sid for sid, rec in SESSIONS.items() if rec.get("expires_at", 0) < now]
+    for sid in expired:
+        SESSIONS.pop(sid, None)
+
+@app.get("/auth/config")
+async def auth_config():
+    """Return authentication configuration for frontend"""
+    return JSONResponse({
+        "googleClientId": os.environ.get("GOOGLE_CLIENT_ID"),
+        "authEnabled": bool(os.environ.get("GOOGLE_CLIENT_ID"))
+    })
+
+@app.post("/auth/google")
+async def google_auth(request: Request):
+    """Verify Google OAuth credential and create user session"""
+    try:
+        body = await request.json()
+        credential = body.get("credential")
+        
+        if not credential:
+            return JSONResponse({"error": "Missing credential"}, status_code=400)
+        
+        # Verify the Google ID token
+        google_client_id = os.environ.get("GOOGLE_CLIENT_ID")
+        if not google_client_id:
+            return JSONResponse({"error": "Google auth not configured"}, status_code=500)
+        
+        # Verify and decode the credential
+        try:
+            idinfo = id_token.verify_oauth2_token(
+                credential, google_requests.Request(), google_client_id
+            )
+            
+            # Additional security checks
+            if idinfo['iss'] not in ['accounts.google.com', 'https://accounts.google.com']:
+                return JSONResponse({"error": "Invalid issuer"}, status_code=400)
+                
+        except ValueError as e:
+            return JSONResponse({"error": f"Invalid token: {str(e)}"}, status_code=400)
+        
+        # Extract user information
+        user_id = idinfo['sub']
+        email = idinfo.get('email')
+        name = idinfo.get('name', email or 'Google User')
+        picture = idinfo.get('picture')
+        
+        # Create user profile
+        user_profile = {
+            "id": f"google:{user_id}",
+            "email": email,
+            "name": name,
+            "avatar": picture,
+            "provider": "google",
+            "achievements": ["early_adopter"] if email else []  # Give early adopter badge
+        }
+        register_name_mapping(user_profile)
+        
+        # Create session
+        session_id = f"session_{random.randint(100000, 999999)}_{int(time.time())}"
+        SESSIONS[session_id] = {
+            "user": user_profile,
+            "created_at": time.time(),
+            "expires_at": time.time() + (30 * 24 * 60 * 60)  # 30 days
+        }
+        
+        # Set session cookie
+        response = JSONResponse({"user": user_profile})
+        response.set_cookie(
+            key="session_id",
+            value=session_id,
+            max_age=30 * 24 * 60 * 60,  # 30 days
+            httponly=True,
+            secure=False,  # Set to True in production with HTTPS
+            samesite="lax"
+        )
+        
+        return response
+        
+    except Exception as e:
+        return JSONResponse({"error": f"Authentication failed: {str(e)}"}, status_code=500)
+
+@app.post("/auth/register")
+async def register_local(request: Request):
+    """Register a new local user account (with bcrypt & optional remember_me)."""
+    try:
+        body = await request.json()
+        username = body.get("username", "").strip()
+        email = body.get("email", "").strip() or None
+        password = body.get("password", "").strip()
+        name = body.get("name", "").strip() or username
+        remember_me = bool(body.get("remember_me"))
+
+        # Validation
+        if not username or len(username) < 3:
+            return JSONResponse({"error": "Username must be at least 3 characters"}, status_code=400)
+        if not password or len(password) < 8:
+            return JSONResponse({"error": "Password must be at least 8 characters"}, status_code=400)
+        if username in USERS:
+            return JSONResponse({"error": "Username already exists"}, status_code=400)
+        if email and any(u.get("email") == email for u in USERS.values()):
+            return JSONResponse({"error": "Email already registered"}, status_code=400)
+
+        password_hash = bcrypt_hasher.hash(password)
+        user_data = {
+            "username": username,
+            "email": email,
+            "name": name,
+            "password_hash": password_hash,
+            "created_at": time.time(),
+            "provider": "local",
+            "avatar": None,
+        }
+        USERS[username] = user_data
+
+        user_profile = {
+            "id": f"local:{username}",
+            "email": email,
+            "name": name,
+            "avatar": None,
+            "provider": "local",
+            "achievements": ["early_adopter"],
+        }
+        register_name_mapping(user_profile)
+
+        session_id, _ = _create_session(user_profile, request, remember=remember_me)
+        cookie_settings = _secure_cookie_settings(request, remember=remember_me)
+        response = JSONResponse({"user": user_profile})
+        response.set_cookie("session_id", session_id, **cookie_settings)
+        return response
+    except Exception as e:
+        return JSONResponse({"error": f"Registration failed: {str(e)}"}, status_code=500)
+
+@app.post("/auth/login")
+async def login_local(request: Request):
+    """Login with local user account (bcrypt, remember_me)."""
+    try:
+        body = await request.json()
+        identifier = body.get("identifier", "").strip()
+        password = body.get("password", "").strip()
+        remember_me = bool(body.get("remember_me"))
+        if not identifier or not password:
+            return JSONResponse({"error": "Username/email and password required"}, status_code=400)
+
+        user_data = None
+        if identifier in USERS:
+            user_data = USERS[identifier]
+        else:
+            for u in USERS.values():
+                if u.get("email") == identifier:
+                    user_data = u
+                    break
+        if not user_data:
+            return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
+        if not bcrypt_hasher.verify(password, user_data.get("password_hash", "")):
+            return JSONResponse({"error": "Invalid credentials"}, status_code=401)
+
+        user_profile = {
+            "id": f"local:{user_data['username']}",
+            "email": user_data.get("email"),
+            "name": user_data["name"],
+            "avatar": user_data.get("avatar"),
+            "provider": "local",
+            "achievements": ["early_adopter"],
+        }
+        register_name_mapping(user_profile)
+        session_id, _ = _create_session(user_profile, request, remember=remember_me)
+        cookie_settings = _secure_cookie_settings(request, remember=remember_me)
+        response = JSONResponse({"user": user_profile})
+        response.set_cookie("session_id", session_id, **cookie_settings)
+        return response
+    except Exception as e:
+        return JSONResponse({"error": f"Login failed: {str(e)}"}, status_code=500)
+
+@app.post("/auth/profile/update")
+async def update_profile(request: Request):
+    """Update mutable profile fields (display name, avatar placeholder)."""
+    try:
+        session_id = request.cookies.get("session_id")
+        if not session_id or session_id not in SESSIONS:
+            return JSONResponse({"error": "Not authenticated"}, status_code=401)
+        session = SESSIONS[session_id]
+        if time.time() > session.get("expires_at", 0):
+            return JSONResponse({"error": "Session expired"}, status_code=401)
+        body = await request.json()
+        new_name = (body.get("name") or "").strip()
+        avatar = body.get("avatar")  # future: validate / upload
+        if new_name:
+            session["user"]["name"] = new_name
+        if avatar is not None:
+            session["user"]["avatar"] = avatar
+        register_name_mapping(session["user"])
+        return JSONResponse({"user": session["user"]})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/logout")
+async def logout(request: Request):
+    """Log out user and clear session."""
+    try:
+        sid = request.cookies.get("session_id")
+        if sid:
+            SESSIONS.pop(sid, None)
+        resp = JSONResponse({"success": True})
+        # Delete cookie using same security attributes
+        cookie_settings = _secure_cookie_settings(request)
+        resp.delete_cookie("session_id", path="/")
+        return resp
+    except Exception:
+        return JSONResponse({"success": True})
+
+@app.get("/auth/me")
+async def get_current_user(request: Request):
+    """Get current authenticated user (touch session)."""
+    try:
+        sid = request.cookies.get("session_id")
+        if not sid or sid not in SESSIONS:
+            return JSONResponse({"error": "Not authenticated"}, status_code=401)
+        sess = SESSIONS[sid]
+        if time.time() > sess.get("expires_at", 0):
+            SESSIONS.pop(sid, None)
+            return JSONResponse({"error": "Session expired"}, status_code=401)
+        _touch_session(sid)
+        return JSONResponse({"user": sess["user"], "expires_at": sess.get("expires_at"), "guest": sess.get("guest", False)})
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to get user: {str(e)}"}, status_code=500)
+
+# Helper function to get authenticated user from request
+def get_authenticated_user(request: Request) -> Optional[Dict[str, Any]]:
+    """Get authenticated user from request, returns None if not authenticated"""
+    try:
+        session_id = request.cookies.get("session_id")
+        if not session_id or session_id not in SESSIONS:
+            return None
+        
+        session = SESSIONS[session_id]
+        if time.time() > session.get("expires_at", 0):
+            del SESSIONS[session_id]
+            return None
+        
+        return session["user"]
+    except Exception:
+        return None
+
 # Optionally serve static frontend if directory is present
 STATIC_DIR = os.environ.get("SERVE_STATIC_DIR", "/app/static")
 try:
@@ -812,6 +1377,7 @@ def lobby_state(l: Lobby) -> Dict[str, Any]:
         "chat": l.chat[-50:],
         "starting_cash": l.starting_cash,
         "player_colors": l.player_colors,
+        "premium_players": [p for p in l.players if player_has_premium_piece(p)],
     }
 
 
@@ -870,30 +1436,35 @@ async def disconnect(sid):
                     l2 = LOBBIES.get(lobby_id)
                     if not l2:
                         return
-                    # If player still not reconnected
-                    if l2.disconnect_deadlines.get(pname, 0) <= asyncio.get_event_loop().time():
-                        l2.disconnect_deadlines.pop(pname, None)
-                        # If a game is running, remove player from game and release assets
-                        if l2.game:
-                            g = l2.game
-                            # Remove properties and the player
-                            for pos, st in list(g.properties.items()):
-                                if st.owner == pname:
-                                    st.owner = None
-                                    st.houses = 0
-                                    st.hotel = False
-                                    st.mortgaged = False
-                                    g.properties[pos] = st
-                            g.players = [pl for pl in g.players if pl.name != pname]
-                            if len(g.players) > 0:
-                                g.current_turn = g.current_turn % len(g.players)
-                            # Log removal
-                            g.log.append({"type": "disconnect_kick", "text": f"{pname} removed after disconnect timeout"})
-                            try:
-                                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-                            except Exception:
-                                pass
+                    # Re-check deadline existence (reconnect may have cleared it)
+                    current_deadline = l2.disconnect_deadlines.get(pname)
+                    if current_deadline is None:
+                        return  # player already reconnected
+                    if current_deadline > asyncio.get_event_loop().time():
+                        return  # deadline extended; abort this task
+                    # Deadline expired; finalize removal
+                    l2.disconnect_deadlines.pop(pname, None)
+                    if l2.game:
+                        g = l2.game
+                        for pos, st in list(g.properties.items()):
+                            if st.owner == pname:
+                                st.owner = None
+                                st.houses = 0
+                                st.hotel = False
+                                st.mortgaged = False
+                                g.properties[pos] = st
+                        g.players = [pl for pl in g.players if pl.name != pname]
+                        if len(g.players) > 0:
+                            g.current_turn = g.current_turn % len(g.players)
+                        g.log.append({"type": "disconnect_kick", "text": f"{pname} removed after disconnect timeout"})
+                        try:
+                            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                        except Exception:
+                            pass
+                    try:
                         await sio.emit("lobby_state", lobby_state(l2), room=lobby_id)
+                    except Exception:
+                        pass
                 asyncio.create_task(timeout_check(l.id, name, l.disconnect_deadlines[name]))
             await sio.emit("lobby_state", lobby_state(l), room=l.id)
 
@@ -907,9 +1478,12 @@ async def auth(sid, data):
     # Clear any pending disconnect deadline for this name in any lobby
     name = USERNAMES[sid]
     for l in LOBBIES.values():
-        for k, v in list(l.disconnect_deadlines.items()):
-            if k == name:
-                l.disconnect_deadlines.pop(k, None)
+        if name in l.disconnect_deadlines:
+            l.disconnect_deadlines.pop(name, None)
+            try:
+                await sio.emit("lobby_state", lobby_state(l), room=l.id)
+            except Exception:
+                pass
 
 
 @sio.event
@@ -1317,6 +1891,12 @@ async def lobby_start(sid, data):
         # Use chosen color from lobby if available, otherwise use palette
         chosen_color = l.player_colors.get(pl.name)
         pl.color = chosen_color if chosen_color else palette[i % len(palette)]
+        try:
+            if player_has_premium_piece(pl.name):
+                pl.token = 'premium-coin'
+        except Exception:
+            pl.token = getattr(pl, 'token', None)
+        pl.token = "premium-coin" if player_has_premium_piece(pl.name) else "classic"
     # Also set the game's player_colors for consistency
     game.player_colors = dict(l.player_colors)
     l.game = game
@@ -1852,7 +2432,7 @@ async def game_action(sid, data):
         await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
         return
 
-    # Stocks: invest/sell/settings (owner-only dilution/redemption, cash-basis)
+    # Stocks: invest/sell/settings (Option 1 model: pool == owner cash; sells shrink pool)
     if t in {"stock_invest", "stock_sell", "stock_settings"}:
         payload = action or {}
         owner = str(payload.get("owner") or "")
@@ -1860,241 +2440,204 @@ async def game_action(sid, data):
             g.last_action = {"type": f"{t}_denied", "reason": "missing_owner"}
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
-        # Ensure stock exists
         st = _stocks_ensure(g, owner)
-        price = _stock_price(g, owner)
-        
+        investor = actor
+        inv_p = _find_player(g, investor)
+        own_p = _find_player(g, owner)
+        if not own_p:
+            g.last_action = {"type": f"{t}_denied", "reason": "owner_missing"}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
         if t == "stock_settings":
-            # Only owner can update settings
             if actor != owner:
                 g.last_action = {"type": "stock_settings_denied", "by": actor, "expected": owner}
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
-            try:
-                min_buy = int(payload.get("min_buy") or 0)
-                if min_buy < 0:
-                    min_buy = 0
-            except Exception:
-                min_buy = int(st.get("min_buy") or 0)
-            allow_investing = bool(payload.get("allow_investing")) if ("allow_investing" in payload) else bool(st.get("allow_investing", False))
-            enforce_min_buy = bool(payload.get("enforce_min_buy")) if ("enforce_min_buy" in payload) else bool(st.get("enforce_min_buy", False))
-            try:
-                min_pool_total = int(payload.get("min_pool_total") or 0)
-                if min_pool_total < 0:
-                    min_pool_total = 0
-            except Exception:
-                min_pool_total = int(st.get("min_pool_total") or 0)
-            try:
-                min_pool_owner = int(payload.get("min_pool_owner") or 0)
-                if min_pool_owner < 0:
-                    min_pool_owner = 0
-            except Exception:
-                min_pool_owner = int(st.get("min_pool_owner") or 0)
-            # Support both legacy single flag and new independent flags
-            enforce_min_pool = bool(payload.get("enforce_min_pool")) if ("enforce_min_pool" in payload) else bool(st.get("enforce_min_pool", False))
-            enforce_min_pool_total = bool(payload.get("enforce_min_pool_total")) if ("enforce_min_pool_total" in payload) else bool(st.get("enforce_min_pool_total", enforce_min_pool))
-            enforce_min_pool_owner = bool(payload.get("enforce_min_pool_owner")) if ("enforce_min_pool_owner" in payload) else bool(st.get("enforce_min_pool_owner", enforce_min_pool))
-            
-            st["allow_investing"] = allow_investing
-            st["enforce_min_buy"] = enforce_min_buy
-            st["min_buy"] = min_buy
-            st["enforce_min_pool"] = enforce_min_pool  # Keep for backwards compatibility
-            st["enforce_min_pool_total"] = enforce_min_pool_total
-            st["enforce_min_pool_owner"] = enforce_min_pool_owner
-            st["min_pool_total"] = min_pool_total
-            st["min_pool_owner"] = min_pool_owner
+            # Update settings
+            def _int(key, default=0):
+                try:
+                    v = int(payload.get(key) or default)
+                    return max(0, v)
+                except Exception:
+                    return int(st.get(key) or default)
+            st["allow_investing"] = bool(payload.get("allow_investing")) if ("allow_investing" in payload) else bool(st.get("allow_investing", False))
+            st["enforce_min_buy"] = bool(payload.get("enforce_min_buy")) if ("enforce_min_buy" in payload) else bool(st.get("enforce_min_buy", False))
+            st["min_buy"] = _int("min_buy", st.get("min_buy") or 0)
+            st["enforce_min_pool"] = bool(payload.get("enforce_min_pool")) if ("enforce_min_pool" in payload) else bool(st.get("enforce_min_pool", False))
+            st["enforce_min_pool_total"] = bool(payload.get("enforce_min_pool_total")) if ("enforce_min_pool_total" in payload) else bool(st.get("enforce_min_pool_total", st.get("enforce_min_pool", False)))
+            st["enforce_min_pool_owner"] = bool(payload.get("enforce_min_pool_owner")) if ("enforce_min_pool_owner" in payload) else bool(st.get("enforce_min_pool_owner", st.get("enforce_min_pool", False)))
+            st["min_pool_total"] = _int("min_pool_total", st.get("min_pool_total") or 0)
+            st["min_pool_owner"] = _int("min_pool_owner", st.get("min_pool_owner") or 0)
             g.stocks[owner] = st
-            g.last_action = {"type": "stock_settings", "owner": owner, "allow_investing": allow_investing, "enforce_min_buy": enforce_min_buy, "min_buy": min_buy, "enforce_min_pool": enforce_min_pool, "enforce_min_pool_total": enforce_min_pool_total, "enforce_min_pool_owner": enforce_min_pool_owner, "min_pool_total": min_pool_total, "min_pool_owner": min_pool_owner}
+            g.last_action = {"type": "stock_settings", "owner": owner, **{k: st[k] for k in ["allow_investing","enforce_min_buy","min_buy","enforce_min_pool","enforce_min_pool_total","enforce_min_pool_owner","min_pool_total","min_pool_owner"]}}
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
-        
-        # Invest / sell
-        shares = int(payload.get("shares") or 0)
-        amount = payload.get("amount")
-        percent = payload.get("percent")
-        investor = actor
-        inv_p = _find_player(g, investor)
-        own_p = _find_player(g, owner)
-        if not inv_p or not own_p:
-                g.last_action = {"type": f"{t}_denied", "reason": "player_missing"}
-                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-                return
-        # Invest: percent-of-pool model (A dollars into pool P)
+        # Common vars for invest/sell
+        if not inv_p:
+            g.last_action = {"type": f"{t}_denied", "reason": "investor_missing"}
+            await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+            return
+        hold = dict(st.get("holdings") or {})  # investor -> percent (0..1)
+        P_before = max(0, int(_player_cash(g, owner)))
+        outside_sum = sum(float(v or 0.0) for v in hold.values())
+        owner_percent_before = max(0.0, 1.0 - outside_sum)
+        # INVEST
         if t == "stock_invest":
             if investor == owner:
                 g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "owner_cannot_invest"}
+                g.log.append({"type": "stock_invest_denied", "text": f"{investor} cannot invest in their own stock ({owner})"})
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
-            if not bool(st.get("allow_investing", True)):
+            if not bool(st.get("allow_investing", False)):
                 g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "disabled"}
+                g.log.append({"type": "stock_invest_denied", "text": f"{investor} denied investing in {owner} (disabled)"})
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
-            A = int(float(amount or 0)) if isinstance(amount, (int, float)) else 0
+            amount_raw = payload.get("amount")
+            try:
+                A = int(float(amount_raw or 0))
+            except Exception:
+                A = 0
             if A <= 0:
                 g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "invalid_amount"}
-                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-                return
-            P = int(own_p.cash)
-            hold = dict(st.get("holdings") or {})
-            # current percent and dollar stake
-            p_cur = float(hold.get(investor) or 0.0)
-            outside_sum = sum(float(v or 0.0) for v in hold.values())
-            owner_percent = max(0.0, 1.0 - outside_sum)
-            E = p_cur * float(P)
-            # Enforce independent pool gates
-            min_pool_total = int(st.get("min_pool_total") or 0)
-            min_pool_owner = int(st.get("min_pool_owner") or 0)
-            enforce_min_pool_total = bool(st.get("enforce_min_pool_total", st.get("enforce_min_pool", False)))
-            enforce_min_pool_owner = bool(st.get("enforce_min_pool_owner", st.get("enforce_min_pool", False)))
-            
-            if enforce_min_pool_total and min_pool_total > 0 and P < min_pool_total:
-                g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "below_min_pool_total", "needed": min_pool_total, "pool_value": P}
-                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-                return
-            owner_value = owner_percent * float(P)
-            if enforce_min_pool_owner and min_pool_owner > 0 and owner_value < float(min_pool_owner):
-                g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "below_min_pool_owner", "needed": min_pool_owner, "owner_value": int(owner_value)}
+                g.log.append({"type": "stock_invest_denied", "text": f"{investor} invest denied invalid amount"})
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
             min_buy = int(st.get("min_buy") or 0)
             if bool(st.get("enforce_min_buy", False)) and min_buy > 0 and A < min_buy:
                 g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "below_min", "needed": min_buy, "cost": A}
+                g.log.append({"type": "stock_invest_denied", "text": f"{investor} invest ${A} below min ${min_buy} for {owner}"})
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
             if inv_p.cash < A:
                 g.last_action = {"type": "stock_invest_denied", "by": investor, "reason": "insufficient_cash", "needed": A}
+                g.log.append({"type": "stock_invest_denied", "text": f"{investor} invest ${A} denied insufficient cash"})
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
-            # Cash transfer
+            # Perform cash transfer: investor -> owner (pool grows by A via owner cash increase)
             inv_p.cash -= A
-            retained = _route_inflow(g, owner, int(A), "stock_invest", {"pool_before": P})
+            retained = _route_inflow(g, owner, int(A), "stock_invest", {"pool_before": P_before})
             own_p.cash += retained
-            try:
-                _ledger_add(g, "stock_invest", investor, owner, A, {"pool_before": P, "pool_after": int(P_new) if 'P_new' in locals() else None})
-            except Exception:
-                pass
-            # Recalculate percents based on dollar stakes
-            P_new = float(P + A)
-            # First compute each investor's dollar stake E_k from old percents
+            P_after = max(0, int(_player_cash(g, owner)))  # new pool
+            # Reconstruct dollar stakes from old percents at P_before
             stakes: Dict[str, float] = {}
             for k, pv in hold.items():
                 try:
-                    stakes[k] = max(0.0, float(pv)) * float(P)
+                    stakes[k] = max(0.0, float(pv)) * float(P_before)
                 except Exception:
                     stakes[k] = 0.0
+            # Add investor new dollars
             stakes[investor] = float(stakes.get(investor) or 0.0) + float(A)
-            # Convert back to percents under new pool
+            # Convert to percents over new pool P_after
             new_hold: Dict[str, float] = {}
-            if P_new > 0:
-                total_pct_accum = 0.0
-                ordered = list(stakes.items())
-                for idx, (k, Ek) in enumerate(ordered):
-                    if Ek <= 0.0:
+            if P_after > 0:
+                total_pct = 0.0
+                for k, dollars in stakes.items():
+                    if dollars <= 0:
                         continue
-                    pct = max(0.0, min(1.0, float(Ek) / P_new))
-                    # Drop dust below 0.000001 to avoid lingering microscopic holders
-                    if pct < 0.000001:
+                    pct = max(0.0, min(1.0, dollars / float(P_after)))
+                    # Allow very small stakes (reduced dust threshold for visibility)
+                    if pct < 0.000000001:
                         continue
-                    # Round to 1e-9 for stability
                     pct = round(pct, 9)
                     new_hold[k] = pct
-                    total_pct_accum += pct
-                # Normalize if accumulated percent drifts from 1.0 significantly
-                if 0.0001 < total_pct_accum < 1.9999:
-                    # Owner implicit percent = 1 - outside sum; clamp if rounding error pushes outside sum >1
-                    if total_pct_accum > 1.0:
-                        scale = 1.0 / total_pct_accum
-                        for k in list(new_hold.keys()):
-                            new_hold[k] = round(new_hold[k] * scale, 9)
-                # Final cleanup: remove any entries that became zero after scaling
+                    total_pct += pct
+                if total_pct > 1.0 and total_pct < 2.0:
+                    scale = 1.0 / total_pct
+                    for k in list(new_hold.keys()):
+                        new_hold[k] = round(new_hold[k] * scale, 9)
                 for k in list(new_hold.keys()):
-                    if new_hold[k] <= 0.0:
+                    if new_hold[k] <= 0:
                         del new_hold[k]
             st["holdings"] = new_hold
             g.stocks[owner] = st
-            g.last_action = {"type": "stock_invest", "by": investor, "owner": owner, "amount": A, "pool_before": P, "pool_after": int(P_new)}
-            g.log.append({"type": "stock_invest", "text": f"{investor} invested ${A} into {owner} pool (P: ${P} → ${int(P_new)})"})
+            g.last_action = {"type": "stock_invest", "by": investor, "owner": owner, "amount": A, "pool_before": P_before, "pool_after": P_after}
+            g.log.append({"type": "stock_invest", "text": f"{investor} invested ${A} into {owner} pool (P: ${P_before} → ${P_after})"})
+            try:
+                _ledger_add(g, "stock_invest", investor, owner, int(A), {"pool_before": P_before, "pool_after": P_after})
+            except Exception:
+                pass
             try:
                 _record_stock_history_for(g, owner, overwrite=True)
             except Exception:
                 pass
             await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
             return
+        # SELL: investor redeems S dollars; owner cash decreases; pool shrinks; percent recalculated
         if t == "stock_sell":
-            hold = dict(st.get("holdings") or {})
-            P = int(own_p.cash)
-            p_cur = float(hold.get(investor) or 0.0)
-            E = p_cur * float(P)
-            if P <= 0 or E <= 0:
-                g.last_action = {"type": "stock_sell_denied", "by": investor, "reason": "no_stake_or_pool"}
+            if investor == owner:
+                g.last_action = {"type": "stock_sell_denied", "by": investor, "reason": "owner_cannot_sell_to_self"}
+                g.log.append({"type": "stock_sell_denied", "text": f"{investor} cannot sell owner stake to self ({owner})"})
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
-            # Determine S (cash to redeem)
+            p_cur = float(hold.get(investor) or 0.0)
+            E = p_cur * float(P_before)  # investor dollar stake before redemption
+            if P_before <= 0 or E <= 0:
+                g.last_action = {"type": "stock_sell_denied", "by": investor, "reason": "no_stake_or_pool"}
+                g.log.append({"type": "stock_sell_denied", "text": f"{investor} sell denied no stake/pool in {owner}"})
+                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
+                return
+            amount_raw = payload.get("amount")
+            percent_raw = payload.get("percent")
+            shares_raw = payload.get("shares")
             S = 0
-            if isinstance(percent, (int, float)) and float(percent) > 0:
-                portion = max(0.0, min(1.0, float(percent)))
+            if isinstance(percent_raw, (int, float)) and float(percent_raw) > 0:
+                portion = max(0.0, min(1.0, float(percent_raw)))
                 S = int(portion * E)
-            elif isinstance(amount, (int, float)) and float(amount) > 0:
-                S = int(float(amount))
-            elif isinstance(shares, (int, float)) and float(shares) > 0:
-                # legacy path: treat shares as percent-of-base (100), convert to dollar stake
-                S = int((float(shares) / 100.0) * E)
-            # Clamp S by my stake and owner cash
-            S = max(0, min(S, int(E), int(P)))
+            elif isinstance(amount_raw, (int, float)) and float(amount_raw) > 0:
+                S = int(float(amount_raw))
+            elif isinstance(shares_raw, (int, float)) and float(shares_raw) > 0:
+                # shares_raw is in pseudo-share units (base=100)
+                S = int((float(shares_raw) / 100.0) * E)
+            S = max(0, min(S, int(E), int(P_before)))
             if S <= 0:
                 g.last_action = {"type": "stock_sell_denied", "by": investor, "reason": "invalid_amount"}
+                g.log.append({"type": "stock_sell_denied", "text": f"{investor} sell denied invalid amount"})
                 await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
                 return
-            # Cash transfer
+            # Owner pays investor (pool shrinks)
             own_p.cash -= S
-            retained = _route_inflow(g, investor, int(S), "stock_sell", {"pool_before": P})
+            retained = _route_inflow(g, investor, int(S), "stock_sell", {"pool_before": P_before})
             inv_p.cash += retained
-            try:
-                _ledger_add(g, "stock_sell", owner, investor, S, {"pool_before": P, "pool_after": int(P_new) if 'P_new' in locals() else None})
-            except Exception:
-                pass
-            P_new = float(P - S)
-            # Recompute percents from old dollar stakes
-            if P_new <= 0:
-                st["holdings"] = {}
-                g.stocks[owner] = st
-                g.last_action = {"type": "stock_sell", "by": investor, "owner": owner, "amount": S, "pool_before": P, "pool_after": 0}
-                g.log.append({"type": "stock_sell", "text": f"{investor} redeemed ${S} from {owner} pool (P: ${P} → $0)"})
-                try:
-                    _record_stock_history_for(g, owner, overwrite=True)
-                except Exception:
-                    pass
-                await sio.emit("game_state", {"lobby_id": lobby_id, "snapshot": g.snapshot()}, room=lobby_id)
-                return
+            # Reconstruct all dollar stakes based on pre-sell pool P_before
             stakes: Dict[str, float] = {}
             for k, pv in hold.items():
                 try:
-                    stakes[k] = max(0.0, float(pv)) * float(P)
+                    stakes[k] = max(0.0, float(pv)) * float(P_before)
                 except Exception:
                     stakes[k] = 0.0
+            # Reduce seller's dollar stake by S (burned from pool)
             stakes[investor] = max(0.0, float(stakes.get(investor) or 0.0) - float(S))
+            # New pool after sell equals old pool minus S (since owner's cash decreased)
+            P_after = max(0, int(_player_cash(g, owner)))
+            # Convert remaining stakes to percents relative to P_after
             new_hold: Dict[str, float] = {}
-            total_pct_accum = 0.0
-            for k, Ek in stakes.items():
-                if Ek <= 0.0:
-                    continue
-                pct = max(0.0, min(1.0, float(Ek) / float(P_new)))
-                if pct < 0.000001:
-                    continue
-                pct = round(pct, 9)
-                new_hold[k] = pct
-                total_pct_accum += pct
-            if 0.0001 < total_pct_accum < 1.9999 and total_pct_accum > 1.0:
-                scale = 1.0 / total_pct_accum
+            if P_after > 0:
+                total_pct = 0.0
+                for k, dollars in stakes.items():
+                    if dollars <= 0:
+                        continue
+                    pct = max(0.0, min(1.0, dollars / float(P_after)))
+                    if pct < 0.000000001:
+                        continue
+                    pct = round(pct, 9)
+                    new_hold[k] = pct
+                    total_pct += pct
+                if total_pct > 1.0 and total_pct < 2.0:
+                    scale = 1.0 / total_pct
+                    for k in list(new_hold.keys()):
+                        new_hold[k] = round(new_hold[k] * scale, 9)
                 for k in list(new_hold.keys()):
-                    new_hold[k] = round(new_hold[k] * scale, 9)
-            for k in list(new_hold.keys()):
-                if new_hold[k] <= 0.0:
-                    del new_hold[k]
+                    if new_hold[k] <= 0:
+                        del new_hold[k]
             st["holdings"] = new_hold
             g.stocks[owner] = st
-            g.last_action = {"type": "stock_sell", "by": investor, "owner": owner, "amount": S, "pool_before": P, "pool_after": int(P_new)}
-            g.log.append({"type": "stock_sell", "text": f"{investor} redeemed ${S} from {owner} pool (P: ${P} → ${int(P_new)})"})
+            g.last_action = {"type": "stock_sell", "by": investor, "owner": owner, "amount": S, "pool_before": P_before, "pool_after": P_after}
+            g.log.append({"type": "stock_sell", "text": f"{investor} redeemed ${S} from {owner} pool (P: ${P_before} → ${P_after})"})
+            try:
+                _ledger_add(g, "stock_sell", owner, investor, int(S), {"pool_before": P_before, "pool_after": P_after})
+            except Exception:
+                pass
             try:
                 _record_stock_history_for(g, owner, overwrite=True)
             except Exception:
@@ -3005,9 +3548,17 @@ def _player_cash(g: Game, name: str) -> int:
 
 
 def _stock_price(g: Game, owner: str) -> int:
-    # In the percent-based model, "price" reported in the snapshot is the owner's current cash (the pool P)
-    # Ensure minimum price of 1 to avoid division by zero edge cases
-    return max(1, int(_player_cash(g, owner)))
+    """Return current stock pool value (Option 1 model: equals owner's current cash).
+    We continue to mirror this into st['pool_value'] for backward compatibility with any
+    existing client code that still reads that field, but authoritative value is owner cash.
+    """
+    cash_now = max(0, int(_player_cash(g, owner)))
+    st = _stocks_ensure(g, owner)
+    try:
+        st["pool_value"] = cash_now  # keep in sync for snapshots/history consumers
+    except Exception:
+        pass
+    return cash_now
 
 
 def _stocks_ensure(g: Game, owner: str) -> Dict[str, Any]:
@@ -3018,7 +3569,8 @@ def _stocks_ensure(g: Game, owner: str) -> Dict[str, Any]:
             # holdings will store percents per investor (0..1). Keep total_shares only for backward-compat snapshot base.
             "total_shares": 0.0,
             "holdings": {},
-            "allow_investing": False,
+            # Default investing to True so UX is consistent with dashboard expectations unless explicitly disabled.
+            "allow_investing": True,
             "enforce_min_buy": False,
             "min_buy": 0,
             "enforce_min_pool": False,
@@ -3026,6 +3578,7 @@ def _stocks_ensure(g: Game, owner: str) -> Dict[str, Any]:
             "min_pool_owner": 0,
             "history": [],
             "last_history_turn": None,
+            "pool_value": None,
         }
         g.stocks[owner] = st
     # Ensure schema fields
@@ -3047,7 +3600,9 @@ def _stocks_ensure(g: Game, owner: str) -> Dict[str, Any]:
             st["holdings"] = new_hold
     except Exception:
         pass
-    st.setdefault("allow_investing", False)
+    # Preserve explicit False if previously set, but otherwise default to True
+    if "allow_investing" not in st:
+        st["allow_investing"] = True
     st.setdefault("enforce_min_buy", False)
     st.setdefault("min_buy", 0)
     st.setdefault("enforce_min_pool", False)
@@ -3055,6 +3610,11 @@ def _stocks_ensure(g: Game, owner: str) -> Dict[str, Any]:
     st.setdefault("min_pool_owner", 0)
     st.setdefault("history", [])
     st.setdefault("last_history_turn", None)
+    # Always keep pool_value synced to owner's current cash (Option 1 model)
+    try:
+        st["pool_value"] = int(_player_cash(g, owner))
+    except Exception:
+        st["pool_value"] = 0
     return st
 
 
@@ -3076,6 +3636,17 @@ def _stocks_snapshot(g: Game) -> List[Dict[str, Any]]:
         holdings.sort(key=lambda x: -float(x.get("percent") or 0.0))
         outside_percent = sum(float(h.get("percent") or 0.0) for h in holdings)
         owner_percent = max(0.0, 1.0 - outside_percent)
+        # Build history copy and ensure most recent point reflects current pool immediately.
+        hist = [
+            {"turn": int(pt.get("turn") or 0), "pool": float(pt.get("pool") or 0.0)}
+            for pt in (rec.get("history") or [])
+        ][-200:]
+        try:
+            if (not hist) or (hist and float(hist[-1].get("pool")) != float(price)):
+                # Append synthetic point with current round (g.round) to reflect new pool value instantly.
+                hist.append({"turn": int(getattr(g, "round", 0)), "pool": float(price)})
+        except Exception:
+            pass
         out.append({
             "owner": p.name,
             "owner_color": p.color,
@@ -3090,10 +3661,7 @@ def _stocks_snapshot(g: Game) -> List[Dict[str, Any]]:
             "base": base,
             "owner_percent": owner_percent,
             "holdings": holdings,
-            "history": [
-                {"turn": int(pt.get("turn") or 0), "pool": float(pt.get("pool") or 0.0)}
-                for pt in (rec.get("history") or [])
-            ][-200:],
+            "history": hist,
         })
     return out
 
@@ -3167,14 +3735,15 @@ def _bond_payouts_snapshot(g: Game) -> List[Dict[str, Any]]:
 
 
 def _stock_pool_value(g: Game, owner: str) -> float:
-    # Pool value is simply the owner's current cash
-    return float(_player_cash(g, owner))
+    # Authoritative pool = owner cash
+    return float(max(0, int(_player_cash(g, owner))))
 
 
 def _record_stock_history_for(g: Game, owner: str, overwrite: bool = True) -> None:
     st = _stocks_ensure(g, owner)
     turn = int(g.turns or 0)
-    val = _stock_pool_value(g, owner)
+    # Recompute directly from owner cash (st["pool_value"] already synced by helpers)
+    val = float(max(0, int(_player_cash(g, owner))))
     hist = list(st.get("history") or [])
     last_turn = st.get("last_history_turn")
     if overwrite and hist and (last_turn == turn or (hist[-1].get("turn") == turn)):
@@ -3409,7 +3978,15 @@ def _check_and_finalize_game(g: Game) -> bool:
             "turns": g.turns,
             "most_landed": {"pos": most_pos, "name": most_name, "count": max(0, most_cnt)},
         }
+        g.game_over_summary = g.game_over  # Store for stats tracking
         g.log.append({"type": "game_over", "text": f"Game over. Winner: {winner or '—'}"})
+        
+        # Update user stats
+        try:
+            on_game_completed(g)
+        except Exception as e:
+            print(f"Error updating user stats: {e}")
+        
         return True
     return False
 
@@ -3879,6 +4456,592 @@ async def chat_send(sid, data):
     # Always emit unified chat_message event so clients can rely on it regardless of game state
     await sio.emit("chat_message", {"from": name, "message": message, "lobby_id": lobby_id, "ts": payload["ts"]}, room=lobby_id)
 
+
+# ---------------------------
+# Payment System Configuration
+# ---------------------------
+
+# Stripe configuration
+stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "sk_test_...")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "whsec_...")
+
+# Coin packages available for purchase
+COIN_PACKAGES = {
+    "small": {
+        "id": "small",
+        "name": "Small Pack",
+        "coins": 25,
+        "price_usd": 399,  # $3.99 in cents
+        "bonus": 0,
+        "popular": False,
+        "description": "Get started with some coins"
+    },
+    "medium": {
+        "id": "medium", 
+        "name": "Medium Pack",
+        "coins": 50,
+        "price_usd": 599,  # $5.99 in cents
+        "bonus": 0,
+        "popular": True,
+        "description": "Perfect for buying premium items"
+    }
+}
+
+# ---------------------------
+# User Stats and Premium Features
+# ---------------------------
+
+# User stats storage (in production, use database)
+USER_STATS: Dict[str, Dict[str, Any]] = {}  # user_id -> stats
+PREMIUM_PURCHASES: Dict[str, Dict[str, Any]] = {}  # user_id -> purchases
+PAYMENT_TRANSACTIONS: Dict[str, Dict[str, Any]] = {}  # transaction_id -> payment data
+NAME_TO_USER_ID: Dict[str, str] = {}  # display name -> user_id
+PREMIUM_NAME_CACHE: Dict[str, bool] = {}  # display name -> owns premium piece
+
+
+def register_name_mapping(user: Optional[Dict[str, Any]]) -> None:
+    """Remember the mapping between a user's display name and their stable user_id."""
+    try:
+        if not user:
+            return
+        name = str(user.get("name") or "").strip()
+        user_id = str(user.get("id") or "").strip()
+        if name and user_id:
+            NAME_TO_USER_ID[name] = user_id
+    except Exception:
+        pass
+
+
+def mark_premium_status(display_name: Optional[str], owned: bool) -> None:
+    if not display_name:
+        return
+    if owned:
+        PREMIUM_NAME_CACHE[display_name] = True
+    else:
+        PREMIUM_NAME_CACHE.pop(display_name, None)
+
+
+def player_has_premium_piece(display_name: str) -> bool:
+    if not display_name:
+        return False
+    if PREMIUM_NAME_CACHE.get(display_name):
+        return True
+    user_id = NAME_TO_USER_ID.get(display_name)
+    if user_id:
+        purchases = PREMIUM_PURCHASES.get(user_id) or {}
+        if "premium-coin" in purchases:
+            PREMIUM_NAME_CACHE[display_name] = True
+            return True
+        stats = USER_STATS.get(user_id)
+        if stats and stats.get("premium_piece_owned"):
+            PREMIUM_NAME_CACHE[display_name] = True
+            return True
+    # Fallback: search user stats for matching display name flag
+    for uid, stats in USER_STATS.items():
+        try:
+            if stats.get("display_name") == display_name and stats.get("premium_piece_owned"):
+                NAME_TO_USER_ID[display_name] = uid
+                PREMIUM_NAME_CACHE[display_name] = True
+                return True
+        except Exception:
+            continue
+    return False
+
+def get_user_stats(user_id: str, display_name: Optional[str] = None) -> Dict[str, Any]:
+    """Get user statistics"""
+    if user_id not in USER_STATS:
+        USER_STATS[user_id] = {
+            "games_played": 0,
+            "games_won": 0,
+            "win_rate": 0.0,
+            "total_earnings": 0,
+            "gold_coins": 500,   # Purchased currency
+            "silver_coins": 0,   # Earned currency
+            "coins": 500,        # Legacy field mapped to gold coins for compatibility
+            "premium_piece_owned": False,
+            "member_since": "Today",
+            "display_name": display_name or None
+        }
+    
+    stats = USER_STATS[user_id]
+    if display_name:
+        stats["display_name"] = display_name
+        register_name_mapping({"id": user_id, "name": display_name})
+    # Ensure new currency fields exist for legacy records
+    stats.setdefault("gold_coins", stats.get("coins", 0))
+    stats.setdefault("silver_coins", 0)
+    stats["coins"] = stats.get("gold_coins", 0)
+    # Calculate win rate
+    if stats["games_played"] > 0:
+        stats["win_rate"] = (stats["games_won"] / stats["games_played"]) * 100
+    else:
+        stats["win_rate"] = 0.0
+    
+    # Check if user owns premium piece
+    stats["premium_piece_owned"] = user_id in PREMIUM_PURCHASES and "premium-coin" in PREMIUM_PURCHASES[user_id]
+    mark_premium_status(stats.get("display_name") or display_name, bool(stats.get("premium_piece_owned")))
+    
+    return stats
+
+def update_user_game_stats(user_id: str, won: bool, earnings: int):
+    """Update user stats after a game"""
+    stats = get_user_stats(user_id)
+    stats["games_played"] += 1
+    if won:
+        stats["games_won"] += 1
+        stats["silver_coins"] = stats.get("silver_coins", 0) + 1
+    stats["total_earnings"] += earnings
+    USER_STATS[user_id] = stats
+
+@app.get("/api/user/stats")
+async def get_user_stats_endpoint(request: Request):
+    """Get current user's statistics"""
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in SESSIONS:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    
+    session = SESSIONS[session_id]
+    if session["expires_at"] < time.time():
+        return JSONResponse({"error": "Session expired"}, status_code=401)
+    
+    user = session["user"]
+    register_name_mapping(user)
+    stats = get_user_stats(user["id"], user.get("name"))
+    
+    return JSONResponse(stats)
+
+@app.post("/api/user/purchase-premium-piece")
+async def purchase_premium_piece(request: Request):
+    """Purchase the premium 3D coin piece"""
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in SESSIONS:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    
+    session = SESSIONS[session_id]
+    if session["expires_at"] < time.time():
+        return JSONResponse({"error": "Session expired"}, status_code=401)
+    
+    try:
+        body = await request.json()
+        item_id = body.get("item_id")
+        
+        if item_id != "premium-coin":
+            return JSONResponse({"error": "Invalid item"}, status_code=400)
+        
+        user = session["user"]
+        user_id = user["id"]
+        register_name_mapping(user)
+        stats = get_user_stats(user_id, user.get("name"))
+        
+        # Check if already owned
+        if stats["premium_piece_owned"]:
+            return JSONResponse({"error": "Already owned"}, status_code=400)
+        
+        # Check if user has enough coins
+        PREMIUM_PRICE = 50
+        gold_balance = stats.get("gold_coins", stats.get("coins", 0))
+        if gold_balance < PREMIUM_PRICE:
+            return JSONResponse({"error": "Insufficient coins"}, status_code=400)
+        
+        # Process purchase
+        stats["gold_coins"] = gold_balance - PREMIUM_PRICE
+        stats["coins"] = stats["gold_coins"]
+        if user_id not in PREMIUM_PURCHASES:
+            PREMIUM_PURCHASES[user_id] = {}
+        PREMIUM_PURCHASES[user_id]["premium-coin"] = {
+            "purchased_at": time.time(),
+            "price_paid": PREMIUM_PRICE
+        }
+        
+        USER_STATS[user_id] = stats
+        mark_premium_status(user.get("name"), True)
+        return JSONResponse({"success": True, "remaining_coins": stats["gold_coins"]})
+        
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ---------------------------
+# Payment System Endpoints
+# ---------------------------
+
+@app.get("/api/store/packages")
+async def get_coin_packages():
+    """Get available coin packages for purchase"""
+    return JSONResponse(list(COIN_PACKAGES.values()))
+
+@app.get("/api/store/items")
+async def get_marketplace_items():
+    """Get available marketplace items"""
+    return JSONResponse([{
+        "id": "premium-coin", 
+        "name": "Premium 3D Coin",
+        "description": "A beautiful 3D coin piece that looks like a round coin but flatter",
+        "price": 50,
+        "type": "game_piece",
+        "rarity": "premium"
+    }])
+
+@app.post("/api/auth/guest-session")
+async def create_guest_session(request: Request):
+    """Create a temporary guest session for demo payments"""
+    try:
+        body = await request.json()
+        display_name = body.get("display_name", "Guest")
+        
+        # Create a guest session
+        session_id = f"guest_{random.randint(100000, 999999)}"
+        user_id = f"guest:{session_id}"
+        
+        SESSIONS[session_id] = {
+            "user": {
+                "id": user_id,
+                "name": display_name,
+                "email": f"{session_id}@guest.demo",
+                "provider": "guest"
+            },
+            "expires_at": time.time() + 3600,  # 1 hour
+            "created_at": time.time()
+        }
+        register_name_mapping(SESSIONS[session_id]["user"])
+        
+        response = JSONResponse({
+            "success": True,
+            "user": SESSIONS[session_id]["user"],
+            "session_id": session_id
+        })
+        
+        # Set session cookie
+        response.set_cookie(
+            "session_id", 
+            session_id, 
+            max_age=3600,
+            httponly=True,
+            secure=False,  # Set to True in production with HTTPS
+            samesite="lax"
+        )
+        
+        return response
+        
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/payments/create-intent")
+async def create_payment_intent(request: Request):
+    """Create a Stripe payment intent for coin purchase"""
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in SESSIONS:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    
+    session = SESSIONS[session_id]
+    if session["expires_at"] < time.time():
+        return JSONResponse({"error": "Session expired"}, status_code=401)
+    
+    try:
+        body = await request.json()
+        package_id = body.get("package_id")
+        
+        if package_id not in COIN_PACKAGES:
+            return JSONResponse({"error": "Invalid package"}, status_code=400)
+        
+        package = COIN_PACKAGES[package_id]
+        base_coins = int(package.get("coins", 0) or 0)
+        bonus_coins = int(package.get("bonus", 0) or 0)
+        total_coins = max(0, base_coins + bonus_coins)
+        user = session["user"]
+        register_name_mapping(user)
+        
+        # Create Stripe payment intent
+        intent = stripe.PaymentIntent.create(
+            amount=package["price_usd"],
+            currency="usd",
+            metadata={
+                "user_id": user["id"],
+                "package_id": package_id,
+                "coins": str(total_coins),
+                "coins_expected": str(total_coins),
+                "coin_type": "gold",
+                "user_email": user.get("email", ""),
+                "user_name": user.get("name", "")
+            },
+            description=f"InvestUp.trade - {package['name']} ({package['coins'] + package['bonus']} coins)"
+        )
+        
+        # Store transaction for tracking
+        PAYMENT_TRANSACTIONS[intent.id] = {
+            "user_id": user["id"],
+            "package_id": package_id,
+            "amount_usd": package["price_usd"],
+            "coins": total_coins,
+            "coins_expected": total_coins,
+            "coin_type": "gold",
+            "status": "pending",
+            "created_at": time.time(),
+            "stripe_intent_id": intent.id,
+            "user_name": user.get("name")
+        }
+        
+        return JSONResponse({
+            "client_secret": intent.client_secret,
+            "stripe_intent_id": intent.id,
+            "package": package
+        })
+        
+    except stripe.error.StripeError as e:
+        return JSONResponse({"error": f"Payment error: {str(e)}"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/payments/confirm")
+async def confirm_payment(request: Request):
+    """Confirm payment completion and deliver coins"""
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in SESSIONS:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    
+    try:
+        body = await request.json()
+        payment_intent_id = body.get("payment_intent_id")
+        
+        if not payment_intent_id or payment_intent_id not in PAYMENT_TRANSACTIONS:
+            return JSONResponse({"error": "Invalid payment intent"}, status_code=400)
+        
+        # Verify payment with Stripe
+        intent = stripe.PaymentIntent.retrieve(payment_intent_id)
+        
+        # For demo/testing, also accept "requires_payment_method" status as successful
+        demo_mode = os.environ.get("DEBUG", "false").lower() == "true"
+        payment_successful = intent.status == "succeeded" or (demo_mode and intent.status in ["requires_payment_method", "requires_confirmation"])
+        
+        if payment_successful:
+            transaction = PAYMENT_TRANSACTIONS[payment_intent_id]
+            user_id = transaction["user_id"]
+            package_def = COIN_PACKAGES.get(transaction["package_id"])
+
+            if not package_def:
+                return JSONResponse({"error": "Package configuration missing"}, status_code=500)
+
+            canonical_coins = max(0, int(package_def.get("coins", 0) or 0) + int(package_def.get("bonus", 0) or 0))
+            metadata_coins = canonical_coins
+            try:
+                if getattr(intent, "metadata", None):
+                    raw_meta_value = intent.metadata.get("coins_expected") or intent.metadata.get("coins")
+                    if raw_meta_value is not None:
+                        metadata_coins = int(str(raw_meta_value))
+            except Exception:
+                metadata_coins = canonical_coins
+
+            coins_to_add = min(canonical_coins, metadata_coins)
+            if coins_to_add <= 0:
+                return JSONResponse({"error": "Unable to determine coin reward"}, status_code=500)
+            transaction["coins"] = coins_to_add
+            transaction["coins_expected"] = canonical_coins
+            
+            # Add coins to user account
+            stats = get_user_stats(user_id, transaction.get("user_name"))
+            stats["gold_coins"] = stats.get("gold_coins", stats.get("coins", 0)) + coins_to_add
+            stats["coins"] = stats["gold_coins"]
+            USER_STATS[user_id] = stats
+            
+            # Update transaction status
+            transaction["status"] = "completed"
+            transaction["completed_at"] = time.time()
+            
+            return JSONResponse({
+                "success": True,
+                "coins_added": coins_to_add,
+                "new_balance": stats["gold_coins"],
+                "transaction_id": payment_intent_id
+            })
+        else:
+            return JSONResponse({"error": "Payment not completed"}, status_code=400)
+            
+    except stripe.error.StripeError as e:
+        return JSONResponse({"error": f"Payment verification failed: {str(e)}"}, status_code=400)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/payments/webhook")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhooks for secure payment verification"""
+    payload = await request.body()
+    sig_header = request.headers.get('stripe-signature')
+    
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+    except ValueError:
+        return JSONResponse({"error": "Invalid payload"}, status_code=400)
+    except stripe.error.SignatureVerificationError:
+        return JSONResponse({"error": "Invalid signature"}, status_code=400)
+    
+    # Handle successful payment
+    if event['type'] == 'payment_intent.succeeded':
+        payment_intent = event['data']['object']
+        intent_id = payment_intent['id']
+        
+        if intent_id in PAYMENT_TRANSACTIONS:
+            transaction = PAYMENT_TRANSACTIONS[intent_id]
+            user_id = transaction["user_id"]
+            package_def = COIN_PACKAGES.get(transaction["package_id"])
+            canonical_coins = max(0, int(package_def.get("coins", 0) or 0) + int(package_def.get("bonus", 0) or 0)) if package_def else 0
+            metadata_coins = canonical_coins
+            try:
+                raw_meta_value = payment_intent.get("metadata", {}).get("coins_expected") or payment_intent.get("metadata", {}).get("coins")
+                if raw_meta_value is not None:
+                    metadata_coins = int(str(raw_meta_value))
+            except Exception:
+                metadata_coins = canonical_coins
+
+            coins_to_add = min([v for v in (canonical_coins, metadata_coins) if isinstance(v, int) and v >= 0] or [0])
+            if coins_to_add <= 0:
+                coins_to_add = canonical_coins
+            transaction["coins"] = coins_to_add
+            transaction["coins_expected"] = canonical_coins
+            
+            # Ensure coins are delivered (idempotent)
+            if transaction["status"] == "pending":
+                stats = get_user_stats(user_id, transaction.get("user_name"))
+                stats["gold_coins"] = stats.get("gold_coins", stats.get("coins", 0)) + coins_to_add
+                stats["coins"] = stats["gold_coins"]
+                USER_STATS[user_id] = stats
+                
+                transaction["status"] = "completed"
+                transaction["completed_at"] = time.time()
+                transaction["webhook_verified"] = True
+    
+    return JSONResponse({"status": "success"})
+
+@app.get("/api/payments/history")
+async def get_payment_history(request: Request):
+    """Get user's payment transaction history"""
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in SESSIONS:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    
+    session = SESSIONS[session_id]
+    if session["expires_at"] < time.time():
+        return JSONResponse({"error": "Session expired"}, status_code=401)
+    
+    user_id = session["user"]["id"]
+    
+    # Filter transactions for this user
+    user_transactions = []
+    for transaction in PAYMENT_TRANSACTIONS.values():
+        if transaction["user_id"] == user_id:
+            # Don't expose sensitive data
+            safe_transaction = {
+                "id": transaction["stripe_intent_id"],
+                "package_id": transaction["package_id"],
+                "coins": transaction["coins"],
+                "coin_type": transaction.get("coin_type", "gold"),
+                "amount_usd": transaction["amount_usd"],
+                "status": transaction["status"],
+                "created_at": transaction["created_at"],
+                "completed_at": transaction.get("completed_at"),
+                "webhook_verified": transaction.get("webhook_verified", False),
+                # Add human-readable package name
+                "package_name": next((pkg["name"] for pkg in COIN_PACKAGES.values() if pkg["id"] == transaction["package_id"]), "Unknown Package")
+            }
+            user_transactions.append(safe_transaction)
+    
+    # Sort by creation date (newest first)
+    user_transactions.sort(key=lambda x: x["created_at"], reverse=True)
+    
+    return JSONResponse(user_transactions)
+
+@app.get("/api/payments/receipt/{payment_id}")
+async def get_payment_receipt(payment_id: str, request: Request):
+    """Generate a detailed receipt for a specific payment"""
+    session_id = request.cookies.get("session_id")
+    if not session_id or session_id not in SESSIONS:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    
+    session = SESSIONS[session_id]
+    if session["expires_at"] < time.time():
+        return JSONResponse({"error": "Session expired"}, status_code=401)
+    
+    user_id = session["user"]["id"]
+    
+    # Find the transaction
+    transaction = None
+    for trans in PAYMENT_TRANSACTIONS.values():
+        if trans["stripe_intent_id"] == payment_id and trans["user_id"] == user_id:
+            transaction = trans
+            break
+    
+    if not transaction:
+        return JSONResponse({"error": "Transaction not found"}, status_code=404)
+    
+    # Generate detailed receipt
+    package = next((pkg for pkg in COIN_PACKAGES.values() if pkg["id"] == transaction["package_id"]), None)
+    if not package:
+        return JSONResponse({"error": "Package not found"}, status_code=404)
+    
+    receipt = {
+        "receipt_id": payment_id,
+        "transaction_date": time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(transaction["created_at"])),
+        "customer": {
+            "user_id": user_id,
+            "display_name": session["user"]["name"]
+        },
+        "items": [{
+            "description": f"{package['name']} - {package['coins']:,} Coins",
+            "quantity": 1,
+            "unit_price": f"${package['price_usd'] / 100:.2f}",
+            "total": f"${package['price_usd'] / 100:.2f}"
+        }],
+        "payment": {
+            "method": "Credit Card",
+            "amount": f"${transaction['amount_usd'] / 100:.2f}",
+            "currency": "USD",
+            "status": transaction["status"].title(),
+            "stripe_payment_id": payment_id
+        },
+        "summary": {
+            "subtotal": f"${package['price_usd'] / 100:.2f}",
+            "tax": "$0.00",
+            "total": f"${package['price_usd'] / 100:.2f}",
+            "coins_delivered": f"{transaction['coins']:,}",
+            "coin_type": transaction.get("coin_type", "gold")
+        },
+        "verification": {
+            "webhook_verified": transaction.get("webhook_verified", False),
+            "completed_at": transaction.get("completed_at")
+        }
+    }
+    
+    return JSONResponse(receipt)
+
+# Hook into game completion to update stats
+def on_game_completed(game: Game):
+    """Called when a game is completed to update user stats"""
+    if not game.game_over_summary:
+        return
+    
+    winner_name = game.game_over_summary.get("winner")
+    
+    # Update stats for all players
+    for player in game.players:
+        # Try to find the user ID for this player
+        user_id = None
+        
+        # Look through sessions to find matching display name
+        for session_data in SESSIONS.values():
+            if session_data["user"]["name"] == player.name:
+                user_id = session_data["user"]["id"]
+                break
+        
+        if user_id:
+            won = player.name == winner_name
+            earnings = max(0, player.net_worth())
+            update_user_game_stats(user_id, won, earnings)
+        else:
+            mapped_id = NAME_TO_USER_ID.get(player.name)
+            if mapped_id:
+                won = player.name == winner_name
+                earnings = max(0, player.net_worth())
+                update_user_game_stats(mapped_id, won, earnings)
 
 # ---------------------------
 # Entrypoint

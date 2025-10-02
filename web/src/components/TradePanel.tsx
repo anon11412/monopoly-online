@@ -210,10 +210,24 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
     </label>
   );
 
+  const [isMobile, setIsMobile] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(max-width: 768px)').matches;
+  });
+  
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const mql = window.matchMedia('(max-width: 768px)');
+    const onChange = () => setIsMobile(mql.matches);
+    mql.addEventListener('change', onChange);
+    onChange();
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
+
   return (
     <Portal>
   <div className="trade-panel" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2500 }} onClick={onClose}>
-  <div style={{ background: 'var(--color-surface)', minWidth: 720, maxWidth: '90vw', maxHeight: '85vh', overflow: 'auto', borderRadius: 8, padding: 16, boxShadow: '0 8px 24px var(--color-shadow)' }} onClick={(e) => e.stopPropagation()}>
+  <div style={{ background: 'var(--color-surface)', minWidth: isMobile ? 'auto' : 720, width: isMobile ? '95vw' : 'auto', maxWidth: '95vw', maxHeight: '90vh', overflow: 'auto', borderRadius: 8, padding: isMobile ? 12 : 16, boxShadow: '0 8px 24px var(--color-shadow)' }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <h3 style={{ margin: 0 }}>{variant === 'advanced' ? '⚡ Advanced Combined Trade' : '🤝 Trade Properties'}</h3>
           <button className="btn btn-ghost" onClick={onClose}>❌ Close</button>
@@ -227,7 +241,7 @@ export default function TradePanel({ lobbyId, snapshot, onClose, variant = 'prop
           </label>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 12 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: 16, marginTop: 12 }}>
           <div className="ui-labelframe">
             <div className="ui-title ui-h3">📤 Your Offer {myName ? `(${myName})` : ''}</div>
             <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 8 }}>

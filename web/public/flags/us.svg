@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 7410 3900">
+  <rect width="7410" height="3900" fill="#fff"/>
+  <!-- Red stripes -->
+  <g fill="#b22234">
+    <rect width="7410" height="300" y="0"/>
+    <rect width="7410" height="300" y="600"/>
+    <rect width="7410" height="300" y="1200"/>
+    <rect width="7410" height="300" y="1800"/>
+    <rect width="7410" height="300" y="2400"/>
+    <rect width="7410" height="300" y="3000"/>
+    <rect width="7410" height="300" y="3600"/>
+  </g>
+  <!-- Canton -->
+  <rect width="2964" height="2100" fill="#3c3b6e"/>
+  <!-- Simple star grid approximation -->
+  <g fill="#fff">
+    <!-- 6x5 grid of dots -->
+    <g>
+      <circle cx="247" cy="175" r="55"/>
+      <circle cx="494" cy="175" r="55"/>
+      <circle cx="741" cy="175" r="55"/>
+      <circle cx="988" cy="175" r="55"/>
+      <circle cx="1235" cy="175" r="55"/>
+      <circle cx="1482" cy="175" r="55"/>
+    </g>
+    <g transform="translate(0,350)">
+      <circle cx="247" cy="175" r="55"/>
+      <circle cx="494" cy="175" r="55"/>
+      <circle cx="741" cy="175" r="55"/>
+      <circle cx="988" cy="175" r="55"/>
+      <circle cx="1235" cy="175" r="55"/>
+      <circle cx="1482" cy="175" r="55"/>
+    </g>
+    <g transform="translate(0,700)">
+      <circle cx="247" cy="175" r="55"/>
+      <circle cx="494" cy="175" r="55"/>
+      <circle cx="741" cy="175" r="55"/>
+      <circle cx="988" cy="175" r="55"/>
+      <circle cx="1235" cy="175" r="55"/>
+      <circle cx="1482" cy="175" r="55"/>
+    </g>
+    <g transform="translate(0,1050)">
+      <circle cx="247" cy="175" r="55"/>
+      <circle cx="494" cy="175" r="55"/>
+      <circle cx="741" cy="175" r="55"/>
+      <circle cx="988" cy="175" r="55"/>
+      <circle cx="1235" cy="175" r="55"/>
+      <circle cx="1482" cy="175" r="55"/>
+    </g>
+  </g>
+</svg>

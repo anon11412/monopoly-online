@@ -14,6 +14,8 @@ export default function StockChartsModal({ open, snapshot, onClose, lobbyId, onO
   const s = getSocket();
   const myName = (getRemembered().displayName || '').trim();
   const stocks = (snapshot as any)?.stocks as Array<any> | undefined;
+  const players = (snapshot as any)?.players as Array<any> | undefined;
+  const me = useMemo(() => (players || []).find(p => p.name === myName), [players, myName]);
   const mapByOwner = useMemo(() => {
     const m: Record<string, any> = {};
     (stocks || []).forEach((st) => { m[st.owner] = st; });
@@ -45,20 +47,73 @@ export default function StockChartsModal({ open, snapshot, onClose, lobbyId, onO
                   <div style={{ display: 'grid', gap: 4, justifyItems: 'end' }}>
                     {myName !== st.owner ? (
                       <>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          {[25, 50, 100].map((amt) => (
-                            <button key={amt} className="btn btn-ghost" onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'stock_invest', owner: st.owner, amount: amt } })}>Buy ${amt}</button>
-                          ))}
+                        {(() => {
+                          const allow = (st as any).allow_investing !== false; // default true if undefined
+                          const enforceMin = !!(st as any).enforce_min_buy;
+                          const minBuy = Math.max(0, Number(st.min_buy || 0));
+                          const myCash = me?.cash || 0;
+                          let quick: number[];
+                          if (enforceMin && minBuy > 0) {
+                            quick = [minBuy, minBuy * 2, minBuy * 3, minBuy * 4];
+                          } else {
+                            quick = [25, 50, 100, 200];
+                          }
+                          // Deduplicate & sort ascending for consistent UI
+                          quick = Array.from(new Set(quick)).sort((a, b) => a - b).slice(0, 5);
+                          return (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxWidth: 300 }}>
+                              {quick.map((amt) => {
+                                const tooSmall = enforceMin && minBuy > 0 && amt < minBuy;
+                                const noCash = amt > myCash;
+                                const disabled = !allow || tooSmall || noCash || amt <= 0;
+                                let title = '';
+                                if (!allow) title = 'Investing disabled by owner';
+                                else if (tooSmall) title = `Minimum buy is $${minBuy}`;
+                                else if (noCash) title = 'Insufficient cash';
+                                return (
+                                  <button
+                                    key={amt}
+                                    className={`btn btn-ghost ${disabled ? 'btn-disabled' : ''}`}
+                                    disabled={disabled}
+                                    title={title}
+                                    onClick={() => !disabled && s.emit('game_action', { id: lobbyId, action: { type: 'stock_invest', owner: st.owner, amount: amt } })}
+                                  >Buy ${amt}</button>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                        <div className="ui-xs" style={{ opacity: 0.7 }}>
+                          {((st as any).allow_investing === false) && <span style={{ color: '#c0392b' }}>Investing disabled</span>}
+                          {((st as any).allow_investing !== false) && (st as any).enforce_min_buy && st.min_buy > 0 && <span>Min buy ${st.min_buy}</span>}
                         </div>
                         {(() => {
                           const myHolding = (st.holdings || []).find((h: any) => h.investor === myName);
                           if (!myHolding || (myHolding.shares || 0) <= 0) return null;
+                          const myPct = Math.max(0, Math.min(1, myHolding.percent || 0));
+                          const pool = Number(st.price || 0);
+                          const stakeValue = myPct * pool; // approximate dollar stake
                           return (
                             <div style={{ display: 'flex', gap: 6 }}>
-                              {[25, 50].map((pct) => (
-                                <button key={pct} className="btn btn-ghost" onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'stock_sell', owner: st.owner, percent: pct/100 } })}>Sell {pct}%</button>
-                              ))}
-                              <button className="btn btn-ghost" onClick={() => s.emit('game_action', { id: lobbyId, action: { type: 'stock_sell', owner: st.owner, amount: 50 } })}>Sell $50</button>
+                              {[25, 50].map((pct) => {
+                                const redeemEst = (pct / 100) * stakeValue;
+                                const disabled = redeemEst < 1; // would round to 0 and be denied
+                                return (
+                                  <button
+                                    key={pct}
+                                    className={`btn btn-ghost ${disabled ? 'btn-disabled' : ''}`}
+                                    disabled={disabled}
+                                    title={disabled ? 'Stake too small for that percent (would redeem <$1)' : ''}
+                                    onClick={() => !disabled && s.emit('game_action', { id: lobbyId, action: { type: 'stock_sell', owner: st.owner, percent: pct/100 } })}
+                                  >Sell {pct}%</button>
+                                );
+                              })}
+                              <button
+                                className="btn btn-ghost"
+                                disabled={stakeValue <= 0}
+                                title={stakeValue <= 0 ? 'No stake to sell' : ''}
+                                onClick={() => stakeValue > 0 && s.emit('game_action', { id: lobbyId, action: { type: 'stock_sell', owner: st.owner, amount: Math.min(50, Math.max(1, Math.floor(stakeValue))) } })}
+                              >Sell ${Math.min(50, Math.max(1, Math.floor(stakeValue)))}</button>
                             </div>
                           );
                         })()}

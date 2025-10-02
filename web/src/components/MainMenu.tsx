@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../lib/auth';
-import { connectSocket, getSocket, getRemembered, rememberLobby, getOrCreateDisplayName } from '../lib/socket';
+import { connectSocket, getSocket, getRemembered, rememberLobby, getOrCreateDisplayName, getResolvedSocketConfig } from '../lib/socket';
 import { useTheme } from '../lib/theme';
 import AudioSettings from './AudioSettings';
 import AccessibilitySettings from './AccessibilitySettings';
+import { AuthPage } from './AuthPage';
+import { ProfilePage } from './ProfilePage';
 import type { LobbyInfo } from '../types';
 import { getStreetRent, houseCostForGroup, mortgageValue } from '../lib/rentData';
 
@@ -19,8 +21,67 @@ export default function MainMenu({ onEnterLobby }: Props) {
     if (/^player$/i.test(s)) return '';
     return s;
   };
-  const initialName = sanitize(saved.displayName || '') || getOrCreateDisplayName();
-  const [name, setName] = useState(initialName);
+  
+  // Get auth state first
+  const { theme, toggleTheme } = useTheme();
+  const { user, ready: authReady, googleReady, signOut, signInWithGoogle, loadRecents } = useAuth();
+  const [recentAccounts, setRecentAccounts] = useState<Array<any>>([]);
+  // Load recent accounts whenever auth becomes ready
+  useEffect(() => {
+    if (authReady) {
+      setRecentAccounts(loadRecents());
+    }
+  }, [authReady, user]);
+
+  const handleQuickAccount = async (acct: any) => {
+    if (!acct) return;
+    // For local accounts we still need password; we can't store that. Show hint.
+    // If provider is google, trigger google sign-in flow.
+    if (acct.provider === 'google') {
+      try { await handleGoogleSignIn(); } catch {}
+      return;
+    }
+    // For local accounts offer prefill path: open auth page with login mode & prefill username
+    setAuthMode('login');
+    setCurrentPage('auth');
+    // We can't autofill password but we can stash a stub to show.
+    setAuthStub(`Enter password for @${acct.id.split(':')[1]}`);
+  };
+
+  const recentAccountsPanel = (
+    <div style={{ marginTop: 16 }}>
+      {recentAccounts.length > 0 && (
+        <div className="ui-labelframe" style={{ padding: 12 }}>
+          <div className="ui-title" style={{ marginBottom: 8 }}>Recent Accounts</div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+            {recentAccounts.map(r => (
+              <button
+                key={r.id}
+                onClick={() => handleQuickAccount(r)}
+                className="btn btn-ghost"
+                style={{ display:'flex', alignItems:'center', gap:6, padding:'6px 10px', fontSize:12 }}
+                title={r.provider === 'google' ? 'Google account' : 'Local account'}
+              >
+                <span style={{
+                  width:24,height:24,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
+                  background:'var(--color-surface-alt)',fontSize:14
+                }}>{(r.name||'?').slice(0,1).toUpperCase()}</span>
+                <span style={{ maxWidth:120, overflow:'hidden', textOverflow:'ellipsis' }}>{r.name}</span>
+                {r.provider === 'google' && <span style={{ fontSize:10, opacity:0.6 }}>G</span>}
+              </button>
+            ))}
+          </div>
+          <div className="ui-xs" style={{ opacity:0.6, marginTop:6 }}>Google accounts sign in instantly. Local accounts need password.</div>
+        </div>
+      )}
+    </div>
+  );
+  
+  const [name, setName] = useState(() => {
+    // Use lazy initial state to call getDisplayName after user is available
+    if (user?.name) return user.name;
+    return sanitize(saved.displayName || '') || getOrCreateDisplayName();
+  });
   const [lobbies, setLobbies] = useState<LobbyInfo[]>([]);
   const [connected, setConnected] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -31,11 +92,48 @@ export default function MainMenu({ onEnterLobby }: Props) {
   const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [showAccessibilitySettings, setShowAccessibilitySettings] = useState(false);
   const lastLobbyId = (saved.lastLobbyId || '').trim();
-  const { theme, toggleTheme } = useTheme();
-  const { user, ready: authReady, signOut } = useAuth();
   const [authStub, setAuthStub] = useState<string | null>(null);
-  const handleLoginLocal = () => setAuthStub('Login coming soon');
-  const handleRegisterLocal = () => setAuthStub('Sign up coming soon');
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [currentPage, setCurrentPage] = useState<'menu' | 'auth' | 'profile'>('menu');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  
+  const handleGoogleSignIn = async () => {
+    if (!googleReady || isSigningIn) return;
+    
+    setIsSigningIn(true);
+    try {
+      await signInWithGoogle();
+      setAuthStub(null);
+    } catch (error) {
+      console.error('Google sign-in failed:', error);
+      setAuthStub(`Sign-in failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+  
+  const handleLoginLocal = () => {
+    setCurrentPage('auth');
+    setAuthMode('login');
+  };
+  
+  const handleRegisterLocal = () => {
+    setCurrentPage('auth');
+    setAuthMode('register');
+  };
+  
+  const handleBackToMenu = () => {
+            {/* Recent Accounts */}
+            {!user && recentAccountsPanel}
+    setCurrentPage('menu');
+    setAuthStub(null);
+  };
+  
+  const handleShowProfile = () => {
+    setCurrentPage('profile');
+  };
+  
+
   const [showTradeDemo, setShowTradeDemo] = useState(false);
   const tradeDemoRef = useRef<HTMLDivElement | null>(null);
   const [friends, setFriends] = useState<{ accepted: any[]; pending_in: any[]; pending_out: any[] } | null>(null);
@@ -60,6 +158,14 @@ export default function MainMenu({ onEnterLobby }: Props) {
     return () => { cancelled = true; clearInterval(t); };
   }, [authReady, user]);
 
+  // Update display name when user auth state changes
+  useEffect(() => {
+    const newName = user?.name || sanitize(saved.displayName || '') || getOrCreateDisplayName();
+    if (newName !== name) {
+      setName(newName);
+    }
+  }, [user?.name]);
+
   // Preserve last lobby for resume: do not auto-leave on landing
   // This allows the user to rejoin within the server's disconnect grace period.
   useEffect(() => {
@@ -68,20 +174,22 @@ export default function MainMenu({ onEnterLobby }: Props) {
 
   async function handleConnect() {
     const s = getSocket();
+    console.debug('[MainMenu] handleConnect start', { already: s.connected });
     setStatus('Connecting…');
-    const onConnectError = (err: any) => {
-      console.warn('connect_error', err);
-      setStatus('Failed to connect to server. Is the backend running on 127.0.0.1:8000?');
-    };
-    s.once('connect_error', onConnectError);
+    // Fallback status update if still not connected after 3s
+    setTimeout(() => {
+      if (!getSocket().connected) {
+        setStatus(prev => prev.startsWith('Failed') ? prev : 'Still connecting… If this hangs, make sure backend is running (default http://127.0.0.1:8000)');
+      }
+    }, 3000);
     try {
-  await connectSocket(name);
-      s.off('connect_error', onConnectError);
+      await connectSocket(name);
+      console.debug('[MainMenu] connect resolved');
       setConnected(true);
       setStatus('Connected. Loading lobbies…');
       // Register handler before requesting list to avoid race
       s.off('lobby_list');
-      s.on('lobby_list', (data: { lobbies: LobbyInfo[] }) => {
+  s.on('lobby_list', (data: { lobbies: LobbyInfo[] }) => {
         const filtered = (data.lobbies || []).filter(l => (l.players || []).length > 0);
         setLobbies(filtered);
         setStatus(filtered.length ? '' : 'No open lobbies. Create one below.');
@@ -111,6 +219,7 @@ export default function MainMenu({ onEnterLobby }: Props) {
         s.emit('lobby_list');
         setRefreshCountdown(9);
       };
+
       const countdown = () => {
         setRefreshCountdown(prev => prev > 0 ? prev - 1 : 9);
       };
@@ -121,8 +230,8 @@ export default function MainMenu({ onEnterLobby }: Props) {
       ;(window as any).__lobbyTick = setInterval(tick, 9000);
       ;(window as any).__lobbyCountdown = setInterval(countdown, 1000);
     } catch (e: any) {
-      s.off('connect_error', onConnectError);
-      setStatus('Failed to connect. Please retry.');
+      console.warn('[MainMenu] connect failed', e);
+      setStatus('Failed to connect. Please ensure backend is running and retry.');
     }
   }
 
@@ -204,43 +313,46 @@ export default function MainMenu({ onEnterLobby }: Props) {
 
   // Sticky connect bar (persistent CTA)
   const stickyBar = (
-    <div style={{ position: 'sticky', top: 0, zIndex: 40, backdropFilter: 'blur(6px)', background: 'rgba(0,0,0,0.4)', padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-      <strong style={{ letterSpacing: 0.5 }}>Monopoly Online</strong>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        {authReady && (
-          user ? (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginRight: 6 }}>
-              {user.avatar ? <img src={user.avatar} alt={user.name} style={{ width: 20, height: 20, borderRadius: '50%' }} /> : <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#888', display: 'inline-block' }} />}
-              <span className="ui-sm" style={{ opacity: 0.9, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name}</span>
-              {Array.isArray(user.achievements) && user.achievements.includes('early_adopter') && (
-                <span className="badge badge-info" title="Early Adopter" style={{ fontSize: 10 }}>🎖 Early</span>
-              )}
-              <button className="btn btn-ghost" onClick={signOut} title="Sign out" style={{ padding: '2px 6px' }}>Sign out</button>
-            </div>
-          ) : (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <button className="btn btn-ghost" onClick={handleLoginLocal} title="Log in">Log in</button>
-              <button className="btn btn-ghost" onClick={handleRegisterLocal} title="Sign up">Sign up</button>
-            </div>
-          )
-        )}
-        <input aria-label="Display Name" value={name} onChange={(e) => setName(e.target.value)} style={{ padding: '4px 8px', borderRadius: 4, border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(255,255,255,0.08)', color: 'inherit', width: 140, fontSize: 12 }} />
-        {!connected ? (
-          <button className="btn" onClick={handleConnect} style={{ fontWeight: 600 }}>Connect</button>
+    <div style={{ position: 'sticky', top: 0, zIndex: 40, backdropFilter: 'blur(6px)', background: 'rgba(0,0,0,0.4)', padding: '6px 10px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 8, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+      {authReady && (
+        user ? (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginRight: 4 }}>
+            {user.avatar ? <img src={user.avatar} alt={user.name} style={{ width: 20, height: 20, borderRadius: '50%' }} /> : <span style={{ width: 20, height: 20, borderRadius: '50%', background: '#888', display: 'inline-block' }} />}
+            <span className="ui-sm" style={{ opacity: 0.9, maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{user.name}</span>
+            {Array.isArray(user.achievements) && user.achievements.includes('early_adopter') && (
+              <span className="badge badge-info" title="Early Adopter" style={{ fontSize: 10 }}>🎖 Early</span>
+            )}
+            <button className="btn btn-ghost" onClick={handleShowProfile} title="Profile" style={{ padding: '2px 6px' }}>Profile</button>
+            <button className="btn btn-ghost" onClick={signOut} title="Sign out" style={{ padding: '2px 6px' }}>Sign out</button>
+          </div>
         ) : (
-          <button className="btn" onClick={manualRefresh} style={{ fontWeight: 600 }}>Refresh</button>
-        )}
-        {lastLobbyId && connected && <button className="btn btn-ghost" onClick={rejoinLast} title="Rejoin last game">↺</button>}
-        <button className="btn btn-ghost" onClick={() => setShowAccessibilitySettings(!showAccessibilitySettings)} title="Accessibility Settings" aria-label="Accessibility Settings">♿</button>
-        <button className="btn btn-ghost" onClick={() => setShowAudioSettings(!showAudioSettings)} title="Audio Settings" aria-label="Audio Settings">🔊</button>
-        <button className="btn btn-ghost" onClick={toggleTheme} title="Toggle Theme" aria-label="Toggle Theme">{theme === 'light' ? '🌙' : '☀️'}</button>
-      </div>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {googleReady && (
+              <button 
+                className={`btn ${isSigningIn ? 'btn-loading' : 'btn-primary'}`}
+                onClick={handleGoogleSignIn} 
+                disabled={isSigningIn}
+                title="Sign in with Google"
+              >
+                {isSigningIn ? 'Signing in...' : '🔍 Google'}
+              </button>
+            )}
+            <button className="btn btn-ghost" onClick={handleLoginLocal} title="Local log in">Log In</button>
+            <button className="btn btn-ghost" onClick={handleRegisterLocal} title="Local sign up">Sign Up</button>
+          </div>
+        )
+      )}
+      {lastLobbyId && connected && <button className="btn btn-ghost" onClick={rejoinLast} title="Rejoin last game">↺</button>}
+      <button className="btn btn-ghost" onClick={() => setShowAccessibilitySettings(!showAccessibilitySettings)} title="Accessibility Settings" aria-label="Accessibility Settings">♿</button>
+      <button className="btn btn-ghost" onClick={() => setShowAudioSettings(!showAudioSettings)} title="Audio Settings" aria-label="Audio Settings">🔊</button>
+      <button className="btn btn-ghost" onClick={toggleTheme} title="Toggle Theme" aria-label="Toggle Theme">{theme === 'light' ? '🌙' : '☀️'}</button>
     </div>
   );
 
-  return (
-    <div className="main-menu" style={{ maxWidth: 1200, margin: '0 auto', paddingBottom: 80 }}>
-      {stickyBar}
+  const mainMenuContent = (
+    <>
+      <div className="main-menu" style={{ maxWidth: 1200, margin: '0 auto', paddingBottom: 80 }}>
+        {stickyBar}
       {authStub && (
         <div role="dialog" aria-modal="true" style={{ position: 'fixed', inset: 0, zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.45)' }} onClick={() => setAuthStub(null)}>
           <div onClick={(e)=>e.stopPropagation()} style={{ background: 'var(--surface, #1f2937)', color: 'inherit', padding: 16, borderRadius: 10, minWidth: 280, maxWidth: '90vw', border: '1px solid rgba(255,255,255,0.12)', boxShadow: '0 10px 30px rgba(0,0,0,0.35)' }}>
@@ -269,6 +381,9 @@ export default function MainMenu({ onEnterLobby }: Props) {
               {lastLobbyId ? <button onClick={rejoinLast} className="btn btn-ghost" style={{ padding: '14px 24px', fontSize: 16 }}>Rejoin Last</button> : null}
             </div>
             <div style={{ fontSize: 12, opacity: 0.7 }}>{status || 'Enter a display name to begin.'}</div>
+            <div style={{ fontSize: 11, opacity: 0.45 }}>
+              Backend: {(() => { const c = getResolvedSocketConfig(); return c.base || '(same-origin)'; })()} path {getResolvedSocketConfig().path}
+            </div>
           </div>
         )}
         {connected && (
@@ -447,8 +562,32 @@ export default function MainMenu({ onEnterLobby }: Props) {
           </div>
         </div>
       )}
-    </div>
+
+      </div>
+    </>
   );
+
+  // Handle page routing
+  if (currentPage === 'auth') {
+    return (
+      <AuthPage
+        mode={authMode}
+        onBack={handleBackToMenu}
+        onSwitchMode={setAuthMode}
+      />
+    );
+  }
+
+  if (currentPage === 'profile') {
+    return (
+      <ProfilePage
+        onBack={handleBackToMenu}
+      />
+    );
+  }
+
+  // Default: render main menu
+  return mainMenuContent;
 }
 
 // --- Local Demo Components ---
