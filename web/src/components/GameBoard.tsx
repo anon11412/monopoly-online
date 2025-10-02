@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useRef } from 'react';
+import { useEffect, useMemo, useState, useRef, type CSSProperties } from 'react';
 import { buildDefaultBoardTiles } from '../lib/boardFallback';
 import TradePanel from './TradePanel';
 import type { BoardTile, GameSnapshot, PropertyState, PropertyStateLike } from '../types';
@@ -312,6 +312,16 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     prevTurn.current = snapshot?.current_turn ?? -1;
   }, [snapshot?.current_turn]);
 
+  // Expose most recent snapshot globally so auxiliary modals / polling helpers can access latest last_action
+  useEffect(() => {
+    try {
+      (window as any).__latestSnapshot = snapshot;
+    } catch {}
+    return () => {
+      try { delete (window as any).__latestSnapshot; } catch {}
+    };
+  }, [snapshot]);
+
   // Derived helpers
   const tileByPos = useMemo(() => Object.fromEntries(tiles.map(t => [t.pos, t])), [tiles]);
 
@@ -514,9 +524,33 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
                 const gridTemplate = here.length <= 1 ? '1fr' : '1fr 1fr';
                 return (
           <div className="tokens" style={{ display: 'grid', gridTemplateColumns: gridTemplate, gridTemplateRows: gridTemplate, alignItems: 'center', justifyItems: 'center', gap: 4, zIndex: 20, position: 'relative' }}>
-                   {here.map((pl, idx) => (
-                     <span key={idx} className="token" title={pl.name} style={{ background: pl.color || '#111' }} />
-                   ))}
+                   {here.map((pl, idx) => {
+                     const tokenType = (pl as any)?.token;
+                     const isPremium = tokenType === 'premium-coin';
+                     const baseStyle: CSSProperties = isPremium
+                       ? {
+                           background: 'linear-gradient(135deg, #FFE259, #FFA751)',
+                           color: '#7a4e00',
+                           fontSize: 12,
+                           display: 'inline-flex',
+                           alignItems: 'center',
+                           justifyContent: 'center',
+                           boxShadow: '0 2px 6px rgba(0,0,0,0.35), inset 0 1px 2px rgba(255,255,255,0.7)',
+                           border: '1px solid rgba(122, 78, 0, 0.6)'
+                         }
+                       : { background: pl.color || '#111' };
+                     return (
+                       <span
+                         key={idx}
+                         className="token"
+                         data-token={tokenType}
+                         title={pl.name}
+                         style={baseStyle}
+                       >
+                         {isPremium ? '🪙' : null}
+                       </span>
+                     );
+                   })}
                  </div>
                 );
               })()}
@@ -525,7 +559,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
         })}
         </div>
           {/* Dice overlay: baseline-only positioning */}
-          <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 40px)', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}>
+          <div style={{ position: 'absolute', left: '50%', top: isSmall ? 'calc(50% + 0px)' : 'calc(50% + 40px)', transform: 'translate(-50%, -50%)', pointerEvents: 'none' }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center', justifyContent: 'center' }}>
               <span className="badge badge-muted" style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{lastRoll ? lastRoll.d1 : '–'}</span>
               <span className="badge badge-muted" style={{ width: 26, height: 26, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>{lastRoll ? lastRoll.d2 : '–'}</span>
@@ -536,7 +570,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             {/* Players Overview moved to ActionPanel top */}
             {/* Game Log — centered horizontally, shifted down ~15px */}
             <div style={{ position: 'absolute', left: '50%', top: 'calc(50% - 220px)', transform: 'translateX(-50%) scale(0.85)', pointerEvents: 'auto' }}>
-              <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, width: 275, height: 225, display: 'flex', flexDirection: 'column', color: 'var(--color-text)' }}>
+              <div className="ui-labelframe" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: 8, padding: 8, width: 275, height: isSmall ? 180 : 225, display: 'flex', flexDirection: 'column', color: 'var(--color-text)' }}>
                 <div className="ui-title ui-h3" style={{ textAlign: 'center' }}>Game Log</div>
                 <div ref={gameLogRef} style={{ fontSize: 10, marginTop: 4, flex: 1, overflowY: 'auto', lineHeight: 1.25 }}>
                   {snapshot?.log && snapshot.log.length ? (
@@ -619,7 +653,7 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
               
               // Always anchor roll/buy/end row relative to board
               return (
-                <div style={{ position: 'absolute', left: '50%', top: 'calc(50% + 80px)', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
+                <div style={{ position: 'absolute', left: '50%', top: isSmall ? 'calc(50% + 25px)' : 'calc(50% + 80px)', transform: 'translateX(-50%)', display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', pointerEvents: 'auto' }}>
                   <button 
                     className={`btn btn-primary action-button ${diceAnimation}`} 
                     disabled={!canRollC} 
@@ -712,44 +746,70 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
             })()}
             {/* Removed mobile bottom bar; unified anchored controls */}
             {(() => {
-              // Trade / Advanced / Bankruptcy row — shifted down by ~10px and reduced size by ~10%
-              if (isSmall) return null;
+              // Trade / Advanced / Bankruptcy row — responsive layout
               const cur = snapshot?.players?.[snapshot?.current_turn ?? -1];
               const myName = meName || cur?.name || '';
               const players = (snapshot?.players || []).map(p => p.name).filter(n => n !== myName);
               const enableTrade = players.length >= 1;
-              const currentTurnPlayer = (snapshot?.players || [])[snapshot?.current_turn ?? -1];
-              const canVoteKick = currentTurnPlayer && currentTurnPlayer.name !== myName && (snapshot?.players?.length || 0) > 2;
-              return (
-                <div style={{ position: 'absolute', left: '50%', bottom: '115px', transform: 'translateX(-50%) scale(0.9)', display: 'flex', gap: 10, alignItems: 'stretch', pointerEvents: 'auto', background: 'var(--color-surface)', padding: '6px 10px', borderRadius: 10, boxShadow: '0 4px 14px var(--color-shadow)', border: '1px solid var(--color-border)' }}>
-                  <button className="btn btn-trade" style={{ minWidth: 110 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('basic')} title="Create a standard property/cash trade">🤝 Trade</button>
-                  <button className="btn btn-advanced" style={{ minWidth: 140 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('advanced')} title="Open advanced combined trade (recurring terms)">⚡ Advanced</button>
-                  <div style={{ width: 1, background: 'rgba(0,0,0,0.15)', margin: '0 2px' }} />
-                  <button className="btn btn-danger" style={{ minWidth: 120 }} onClick={() => act('bankrupt')} title="Declare bankruptcy">💥 Bankruptcy</button>
-                  {canVoteKick ? (
-                    <>
-                      <div style={{ width: 1, background: 'rgba(0,0,0,0.15)', margin: '0 2px' }} />
-                      <button 
-                        className="btn btn-warning" 
-                        onClick={() => {
-                          if (confirm(`Vote to kick ${currentTurnPlayer!.name}? This requires majority approval.`)) {
-                            s.emit('vote_kick', { id: lobbyId, target: currentTurnPlayer!.name });
-                          }
-                        }}
-                        title={`Vote to kick ${currentTurnPlayer!.name} (majority required)`}
-                        style={{ minWidth: 130 }}
-                      >
-                        🚫 Vote Kick
-                      </button>
-                      {kickBanner?.target === currentTurnPlayer!.name && typeof kickBanner.remaining === 'number' && (
-                        <span className="badge" title="Kick timer" style={{ alignSelf: 'center' }}>
-                          ⏰ {Math.floor((kickBanner.remaining as number)/60)}:{String((kickBanner.remaining as number)%60).padStart(2,'0')} · {kickBanner.votes || 0}/{kickBanner.required || 1}
-                        </span>
-                      )}
-                    </>
-                  ) : null}
-                </div>
-              );
+              
+              if (isSmall) {
+                // Mobile layout: horizontal buttons at bottom, positioned above property flags
+                return (
+                  <div style={{ 
+                    position: 'absolute', 
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: '56%',
+                    bottom: '113px', 
+                    display: 'flex', 
+                    gap: 8, 
+                    alignItems: 'stretch', 
+                    pointerEvents: 'auto', 
+                    background: 'var(--color-surface)', 
+                    padding: '8px', 
+                    borderRadius: 8, 
+                    boxShadow: '0 2px 12px var(--color-shadow)', 
+                    border: '1px solid var(--color-border)' 
+                  }}>
+                    <button 
+                      className="btn btn-trade" 
+                      style={{ flex: 1, minHeight: '44px', fontSize: '14px' }} 
+                      disabled={!enableTrade} 
+                      onClick={() => setShowPartnerPicker('basic')} 
+                      title="Create a standard property/cash trade"
+                    >
+                      🤝 Trade
+                    </button>
+                    <button 
+                      className="btn btn-advanced" 
+                      style={{ flex: 1, minHeight: '44px', fontSize: '14px' }} 
+                      disabled={!enableTrade} 
+                      onClick={() => setShowPartnerPicker('advanced')} 
+                      title="Open advanced combined trade (recurring terms)"
+                    >
+                      ⚡ Advanced
+                    </button>
+                    <button 
+                      className="btn btn-danger" 
+                      style={{ flex: 1, minHeight: '44px', fontSize: '14px' }} 
+                      onClick={() => act('bankrupt')} 
+                      title="Declare bankruptcy"
+                    >
+                      💥 Bankruptcy
+                    </button>
+                  </div>
+                );
+              } else {
+                // Desktop layout: centered compact row
+                return (
+                  <div style={{ position: 'absolute', left: '50%', bottom: '115px', transform: 'translateX(-50%) scale(0.9)', display: 'flex', gap: 10, alignItems: 'stretch', pointerEvents: 'auto', background: 'var(--color-surface)', padding: '6px 10px', borderRadius: 10, boxShadow: '0 4px 14px var(--color-shadow)', border: '1px solid var(--color-border)' }}>
+                    <button className="btn btn-trade" style={{ minWidth: 110 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('basic')} title="Create a standard property/cash trade">🤝 Trade</button>
+                    <button className="btn btn-advanced" style={{ minWidth: 140 }} disabled={!enableTrade} onClick={() => setShowPartnerPicker('advanced')} title="Open advanced combined trade (recurring terms)">⚡ Advanced</button>
+                    <div style={{ width: 1, background: 'rgba(0,0,0,0.15)', margin: '0 2px' }} />
+                    <button className="btn btn-danger" style={{ minWidth: 120 }} onClick={() => act('bankrupt')} title="Declare bankruptcy">💥 Bankruptcy</button>
+                  </div>
+                );
+              }
             })()}
           </div>
   </div>
@@ -801,15 +861,15 @@ export default function GameBoard({ snapshot, lobbyId }: Props) {
     />
   ) : null}
   
-      {/* Modern chat panel - positioned on the right side */}
+      {/* Modern chat panel - positioned on the right side - wider for larger text */}
       {!isSmall && chatOpen && (
         <Portal>
-          <div style={{ position: 'fixed', top: 0, right: 0, width: 'min(400px, 40vw)', height: '100vh', background: 'var(--color-surface)', boxShadow: '-4px 0 20px var(--color-shadow)', display: 'flex', flexDirection: 'column', zIndex: 2500, borderLeft: '1px solid var(--color-border)' }}>
-            <div style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>💬 Game Chat</h3>
-              <button onClick={handleChatToggle} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', borderRadius: 6, padding: '4px 6px', cursor: 'pointer', fontSize: 13 }}>✕</button>
+          <div style={{ position: 'fixed', top: 0, right: 0, width: 'min(650px, 50vw)', height: '100vh', background: 'var(--color-surface)', boxShadow: '-4px 0 20px var(--color-shadow)', display: 'flex', flexDirection: 'column', zIndex: 2500, borderLeft: '1px solid var(--color-border)' }}>
+            <div style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: 'white', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <h3 style={{ margin: 0, fontSize: 28, fontWeight: 600 }}>💬 Game Chat</h3>
+              <button onClick={handleChatToggle} style={{ background: 'rgba(255,255,255,0.2)', border: 'none', color: 'white', borderRadius: 8, padding: '8px 12px', cursor: 'pointer', fontSize: 24 }}>✕</button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, padding: 8 }}>
+            <div style={{ flex: 1, minHeight: 0, padding: 16 }}>
               <ChatPanel lobbyId={lobbyId} />
             </div>
           </div>

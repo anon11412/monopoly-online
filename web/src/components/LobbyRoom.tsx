@@ -40,14 +40,23 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
           timestamp: new Date(c.timestamp || Date.now())
         })));
       }
-      if (data?.id === state.id && data.disconnect_remain && typeof data.disconnect_remain === 'object') {
-        // Initialize/refresh local countdown seconds
-        try {
-          const map = data.disconnect_remain as Record<string, number>;
-          const next: Record<string, number> = {};
-          Object.keys(map).forEach(k => { next[k] = Math.max(0, Math.floor(map[k])); });
-          setDisconnectRemainLocal(next);
-        } catch {}
+      if (data?.id === state.id) {
+        if (data.disconnect_remain && typeof data.disconnect_remain === 'object') {
+          // Initialize/refresh local countdown seconds from server authoritative map.
+          // Only copy keys present in the incoming object so that removed players (reconnected or timed out)
+          // disappear immediately from the local countdown state.
+          try {
+            const map = data.disconnect_remain as Record<string, number>;
+            const next: Record<string, number> = {};
+            Object.keys(map).forEach(k => { next[k] = Math.max(0, Math.floor(map[k])); });
+            setDisconnectRemainLocal(next);
+          } catch {}
+        } else {
+          // If the server omits disconnect_remain entirely for this lobby state, treat it as no active
+          // disconnect timers (e.g. a fast reconnect cleared the only pending entry). Clear local state
+          // so any lingering countdown badges vanish instantly.
+            setDisconnectRemainLocal({});
+        }
       }
     };
   // Stop listening to legacy lobby_chat to avoid duplicate chat messages.
@@ -120,6 +129,28 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
     setMsg('');
   }
 
+  function handleLeaveLobby() {
+    const s = getSocket();
+    // Leave the Socket.IO room to stop receiving lobby updates
+    try {
+      s.emit('leave_room', { room: state.id });
+    } catch (e) {
+      console.warn('Failed to emit leave_room:', e);
+    }
+    // Disconnect and reconnect to fully clean up state
+    try {
+      s.disconnect();
+      // Small delay before calling onBackToMenu to ensure disconnect processes
+      setTimeout(() => {
+        s.connect();
+        if (onBackToMenu) onBackToMenu();
+      }, 100);
+    } catch (e) {
+      console.warn('Error during lobby leave:', e);
+      if (onBackToMenu) onBackToMenu();
+    }
+  }
+
   function startGame() {
     const s = getSocket();
     if (!isHost) {
@@ -181,6 +212,7 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
   }, [hasSidMap, playersBySid, playersByName, state.players]);
   const botSet = useMemo(() => new Set(state.bots || []), [state.bots]);
   const readySet = useMemo(() => new Set(state.ready || []), [state.ready]);
+  const premiumSet = useMemo(() => new Set((state.premium_players || []) as string[]), [state.premium_players]);
   const players = mergedPlayers;
   const readyCount = hasSidMap
     ? mergedPlayers.filter((p) => p.sid && readySet.has(p.sid!)).length
@@ -219,7 +251,7 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
         {onBackToMenu && (
           <button 
             className="btn btn-ghost" 
-            onClick={onBackToMenu}
+            onClick={handleLeaveLobby}
             style={{ padding: '6px 12px', fontSize: 14 }}
           >
             ← Back to Menu
@@ -265,6 +297,7 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
                     {assignedColor ? (
                       <span title="color" style={{ width: 12, height: 12, borderRadius: '50%', background: assignedColor, display: 'inline-block', border: '1px solid rgba(0,0,0,0.5)' }} />
                     ) : null}
+                    {premiumSet.has(p.name) ? <span title="Premium token owner">🪙</span> : null}
                     {p.name}{authedSet.has(p.name) ? ' ✅' : ''}{isHostRow ? ' (host)' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}
                   </span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
@@ -315,6 +348,7 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
                     {assignedColor ? (
                       <span title="color" style={{ width: 12, height: 12, borderRadius: '50%', background: assignedColor, display: 'inline-block', border: '1px solid rgba(0,0,0,0.5)' }} />
                     ) : null}
+                    {premiumSet.has(p.name) ? <span title="Premium token owner">🪙</span> : null}
                     {p.name}{authedSet.has(p.name) ? ' ✅' : ''}{isBot ? ' [BOT]' : ''}{remain ? ` (reconnect: ${remain}s)` : ''}
                   </span>
                   <span className={`badge ${isReady ? 'badge-success' : 'badge-danger'}`} style={{ marginLeft: 'auto' }}>{isReady ? 'Ready' : 'Not Ready'}</span>
