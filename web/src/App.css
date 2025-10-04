@@ -27,45 +27,7 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   transition: background-color 0.3s ease, color 0.3s ease;
-  /* Prevent iOS Safari rendering issues */
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
 }
-
-/* Mobile rendering optimizations - prevent flashing/disappearing elements */
-* {
-  /* Force GPU acceleration for better mobile performance */
-  -webkit-tap-highlight-color: transparent;
-}
-
-/* Prevent layout shift and flickering on scroll */
-.game-view,
-.board,
-.board-wrap,
-.tile,
-.flag-circle,
-.player-token {
-  /* Hardware acceleration */
-  -webkit-transform: translateZ(0);
-  transform: translateZ(0);
-  -webkit-backface-visibility: hidden;
-  backface-visibility: hidden;
-  -webkit-perspective: 1000;
-  perspective: 1000;
-}
-
-/* Smooth scrolling for mobile */
-@media (max-width: 768px) {
-  * {
-    -webkit-overflow-scrolling: touch;
-  }
-  
-  /* Prevent zoom on input focus (iOS Safari) */
-  input, select, textarea {
-    font-size: 16px !important;
-  }
-}
-
 
 /* Fluid base type, respects small phones */
 html { font-size: clamp(14px, 1.6vw, 16px); }
@@ -195,12 +157,6 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   border-radius: 10px;
   border: 2px solid var(--border-color);
   overflow: hidden;
-  /* Hardware acceleration for smooth rendering on mobile */
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  will-change: auto; /* Don't force will-change always, let browser decide */
 }
 
 /* Mobile board scaling removed: board remains fixed size */
@@ -213,23 +169,6 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
 	gap: 3px;
 	width: 100%;
 	height: 100%;
-	/* Hardware acceleration for tile rendering */
-	transform: translateZ(0);
-	-webkit-transform: translateZ(0);
-}
-.tile { 
-  background: var(--bg-secondary); 
-  color: var(--text-primary); 
-  border-radius: 6px; 
-  padding: 4px; 
-  position: relative; 
-  overflow: visible; 
-  border: 1px solid var(--border-color);
-  /* Prevent rendering issues on mobile */
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
 }
 .tile { 
   background: var(--bg-secondary); 
@@ -714,6 +653,46 @@ input, select, textarea {
   .lobby-room h2 {
     font-size: 20px;
   }
+  
+  /* Mobile lobby layout: stack vertically with 60/40 split */
+  .lobby-layout {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 0 !important;
+    min-height: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+  }
+  
+  .lobby-controls {
+    flex: 0 0 auto !important;
+    height: auto !important;
+    max-height: 60vh !important;
+    overflow-y: auto !important;
+    width: 100% !important;
+    padding: 8px !important;
+    border-bottom: 2px solid rgba(255, 255, 255, 0.1);
+  }
+  
+  .lobby-chat-panel {
+    flex: 0 0 auto !important;
+    height: 40vh !important;
+    width: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    padding: 8px !important;
+  }
+  
+  .lobby-chat-panel .chat-messages {
+    flex: 1 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .lobby-chat-panel .chat-input-container {
+    flex-shrink: 0 !important;
+  }
 }
 
 /* Responsive chat */
@@ -1041,4 +1020,87 @@ textarea:focus {
 @media (max-width: 768px) {
   .main-menu, .lobby-room { box-shadow: 0 4px 12px var(--shadow-color); }
   .board .board-overlay { box-shadow: 0 1px 4px rgba(0,0,0,0.12); }
+  
+  /* Mobile-friendly modals for bonds and stock charts */
+  .modal-content-responsive {
+    width: calc(100vw - 16px) !important;
+    max-width: calc(100vw - 16px) !important;
+    max-height: calc(100vh - 16px) !important;
+    margin: 8px !important;
+    padding: 12px !important;
+    font-size: 14px !important;
+  }
+  
+  .modal-content-responsive h3 {
+    font-size: 18px !important;
+  }
+  
+  .modal-content-responsive svg {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+  
+  .modal-content-responsive .ui-labelframe {
+    padding: 8px !important;
+    margin-bottom: 8px !important;
+  }
+  
+  .modal-content-responsive .ui-title {
+    font-size: 14px !important;
+    flex-wrap: wrap !important;
+  }
+  
+  .modal-content-responsive button {
+    font-size: 14px !important;
+    padding: 8px 12px !important;
+    min-height: 44px !important;
+  }
+  
+  /* Dashboard invest/settings modals for mobile: match main dashboard size */
+  .dashboard-invest-modal,
+  .dashboard-settings-modal {
+    width: 100vw !important; /* Full viewport width like main dashboard */
+    min-width: 100vw !important;
+    max-width: 100vw !important;
+    height: 100vh !important; /* Full viewport height like main dashboard */
+    min-height: 100vh !important;
+    max-height: 100vh !important;
+    overflow-y: auto !important;
+    top: 0 !important; /* Start at top like main dashboard */
+    left: 0 !important; /* Start at left edge */
+    transform: none !important; /* No transform needed for full screen */
+    padding: 16px !important; /* Match main dashboard padding */
+    font-size: 14px !important;
+    border-radius: 0 !important; /* No rounded corners on mobile */
+  }
+  
+  .dashboard-invest-modal .ui-h3,
+  .dashboard-settings-modal .ui-h3 {
+    font-size: 16px !important; /* Larger for full screen */
+    line-height: 1.3 !important;
+  }
+  
+  .dashboard-invest-modal .ui-sm,
+  .dashboard-settings-modal .ui-sm {
+    font-size: 13px !important; /* More readable on full screen */
+  }
+  
+  .dashboard-invest-modal button,
+  .dashboard-settings-modal button {
+    font-size: 14px !important;
+    padding: 10px 16px !important;
+    min-height: 48px !important; /* Larger touch targets for full screen */
+  }
+  
+  .dashboard-invest-modal input,
+  .dashboard-settings-modal input {
+    font-size: 14px !important;
+    padding: 10px !important;
+    min-height: 48px !important;
+  }
+  
+  .dashboard-invest-modal label,
+  .dashboard-settings-modal label {
+    font-size: 13px !important;
+  }
 }

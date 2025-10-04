@@ -1946,7 +1946,7 @@ function StockSettingsModal({ onClose, lobbyId, snapshot, owner }: StockSettings
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 3100 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '10%', left: '50%', transform: 'translateX(-50%)', width: 420, background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, boxShadow: 'var(--elev-4)' }}>
+      <div className="dashboard-settings-modal" onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '10%', left: '50%', transform: 'translateX(-50%)', width: 420, background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, boxShadow: 'var(--elev-4)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <div className="ui-h3">Stock Settings — {normalizeName(owner)}</div>
           <button className="btn" onClick={onClose}>Close</button>
@@ -2007,7 +2007,7 @@ function BondSettingsModal({ onClose, lobbyId, snapshot, owner }: BondSettingsPr
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 3100 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '12%', left: '50%', transform: 'translateX(-50%)', width: 420, background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, boxShadow: 'var(--elev-4)' }}>
+      <div className="dashboard-settings-modal" onClick={(e) => e.stopPropagation()} style={{ position: 'absolute', top: '12%', left: '50%', transform: 'translateX(-50%)', width: 420, background: 'var(--color-surface)', color: 'var(--color-text)', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, boxShadow: 'var(--elev-4)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
           <div className="ui-h3">Bond Settings — {normalizeName(owner)}</div>
           <button className="btn" onClick={onClose}>Close</button>
@@ -2059,7 +2059,7 @@ function BondTwoPhaseInvestModal({ onClose, lobbyId, snapshot, owner }: BondInve
   };
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:3350 }} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{ position:'absolute', top:'12%', left:'50%', transform:'translateX(-50%)', width:420, background:'var(--color-surface)', border:'1px solid var(--color-border)', borderRadius:10, padding:14 }}>
+      <div className="dashboard-invest-modal" onClick={e=>e.stopPropagation()} style={{ position:'absolute', top:'12%', left:'50%', transform:'translateX(-50%)', width:420, background:'var(--color-surface)', border:'1px solid var(--color-border)', borderRadius:10, padding:14 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
           <div className="ui-h3">Invest — {normalizeName(owner)} Bonds</div>
           <button className="btn" onClick={onClose}>Close</button>
@@ -2283,7 +2283,7 @@ function StockTwoPhaseInvestModal({ owner, snapshot, lobbyId, onClose }: StockTw
   };
   return (
     <div style={{ position: 'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:3300 }} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{ position:'absolute', top:'12%', left:'50%', transform:'translateX(-50%)', width:420, background:'var(--color-surface)', border:'1px solid var(--color-border)', borderRadius:10, padding:14 }}>
+      <div className="dashboard-invest-modal" onClick={e=>e.stopPropagation()} style={{ position:'absolute', top:'12%', left:'50%', transform:'translateX(-50%)', width:420, background:'var(--color-surface)', border:'1px solid var(--color-border)', borderRadius:10, padding:14 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
           <div className="ui-h3">Invest — {normalizeName(owner)}</div>
           <button className="btn" onClick={onClose}>Close</button>
@@ -2398,7 +2398,7 @@ function StockTwoPhaseSellModal({ owner, snapshot, lobbyId, onClose }: StockTwoP
   };
   return (
     <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.5)', zIndex:3300 }} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{ position:'absolute', top:'12%', left:'50%', transform:'translateX(-50%)', width:420, background:'var(--color-surface)', border:'1px solid var(--color-border)', borderRadius:10, padding:14 }}>
+      <div className="dashboard-invest-modal" onClick={e=>e.stopPropagation()} style={{ position:'absolute', top:'12%', left:'50%', transform:'translateX(-50%)', width:420, background:'var(--color-surface)', border:'1px solid var(--color-border)', borderRadius:10, padding:14 }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
           <div className="ui-h3">Sell — {normalizeName(owner)}</div>
           <button className="btn" onClick={onClose}>Close</button>

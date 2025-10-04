@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo } from 'react';
 import { getSocket, getRemembered } from '../lib/socket';
 import type { GameSnapshot } from '../types';
 
@@ -21,23 +21,14 @@ export default function StockChartsModal({ open, snapshot, onClose, lobbyId, onO
     (stocks || []).forEach((st) => { m[st.owner] = st; });
     return m;
   }, [stocks]);
-  
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
-  
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
 
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100, padding: '10px' }} onClick={onClose}>
-  <div className="card" style={{ background: 'var(--color-surface)', width: 'min(900px, 100%)', maxWidth: '100%', maxHeight: '90vh', overflow: 'auto', borderRadius: 10, padding: isMobile ? 10 : 14 }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-          <h3 style={{ margin: 0, fontSize: isMobile ? '16px' : '18px' }}>📈 Stock Charts</h3>
-          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: isMobile ? '12px' : '14px' }}>❌ Close</button>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100, padding: '8px' }} onClick={onClose}>
+  <div className="card modal-content-responsive" style={{ background: 'var(--color-surface)', width: 'min(900px, 100%)', maxWidth: '100%', maxHeight: 'min(88vh, calc(100vh - 16px))', overflow: 'auto', borderRadius: 10, padding: 14 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ margin: 0 }}>📈 Stock Charts</h3>
+          <button className="btn btn-ghost" onClick={onClose}>❌ Close</button>
         </div>
         {!stocks || stocks.length === 0 ? (
           <div className="ui-sm" style={{ opacity: 0.7, marginTop: 8 }}>No stocks yet.</div>
@@ -45,15 +36,15 @@ export default function StockChartsModal({ open, snapshot, onClose, lobbyId, onO
           <div style={{ display: 'grid', gap: 10, marginTop: 10 }}>
             {stocks.map((st) => (
               <div key={st.owner} className="ui-labelframe">
-                <div className="ui-title ui-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: isMobile ? '14px' : '16px' }}>
+                <div className="ui-title ui-h3" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span title={st.owner} style={{ width: 12, height: 12, borderRadius: '50%', background: st.owner_color || '#999', display: 'inline-block' }} />
                   {st.owner} — ${st.price} • Base {st.base} • Total {st.total_shares}
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr auto', gap: 8, alignItems: 'center' }}>
-                  <div style={{ padding: 6, overflowX: 'auto' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center' }}>
+                  <div style={{ padding: 6 }}>
                     <MiniLineChart history={st.history || []} color={st.owner_color || '#2c3e50'} />
                   </div>
-                  <div style={{ display: 'grid', gap: 4, justifyItems: isMobile ? 'center' : 'end' }}>
+                  <div style={{ display: 'grid', gap: 4, justifyItems: 'end' }}>
                     {myName !== st.owner ? (
                       <>
                         {(() => {
@@ -70,7 +61,7 @@ export default function StockChartsModal({ open, snapshot, onClose, lobbyId, onO
                           // Deduplicate & sort ascending for consistent UI
                           quick = Array.from(new Set(quick)).sort((a, b) => a - b).slice(0, 5);
                           return (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxWidth: isMobile ? '100%' : 300, justifyContent: isMobile ? 'center' : 'flex-start' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, maxWidth: 300 }}>
                               {quick.map((amt) => {
                                 const tooSmall = enforceMin && minBuy > 0 && amt < minBuy;
                                 const noCash = amt > myCash;

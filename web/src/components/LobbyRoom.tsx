@@ -25,20 +25,9 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
   
   // Animation state tracking for player join/leave
   const [prevPlayerNames, setPrevPlayerNames] = useState<Set<string>>(new Set());
-  
-  // Responsive layout tracking
-  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
   // Chat auto-scroll
   const chatMessagesRef = useRef<HTMLDivElement>(null);
-  
-  // Handle window resize for responsive layout
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= 768);
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
 
   useEffect(() => {
   rememberLobby(state.id);
@@ -270,13 +259,13 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
         )}
       </div>
 
-      {/* Two Column Layout - responsive: stacks on mobile */}
-      <div style={{ 
+      {/* Two Column Layout (Desktop) / Stacked Layout (Mobile) */}
+      <div className="lobby-layout" style={{ 
         display: 'grid', 
-        gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', 
-        gap: isMobile ? '16px' : '32px', 
+        gridTemplateColumns: '1fr 1fr', 
+        gap: '32px', 
         alignItems: 'start',
-        minHeight: isMobile ? 'auto' : '600px'
+        minHeight: '600px'
       }}>
         
         {/* Left Column - Lobby Controls */}
@@ -542,7 +531,7 @@ export default function LobbyRoom({ lobby, onGameStarted, onBackToMenu }: Props)
         </div> {/* End of Left Column - lobby-controls */}
 
         {/* Right Column - Chat Panel */}
-        <div className="chat-panel" style={{ height: isMobile ? '400px' : '600px', maxHeight: isMobile ? '50vh' : '600px' }}>
+        <div className="lobby-chat-panel" style={{ height: '600px' }}>
           <div className="chat-header">
             <h3>Lobby Chat</h3>
             <span className="chat-count">{chat.length} messages</span>
