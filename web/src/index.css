@@ -328,6 +328,15 @@ button { font-family: inherit; cursor: pointer; }
 
 /* Mobile responsive enhancements */
 @media (max-width: 768px) {
+  /* Lobby responsive layout */
+  .lobby-room {
+    padding: 12px 8px;
+  }
+  
+  .lobby-controls {
+    margin-bottom: 16px;
+  }
+  
   .chat-panel {
     height: 400px;
     max-height: 50vh;

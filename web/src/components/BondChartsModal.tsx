@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import type { GameSnapshot } from '../types';
 
 type Props = {
@@ -7,14 +8,22 @@ type Props = {
 };
 
 export default function BondChartsModal({ open, snapshot, onClose }: Props) {
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
+  
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= 768);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  
   if (!open) return null;
   const bonds = (snapshot as any)?.bonds as Array<any> | undefined;
   return (
-    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100 }} onClick={onClose}>
-      <div className="card" style={{ background: 'var(--color-surface)', width: 'min(900px, 94vw)', maxHeight: '88vh', overflow: 'auto', borderRadius: 10, padding: 14 }} onClick={(e) => e.stopPropagation()}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ margin: 0 }}>💵 Bond Rate Charts</h3>
-          <button className="btn btn-ghost" onClick={onClose}>❌ Close</button>
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2100, padding: '10px' }} onClick={onClose}>
+      <div className="card" style={{ background: 'var(--color-surface)', width: 'min(900px, 100%)', maxWidth: '100%', maxHeight: '90vh', overflow: 'auto', borderRadius: 10, padding: isMobile ? 10 : 14 }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <h3 style={{ margin: 0, fontSize: isMobile ? '16px' : '18px' }}>💵 Bond Rate Charts</h3>
+          <button className="btn btn-ghost" onClick={onClose} style={{ fontSize: isMobile ? '12px' : '14px' }}>❌ Close</button>
         </div>
         {!bonds || bonds.length === 0 ? (
           <div className="ui-sm" style={{ opacity: 0.7, marginTop: 8 }}>No bonds yet.</div>
@@ -28,11 +37,11 @@ export default function BondChartsModal({ open, snapshot, onClose }: Props) {
             </div>
             {bonds.map((row) => (
               <div key={row.owner} className="ui-labelframe">
-                <div className="ui-title ui-h3" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <div className="ui-title ui-h3" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: isMobile ? '14px' : '16px' }}>
                   <span title={row.owner} style={{ width: 12, height: 12, borderRadius: '50%', background: row.owner_color || '#999', display: 'inline-block' }} />
                   {row.owner} — {row.allow_bonds ? `${(row.rate_percent != null ? row.rate_percent : row.rate) || 0}% every ${row.period_turns || 1} turn(s)` : 'disabled'}
                 </div>
-                <div style={{ padding: 6 }}>
+                <div style={{ padding: 6, overflowX: 'auto' }}>
                   <RateLineChart history={row.history || []} color={row.owner_color || '#2c3e50'} />
                 </div>
               </div>

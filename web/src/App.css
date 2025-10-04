@@ -27,7 +27,45 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   transition: background-color 0.3s ease, color 0.3s ease;
+  /* Prevent iOS Safari rendering issues */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+/* Mobile rendering optimizations - prevent flashing/disappearing elements */
+* {
+  /* Force GPU acceleration for better mobile performance */
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent layout shift and flickering on scroll */
+.game-view,
+.board,
+.board-wrap,
+.tile,
+.flag-circle,
+.player-token {
+  /* Hardware acceleration */
+  -webkit-transform: translateZ(0);
+  transform: translateZ(0);
+  -webkit-backface-visibility: hidden;
+  backface-visibility: hidden;
+  -webkit-perspective: 1000;
+  perspective: 1000;
+}
+
+/* Smooth scrolling for mobile */
+@media (max-width: 768px) {
+  * {
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  /* Prevent zoom on input focus (iOS Safari) */
+  input, select, textarea {
+    font-size: 16px !important;
+  }
+}
+
 
 /* Fluid base type, respects small phones */
 html { font-size: clamp(14px, 1.6vw, 16px); }
@@ -157,6 +195,12 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
   border-radius: 10px;
   border: 2px solid var(--border-color);
   overflow: hidden;
+  /* Hardware acceleration for smooth rendering on mobile */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  will-change: auto; /* Don't force will-change always, let browser decide */
 }
 
 /* Mobile board scaling removed: board remains fixed size */
@@ -169,6 +213,23 @@ html { font-size: clamp(14px, 1.6vw, 16px); }
 	gap: 3px;
 	width: 100%;
 	height: 100%;
+	/* Hardware acceleration for tile rendering */
+	transform: translateZ(0);
+	-webkit-transform: translateZ(0);
+}
+.tile { 
+  background: var(--bg-secondary); 
+  color: var(--text-primary); 
+  border-radius: 6px; 
+  padding: 4px; 
+  position: relative; 
+  overflow: visible; 
+  border: 1px solid var(--border-color);
+  /* Prevent rendering issues on mobile */
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 .tile { 
   background: var(--bg-secondary); 
